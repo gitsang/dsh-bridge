@@ -7,8 +7,9 @@ lists Pi sessions, attaches to a Pi process over the documented RPC protocol,
 streams agent events into dsh, and sends prompts, steering messages, and aborts
 back to Pi.
 
-The browser panel is intentionally minimal at this stage. The transport and
-session layer are the product; the UI will grow in later commits.
+The browser panel lists Pi sessions, shows the current branch, attaches a Pi
+child on demand, renders streaming assistant text and tool calls, sends
+prompts, aborts a turn, and forwards blocking extension dialogs.
 
 ## Status
 
@@ -16,7 +17,7 @@ session layer are the product; the UI will grow in later commits.
 - [x] Current-branch reconstruction, tool-call extraction, list previews
 - [x] Pi RPC process attachment
 - [x] Event fan-out and prompt/steer/abort routes
-- [ ] dsh browser panel
+- [x] dsh browser panel (Pi Sessions main panel + sidebar entry)
 - [ ] Install into a dsh profile
 
 ## How it works
@@ -68,6 +69,18 @@ Environment variables read by the host plugin:
 | `PI_BIN` | `pi` | Pi executable, resolved via `PATH`; when absent the globally installed `@earendil-works/pi-coding-agent` package is used |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi config directory |
 | `PI_CODING_AGENT_SESSION_DIR` | `$PI_CODING_AGENT_DIR/sessions` | Session storage root |
+
+## Browser panel
+
+The client half registers:
+
+- a **Pi Sessions** entry in the sidebar panel list;
+- a `main` panel that renders the session list, transcript, composer, and
+  extension dialogs.
+
+It talks only to the host routes above, with `credentials: 'same-origin'`.
+Live updates arrive over `EventSource`; the host keeps a bounded event ring so
+a reconnecting browser can catch up.
 
 ## Development
 

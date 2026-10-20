@@ -112,12 +112,14 @@ class AttachmentSession {
     this.clients = new Set()
     this.ring = []
     this.subscriptions = []
+    this.sequence = 0
     this.disposed = false
   }
 
   publish(event, data) {
     const payload = wireSafe(data)
-    const record = { event, data: payload, at: Date.now() }
+    this.sequence += 1
+    const record = { seq: this.sequence, event, data: payload, at: Date.now() }
     this.ring.push(record)
     if (this.ring.length > EVENT_RING) this.ring.shift()
     for (const client of this.clients) client.send(event, payload)
@@ -130,7 +132,8 @@ class AttachmentSession {
       session: this.session,
       pid: this.attachment.pid,
       running: this.attachment.running,
-      recentEvents: this.ring.slice(-50),
+      sequence: this.sequence,
+      recentEvents: this.ring.slice(-100),
     })
     return () => this.clients.delete(client)
   }
