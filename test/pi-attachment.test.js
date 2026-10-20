@@ -96,3 +96,14 @@ test('request rejects after dispose', async () => {
   await bridge.dispose()
   await assert.rejects(bridge.getState(), /not running/)
 })
+
+test('resolves PI_BIN and forces offline startup by default', () => {
+  const bridge = attachment()
+  assert.equal(bridge.env.PI_OFFLINE, '1')
+  assert.equal(bridge.env.PI_BIN, fake)
+  const online = new PiAttachment({
+    file: '/tmp/fake-session.jsonl',
+    env: { ...process.env, PI_BIN: fake, PI_BRIDGE_OFFLINE: '0', PI_OFFLINE: '' },
+  })
+  assert.equal(online.env.PI_OFFLINE, '')
+})

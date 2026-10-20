@@ -105,7 +105,13 @@ export class PiAttachment extends EventEmitter {
     super()
     this.file = options.file
     this.cwd = options.cwd && existsSync(options.cwd) ? options.cwd : homedir()
-    this.env = options.env ?? process.env
+    const baseEnv = options.env ?? process.env
+    // A bridge child must not mutate the user's Pi installation or block on
+    // startup package installs. Offline startup still loads installed
+    // extensions, models, and credentials; callers can opt out explicitly.
+    this.env = baseEnv.PI_BRIDGE_OFFLINE === '0'
+      ? { ...baseEnv }
+      : { ...baseEnv, PI_OFFLINE: baseEnv.PI_OFFLINE ?? '1' }
     this.extraArgs = options.extraArgs ?? []
     this.responseTimeoutMs = options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS
     this.pending = new Map()

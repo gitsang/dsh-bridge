@@ -193,6 +193,19 @@ export function apply(ctx) {
       if (info?.stderr) logger?.warn?.(`pi-bridge: Pi exited for ${file}: ${info.stderr.trim()}`)
     })
     await attachment.start()
+    try {
+      await attachment.getState()
+    } catch (error) {
+      const detail = attachment.stderr.trim()
+      await attachment.dispose()
+      const failure = new Error(
+        detail === ''
+          ? `Pi exited during startup (${error instanceof Error ? error.message : String(error)})`
+          : `Pi exited during startup: ${detail}`,
+      )
+      failure.status = 502
+      throw failure
+    }
     const live = new AttachmentSession(attachment, {
       key,
       id: session.id,
