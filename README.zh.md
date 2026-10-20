@@ -69,7 +69,8 @@ dsh web
 
 | 变量 | 默认值 | 含义 |
 | --- | --- | --- |
-| `PI_BIN` | 自动探测 | Pi 可执行文件；优先 `$PI_CODING_AGENT_DIR/bin/pi` |
+| `PI_BIN` | 自动探测 | 探测顺序：`$PI_CODING_AGENT_DIR/bin/pi`、`~/.pi/agent/bin/pi`、dsh 可见的 `@earendil-works/pi-coding-agent`、`PATH` 上的 `pi` |
+| `PI_BRIDGE_OFFLINE` | `1` | 附加的 Pi 以 `PI_OFFLINE=1` 启动，避免启动时安装包或写 agent 目录；设为 `0` 可允许联网启动 |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi 配置目录 |
 | `PI_CODING_AGENT_SESSION_DIR` | `$PI_CODING_AGENT_DIR/sessions` | 会话根目录 |
 

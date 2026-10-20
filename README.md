@@ -66,7 +66,8 @@ Environment variables read by the host plugin:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PI_BIN` | `pi` | Pi executable, resolved via `PATH`; when absent the globally installed `@earendil-works/pi-coding-agent` package is used |
+| `PI_BIN` | auto | Pi executable. Resolution order: `$PI_CODING_AGENT_DIR/bin/pi`, `~/.pi/agent/bin/pi`, the `@earendil-works/pi-coding-agent` package visible to dsh, then `pi` on `PATH` |
+| `PI_BRIDGE_OFFLINE` | `1` | Start attached Pi with `PI_OFFLINE=1` so startup never installs packages or writes the agent directory. Set `0` to allow online startup |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi config directory |
 | `PI_CODING_AGENT_SESSION_DIR` | `$PI_CODING_AGENT_DIR/sessions` | Session storage root |
 
@@ -87,6 +88,11 @@ a reconnecting browser can catch up.
 ```bash
 npm test
 ```
+
+`scripts/dev-rpc.sh` is a local debugging helper for calling a dsh Remote
+endpoint with a signed browser cookie. It is not loaded by the plugin. Set
+`DSH_BROWSER_SECRET` from `~/.dsh/.credentials.yaml` and call it as
+`scripts/dev-rpc.sh pluginManager/listBundles '{}'`.
 
 ## License
 
