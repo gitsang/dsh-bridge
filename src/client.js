@@ -1,215 +1,269 @@
 /**
- * Browser half of dsh-bridge: a Pi Sessions panel.
+ * Browser half of dsh-bridge: the Bridge panel.
  *
- * The panel does not reuse dsh's Conversation controller. Pi sessions have
- * their own message and event model, so this page renders Pi messages directly
- * and talks to the host bridge over same-origin, cookie-authenticated routes.
+ * The panel deliberately borrows dsh's own visual vocabulary instead of
+ * inventing one: content column width, typography, Markdown rendering, card
+ * elevation, and controls all come from `dsh-client-ui-primitives` and the
+ * `--dsw-*` tokens the shipped Web shell paints, so the page reads as part of
+ * the same product.
+ *
+ * It does not reuse dsh's Conversation controller. Pi sessions carry their own
+ * event and message model; the Host bridge translates them, and this component
+ * renders the translated stream with dsh's presentational primitives.
  */
 window.__ModuleLoader__.load({
   id: '@gitsang/dsh-bridge',
   factory: (require) => {
     const React = require('react')
+    const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
     const module = { exports: {} }
     const exports = module.exports
     const { useCallback, useEffect, useMemo, useRef, useState } = React
     const h = React.createElement
 
-    const NS = 'piBridge'
-    const PANEL_ID = 'pi-bridge'
+    const {
+      Button,
+      DisclosureRow,
+      IconApiOutlineRegular,
+      IconChevronDownOutlineRegular,
+      IconCodeOutlineRegular,
+      IconPauseOutlineRegular,
+      IconRefreshOutlineRegular,
+      IconSendOutlineRegular,
+      IconSettingsOutlineRegular,
+      MarkdownText,
+      Menu,
+      Modal,
+      TextShimmer,
+      Tooltip,
+      writeClipboard,
+    } = primitives
+
+    const NS = 'bridge'
+    const PANEL_ID = 'bridge'
+    const SETTINGS_ANCHOR_ID = 'bridge.settings'
 
     const zh = {
-      panel: 'Pi 会话',
-      title: 'Pi 会话',
-      subtitle: '浏览 Pi Coding Agent 会话，附加到 Pi 进程并继续对话。',
+      panel: 'Bridge',
+      title: 'Bridge',
+      subtitle: '把外部 agent 会话接进 dsh。',
+      settings: '桥接设置',
+      settingsTitle: '桥接设置',
+      settingsClose: '关闭',
+      settingsSave: '保存',
+      settingsSaving: '保存中…',
+      settingsSaved: '已保存',
+      settingsFailed: '保存失败',
+      backend: '后端',
+      backendHint: '选择 Bridge 面板当前连接的后端。',
+      backendPi: 'Pi Coding Agent',
+      backendPiHint: '通过 `pi --mode rpc` 附加到 Pi 会话。',
+      backendOnlyOne: '目前仅支持 Pi 后端。',
+      sessionsRoot: '会话根目录',
+      sessionsRootHint: '留空则使用 PI_CODING_AGENT_SESSION_DIR 或 ~/.pi/agent/sessions。',
+      binary: 'Pi 可执行文件',
+      binaryHint: '留空则自动探测（优先 $PI_CODING_AGENT_DIR/bin/pi）。',
+      offline: '离线启动',
+      offlineHint: '附加时以 PI_OFFLINE=1 启动，避免安装包或写入 agent 目录。',
+      detachFirst: '请先断开所有已附加的会话，再修改后端或会话根目录。',
       refresh: '刷新',
-      loading: '正在加载 Pi 会话…',
-      loadFailed: '无法加载 Pi 会话',
-      empty: '还没有 Pi 会话',
-      emptyHint: '先在终端运行一次 pi，或确认 PI_CODING_AGENT_SESSION_DIR 指向正确的目录。',
+      loading: '正在加载…',
+      loadFailed: '无法加载会话',
+      empty: '还没有会话',
+      emptyHint: '先在终端运行一次 pi，或在桥接设置里指定正确的会话根目录。',
       search: '搜索会话',
-      searchPlaceholder: '按名称、路径或首条消息搜索',
+      searchPlaceholder: '搜索名称、路径或首条消息',
       noMatches: '没有匹配的会话',
-      selectHint: '从左侧选择一个 Pi 会话',
-      messages: '{count} 条消息',
+      selectHint: '从左侧选择一个会话',
       attach: '附加并继续',
       attaching: '正在附加…',
       detach: '断开',
-      attached: '已附加',
-      notAttached: '未附加',
+      attached: '已连接',
+      notAttached: '未连接',
       running: '运行中',
       idle: '空闲',
       send: '发送',
-      sending: '发送中…',
-      placeholder: '给这个 Pi 会话发送消息…',
+      placeholder: '给这个会话发送消息…',
       stop: '停止',
       stopped: '已停止',
       copy: '复制',
       copied: '已复制',
-      refreshHistory: '刷新历史',
-      sessionFile: '会话文件',
-      cwd: '工作目录',
-      model: '模型',
-      thinking: '思考等级',
       attachFailed: '附加失败',
       promptFailed: '发送失败',
       abortFailed: '停止失败',
       detachFailed: '断开失败',
       historyLoadFailed: '无法加载会话历史',
       eventsDisconnected: '事件流已断开，正在重连…',
-      eventsConnected: '事件流已连接',
+      dialogCancel: '取消',
+      dialogSubmit: '提交',
+      dialogConfirm: '确认',
       toolRunning: '运行中',
       toolDone: '完成',
       toolFailed: '失败',
-      dialogConfirm: '确认',
-      dialogCancel: '取消',
-      dialogSubmit: '提交',
-      dialogSelect: '请选择',
-      dialogInput: '请输入',
-      dialogEditor: '编辑内容',
-      notification: 'Pi 通知',
-      user: '用户',
-      assistant: 'Pi',
-      tool: '工具',
-      system: '系统',
-      expand: '展开',
-      collapse: '收起',
+      toolArguments: '参数',
+      toolResult: '结果',
       emptyMessage: '（空消息）',
-      detachedNotice: '已断开 Pi 进程；会话文件保持不变。',
       attachNotice: '已附加到 Pi 进程。',
-      noSessionKey: '会话缺少标识',
-      cancelDialog: '取消',
+      detachedNotice: '已断开；会话文件保持不变。',
+      turnCompleted: '已完成',
+      thinking: '思考',
+      metrics: '{size} · {time}',
+      notification: 'Bridge 通知',
+      userRole: '我',
+      assistantRole: 'Agent',
+      noBackend: 'Bridge 尚未配置后端。',
     }
 
     const en = {
-      panel: 'Pi Sessions',
-      title: 'Pi Sessions',
-      subtitle: 'Browse Pi Coding Agent sessions, attach to a Pi process, and continue the conversation.',
+      panel: 'Bridge',
+      title: 'Bridge',
+      subtitle: 'Bring external agent sessions into dsh.',
+      settings: 'Bridge settings',
+      settingsTitle: 'Bridge settings',
+      settingsClose: 'Close',
+      settingsSave: 'Save',
+      settingsSaving: 'Saving…',
+      settingsSaved: 'Saved',
+      settingsFailed: 'Could not save',
+      backend: 'Backend',
+      backendHint: 'Choose which backend the Bridge panel talks to.',
+      backendPi: 'Pi Coding Agent',
+      backendPiHint: 'Attach to Pi sessions through `pi --mode rpc`.',
+      backendOnlyOne: 'Only the Pi backend is available for now.',
+      sessionsRoot: 'Sessions root',
+      sessionsRootHint: 'Leave empty to use PI_CODING_AGENT_SESSION_DIR or ~/.pi/agent/sessions.',
+      binary: 'Pi executable',
+      binaryHint: 'Leave empty for auto-detection ($PI_CODING_AGENT_DIR/bin/pi first).',
+      offline: 'Offline startup',
+      offlineHint: 'Start attached Pi with PI_OFFLINE=1 so it never installs packages or writes the agent directory.',
+      detachFirst: 'Detach every attached session before changing the backend or sessions root.',
       refresh: 'Refresh',
-      loading: 'Loading Pi sessions…',
-      loadFailed: 'Could not load Pi sessions',
-      empty: 'No Pi sessions yet',
-      emptyHint: 'Run pi once in a terminal, or check that PI_CODING_AGENT_SESSION_DIR points at the right directory.',
+      loading: 'Loading…',
+      loadFailed: 'Could not load sessions',
+      empty: 'No sessions yet',
+      emptyHint: 'Run pi once in a terminal, or point the sessions root at the right directory in Bridge settings.',
       search: 'Search sessions',
-      searchPlaceholder: 'Search by name, path, or first message',
+      searchPlaceholder: 'Search name, path, or first message',
       noMatches: 'No matching sessions',
-      selectHint: 'Select a Pi session on the left',
-      messages: '{count} messages',
+      selectHint: 'Select a session on the left',
       attach: 'Attach & continue',
       attaching: 'Attaching…',
       detach: 'Detach',
-      attached: 'Attached',
-      notAttached: 'Not attached',
+      attached: 'Connected',
+      notAttached: 'Not connected',
       running: 'Running',
       idle: 'Idle',
       send: 'Send',
-      sending: 'Sending…',
-      placeholder: 'Message this Pi session…',
+      placeholder: 'Message this session…',
       stop: 'Stop',
       stopped: 'Stopped',
       copy: 'Copy',
       copied: 'Copied',
-      refreshHistory: 'Refresh history',
-      sessionFile: 'Session file',
-      cwd: 'Working directory',
-      model: 'Model',
-      thinking: 'Thinking level',
       attachFailed: 'Attach failed',
       promptFailed: 'Send failed',
       abortFailed: 'Stop failed',
       detachFailed: 'Detach failed',
       historyLoadFailed: 'Could not load session history',
       eventsDisconnected: 'Event stream disconnected; reconnecting…',
-      eventsConnected: 'Event stream connected',
+      dialogCancel: 'Cancel',
+      dialogSubmit: 'Submit',
+      dialogConfirm: 'Confirm',
       toolRunning: 'running',
       toolDone: 'done',
       toolFailed: 'failed',
-      dialogConfirm: 'Confirm',
-      dialogCancel: 'Cancel',
-      dialogSubmit: 'Submit',
-      dialogSelect: 'Select an option',
-      dialogInput: 'Enter a value',
-      dialogEditor: 'Edit text',
-      notification: 'Pi notification',
-      user: 'User',
-      assistant: 'Pi',
-      tool: 'Tool',
-      system: 'System',
-      expand: 'Expand',
-      collapse: 'Collapse',
+      toolArguments: 'Arguments',
+      toolResult: 'Result',
       emptyMessage: '(empty message)',
-      detachedNotice: 'Detached from the Pi process; the session file is unchanged.',
       attachNotice: 'Attached to the Pi process.',
-      noSessionKey: 'Session is missing its key',
-      cancelDialog: 'Cancel',
+      detachedNotice: 'Detached; the session file is unchanged.',
+      turnCompleted: 'Completed',
+      thinking: 'Thinking',
+      metrics: '{size} · {time}',
+      notification: 'Bridge notification',
+      userRole: 'You',
+      assistantRole: 'Agent',
+      noBackend: 'The Bridge has no backend configured yet.',
     }
 
-    const CSS_ID = '@gitsang/dsh-bridge/PiBridge.css'
+    const CSS_ID = '@gitsang/dsh-bridge/Bridge.css'
     const CSS = [
-      '.dshPi_page{box-sizing:border-box;display:grid;grid-template-columns:280px minmax(0,1fr);width:100%;height:100%;min-height:0;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit}',
-      '.dshPi_sidebar{box-sizing:border-box;display:flex;flex-direction:column;min-height:0;border-right:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-l1)}',
-      '.dshPi_sidebarHead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:16px 14px 10px}',
-      '.dshPi_sidebarTitle{font-size:14px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.dshPi_iconButton{border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;border-radius:var(--dsw-radius-sm);width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;font:inherit;flex:none}',
-      '.dshPi_iconButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}',
-      '.dshPi_iconButton:disabled{opacity:.45;cursor:default}',
-      '.dshPi_searchWrap{padding:0 14px 8px}',
-      '.dshPi_search{box-sizing:border-box;width:100%;padding:6px 9px;border-radius:var(--dsw-radius-sm);border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:inherit;font:inherit;font-size:12px}',
-      '.dshPi_list{flex:1;min-height:0;overflow:auto;padding:0 8px 12px}',
-      '.dshPi_row{box-sizing:border-box;display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;cursor:pointer;border-radius:var(--dsw-radius-md);padding:9px 10px;font:inherit;margin:1px 0}',
-      '.dshPi_row:hover{background:var(--dsw-alias-interactive-bg-hover)}',
-      '.dshPi_row[aria-current="true"]{background:var(--dsw-alias-interactive-bg-selected,var(--dsw-alias-interactive-bg-hover))}',
-      '.dshPi_rowTitle{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;min-width:0}',
-      '.dshPi_rowTitleText{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.dshPi_rowMeta{display:flex;gap:6px;margin-top:3px;color:var(--dsw-alias-label-tertiary);font-size:11px;min-width:0}',
-      '.dshPi_rowPreview{margin-top:4px;color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:16px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}',
-      '.dshPi_dot{display:inline-block;width:6px;height:6px;border-radius:999px;background:var(--dsw-alias-label-tertiary);flex:none}',
-      '.dshPi_dot[data-running="true"]{background:var(--dsw-alias-state-business-primary,#2a7)}',
-      '.dshPi_main{display:flex;flex-direction:column;min-width:0;min-height:0}',
-      '.dshPi_head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:16px 22px 12px;border-bottom:.5px solid var(--dsw-alias-border-l2)}',
-      '.dshPi_headText{min-width:0}',
-      '.dshPi_headTitle{margin:0;font-size:16px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.dshPi_headSub{margin-top:3px;color:var(--dsw-alias-label-tertiary);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.dshPi_headActions{display:flex;align-items:center;gap:8px;flex:none}',
-      '.dshPi_badge{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--dsw-alias-bg-l2);color:var(--dsw-alias-label-secondary);font-size:11px;white-space:nowrap}',
-      '.dshPi_button{border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:var(--dsw-radius-sm);padding:5px 11px;font:inherit;font-size:12px;line-height:18px;white-space:nowrap}',
-      '.dshPi_button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}',
-      '.dshPi_button:disabled{opacity:.5;cursor:default}',
-      '.dshPi_button[data-variant="primary"]{background:var(--dsw-alias-state-business-primary,#2563eb);border-color:transparent;color:#fff}',
-      '.dshPi_button[data-variant="danger"]{color:var(--dsw-alias-state-error-primary,#d00);border-color:currentColor}',
-      '.dshPi_notice{padding:7px 22px;font-size:12px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-l2);border-bottom:.5px solid var(--dsw-alias-border-l2)}',
-      '.dshPi_notice[data-error="true"]{color:var(--dsw-alias-state-error-primary,#c00)}',
-      '.dshPi_scroll{flex:1;min-height:0;overflow:auto;padding:18px 22px 26px}',
-      '.dshPi_empty{max-width:520px;margin:12vh auto 0;text-align:center;color:var(--dsw-alias-label-tertiary)}',
-      '.dshPi_emptyTitle{color:var(--dsw-alias-label-primary);font-size:16px;font-weight:600;margin-bottom:8px}',
-      '.dshPi_emptyHint{font-size:12px;line-height:20px}',
-      '.dshPi_msg{display:flex;flex-direction:column;gap:6px;margin-bottom:18px}',
-      '.dshPi_msgHead{display:flex;align-items:center;gap:8px;color:var(--dsw-alias-label-tertiary);font-size:11px}',
-      '.dshPi_role{font-weight:600;color:var(--dsw-alias-label-secondary)}',
-      '.dshPi_bubble{white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:21px;color:var(--dsw-alias-label-primary)}',
-      '.dshPi_msg[data-role="user"] .dshPi_bubble{padding:9px 12px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-l2)}',
-      '.dshPi_msg[data-role="toolResult"] .dshPi_bubble{font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);padding-left:10px;border-left:2px solid var(--dsw-alias-border-l2)}',
-      '.dshPi_block{margin:2px 0}',
-      '.dshPi_thinking{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:19px;white-space:pre-wrap;border-left:2px solid var(--dsw-alias-border-l2);padding-left:9px}',
-      '.dshPi_toolCard{border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-l1);padding:8px 10px;margin:4px 0}',
-      '.dshPi_toolHead{display:flex;align-items:center;gap:8px;font-size:12px}',
-      '.dshPi_toolName{font-family:var(--dsw-font-mono,ui-monospace,monospace);font-weight:600;color:var(--dsw-alias-label-primary)}',
-      '.dshPi_toolStatus{font-size:11px;color:var(--dsw-alias-label-tertiary)}',
-      '.dshPi_toolBody{font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:11px;line-height:17px;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-secondary);margin-top:5px;max-height:320px;overflow:auto}',
-      '.dshPi_streaming .dshPi_bubble:after{content:"▍";margin-left:1px;color:var(--dsw-alias-label-tertiary);animation:dshPiBlink 1s steps(1) infinite}',
-      '@keyframes dshPiBlink{50%{opacity:0}}',
-      '.dshPi_composer{border-top:.5px solid var(--dsw-alias-border-l2);padding:12px 18px 16px;background:var(--dsw-alias-bg-base)}',
-      '.dshPi_composerBox{display:flex;align-items:flex-end;gap:8px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-l1);padding:8px}',
-      '.dshPi_textarea{flex:1;min-height:44px;max-height:200px;resize:vertical;border:0;outline:none;background:transparent;color:inherit;font:inherit;font-size:13px;line-height:20px;padding:3px 4px}',
-      '.dshPi_composerFoot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;color:var(--dsw-alias-label-tertiary);font-size:11px}',
-      '.dshPi_dialogBackdrop{position:fixed;inset:0;z-index:1200;background:rgba(0,0,0,.32);display:flex;align-items:center;justify-content:center;padding:24px}',
-      '.dshPi_dialog{width:min(520px,100%);box-sizing:border-box;border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-base);box-shadow:var(--dsw-elevation-prominent);padding:18px}',
-      '.dshPi_dialogTitle{font-size:14px;font-weight:600;margin-bottom:8px}',
-      '.dshPi_dialogText{font-size:13px;line-height:20px;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;margin-bottom:12px}',
-      '.dshPi_dialogInput{box-sizing:border-box;width:100%;min-height:38px;padding:7px 9px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-l1);color:inherit;font:inherit;font-size:13px}',
-      '.dshPi_dialogActions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap}',
-      '.dshPi_toast{position:fixed;right:22px;bottom:22px;z-index:1300;max-width:360px;padding:9px 12px;border-radius:var(--dsw-radius-md);background:var(--dsw-specific-menu,var(--dsw-alias-bg-l2));box-shadow:var(--dsw-elevation-prominent);font-size:12px;line-height:18px}',
-      '.dshPi_mono{font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:11px}',
-      '@media (max-width:760px){.dshPi_page{grid-template-columns:1fr}.dshPi_sidebar{display:none}}',
+      /* Page frame: the same centred column dsh uses for a conversation. */
+      '.dshBridge_page{display:flex;flex-direction:column;height:100%;min-height:0;background:var(--dsw-alias-bg-base,transparent);color:var(--dsw-alias-label-primary,currentColor)}',
+      '.dshBridge_head{display:flex;align-items:center;gap:10px;padding:10px 20px;min-height:44px;border-bottom:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.08))}',
+      '.dshBridge_headTitle{display:flex;align-items:center;gap:8px;min-width:0;font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary,currentColor)}',
+      '.dshBridge_headTitleText{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.dshBridge_headMeta{display:flex;align-items:center;gap:8px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,currentColor);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.dshBridge_headSpacer{flex:1;min-width:8px}',
+      '.dshBridge_body{display:flex;flex:1;min-height:0}',
+      '.dshBridge_listPane{display:flex;flex-direction:column;flex:none;width:248px;min-height:0;border-right:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.08));background:var(--dsw-alias-bg-layer-1,transparent)}',
+      '.dshBridge_searchWrap{padding:8px 10px 4px}',
+      '.dshBridge_search{box-sizing:border-box;width:100%;height:28px;padding:0 9px;border-radius:var(--dsw-radius-sm,8px);border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));background:var(--dsw-alias-bg-base,transparent);color:inherit;font:inherit;font-size:12px;outline:none}',
+      '.dshBridge_search:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#3b82f6))}',
+      '.dshBridge_list{flex:1;min-height:0;overflow:auto;padding:4px 6px 12px}',
+      '.dshBridge_row{box-sizing:border-box;display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;border:0;background:transparent;color:inherit;cursor:pointer;border-radius:var(--dsw-radius-md,12px);padding:7px 9px;font:inherit}',
+      '.dshBridge_row:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
+      '.dshBridge_row[aria-current="true"]{background:var(--dsw-alias-interactive-bg-active,rgba(0,0,0,.07))}',
+      '.dshBridge_rowLine{display:flex;align-items:center;gap:6px;min-width:0;font-size:13px;line-height:20px;font-weight:500}',
+      '.dshBridge_rowName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.dshBridge_rowMeta{display:flex;align-items:center;gap:6px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor);min-width:0}',
+      '.dshBridge_rowPreview{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}',
+      '.dshBridge_dot{flex:none;width:6px;height:6px;border-radius:999px;background:var(--dsw-alias-label-dimmed,rgba(0,0,0,.2))}',
+      '.dshBridge_dot[data-running="true"]{background:var(--dsw-alias-state-business-primary,#3b82f6)}',
+      '.dshBridge_centre{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}',
+      '.dshBridge_scroll{flex:1;min-height:0;overflow:auto;scroll-behavior:auto}',
+      '.dshBridge_column{box-sizing:border-box;max-width:712px;margin:0 auto;padding:20px 24px 8px}',
+      '.dshBridge_turn{display:flex;flex-direction:column;gap:6px;margin-bottom:20px}',
+      '.dshBridge_turnHead{display:flex;align-items:center;gap:8px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor)}',
+      '.dshBridge_turnRole{font-weight:600;color:var(--dsw-alias-label-secondary,currentColor)}',
+      '.dshBridge_userText{font-size:14px;line-height:24px;color:var(--dsw-alias-label-primary,currentColor);white-space:pre-wrap;word-break:break-word}',
+      '.dshBridge_assistantBody{font-size:14px;line-height:24px;color:var(--dsw-alias-label-primary,currentColor);word-break:break-word}',
+      '.dshBridge_turnFoot{display:flex;align-items:center;gap:8px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor)}',
+      '.dshBridge_toolGroup{display:flex;flex-direction:column;gap:2px;margin:2px 0}',
+      '.dshBridge_toolBody{margin:2px 0 4px;padding-left:10px;border-left:2px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))}',
+      '.dshBridge_toolLabel{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor);margin:4px 0 2px}',
+      '.dshBridge_pre{margin:0;padding:8px 10px;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-markdown-code-block,rgba(0,0,0,.04));font-family:var(--dsw-font-markdown-code-font-family,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:18px;white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto}',
+      '.dshBridge_streaming{min-height:24px}',
+      '.dshBridge_blank{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;height:100%;padding:24px;text-align:center;color:var(--dsw-alias-label-tertiary,currentColor)}',
+      '.dshBridge_blankTitle{font-size:15px;line-height:22px;font-weight:600;color:var(--dsw-alias-label-primary,currentColor)}',
+      '.dshBridge_blankHint{font-size:12px;line-height:20px;max-width:420px}',
+      '.dshBridge_notice{margin:0 auto;max-width:712px;padding:0 24px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,currentColor)}',
+      '.dshBridge_notice[data-error="true"]{color:var(--dsw-alias-state-error-primary,#d33)}',
+      '.dshBridge_composerSeat{flex:none;padding:0 0 18px}',
+      '.dshBridge_composerStack{box-sizing:border-box;max-width:744px;margin:0 auto;padding:0 16px;display:flex;flex-direction:column;gap:6px}',
+      '.dshBridge_card{display:flex;flex-direction:column;gap:0;border-radius:var(--dsw-radius-panel,28px);background:var(--dsw-alias-bg-base,Canvas);box-shadow:var(--dsw-elevation-prominent,0 0 0 .5px rgba(0,0,0,.1),0 4px 16px rgba(0,0,0,.03));padding:8px 0 0}',
+      '.dshBridge_textarea{box-sizing:border-box;display:block;width:100%;min-height:48px;max-height:220px;padding:6px 20px 2px;border:0;outline:none;resize:none;background:transparent;color:inherit;font:inherit;font-size:14px;line-height:24px}',
+      '.dshBridge_textarea::placeholder{color:var(--dsw-alias-label-dimmed,currentColor)}',
+      '.dshBridge_toolbar{display:flex;align-items:center;gap:6px;padding:2px 12px 10px 12px;min-height:36px}',
+      '.dshBridge_toolbarSpacer{flex:1;min-width:4px}',
+      '.dshBridge_hint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor);white-space:nowrap}',
+      '.dshBridge_iconButton{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-secondary,currentColor);cursor:pointer;font:inherit}',
+      '.dshBridge_iconButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
+      '.dshBridge_iconButton:disabled{opacity:.4;cursor:default}',
+      '.dshBridge_send{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:999px;background:var(--dsw-alias-button-primary-fill,#0f1115);color:var(--dsw-alias-label-primary-foreground,#fff);cursor:pointer}',
+      '.dshBridge_send:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover,#333)}',
+      '.dshBridge_send:disabled{opacity:.35;cursor:default}',
+      '.dshBridge_send[data-stop="true"]{background:var(--dsw-alias-state-error-primary,#d33)}',
+      '.dshBridge_gear{position:fixed;z-index:900;pointer-events:auto;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-tertiary,currentColor);cursor:pointer}',
+      '.dshBridge_gear:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.08));color:var(--dsw-alias-label-primary,currentColor)}',
+      '.dshBridge_gear:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#3b82f6));outline-offset:1px}',
+      '.dshBridge_form{display:flex;flex-direction:column;gap:16px;min-width:0}',
+      '.dshBridge_field{display:flex;flex-direction:column;gap:6px;min-width:0}',
+      '.dshBridge_label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary,currentColor)}',
+      '.dshBridge_desc{font-size:11px;line-height:17px;color:var(--dsw-alias-label-tertiary,currentColor)}',
+      '.dshBridge_input{box-sizing:border-box;width:100%;height:34px;padding:0 10px;border-radius:var(--dsw-radius-sm,8px);border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.14));background:var(--dsw-alias-bg-layer-1,transparent);color:inherit;font:inherit;font-size:13px;outline:none}',
+      '.dshBridge_input:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#3b82f6))}',
+      '.dshBridge_picker{display:flex;align-items:center;gap:8px;box-sizing:border-box;width:100%;height:34px;padding:0 10px;border-radius:var(--dsw-radius-sm,8px);border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.14));background:var(--dsw-alias-bg-layer-1,transparent);color:inherit;font:inherit;font-size:13px;cursor:pointer;text-align:left}',
+      '.dshBridge_picker:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
+      '.dshBridge_pickerValue{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.dshBridge_switchRow{display:flex;align-items:flex-start;gap:10px}',
+      '.dshBridge_switchText{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}',
+      '.dshBridge_switch{position:relative;flex:none;width:36px;height:20px;margin-top:1px;border:0;border-radius:999px;background:var(--dsw-alias-border-l3,rgba(0,0,0,.2));cursor:pointer;transition:background .15s ease}',
+      '.dshBridge_switch[data-on="true"]{background:var(--dsw-alias-state-business-primary,#3b82f6)}',
+      '.dshBridge_switchKnob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:999px;background:var(--dsw-switch-thumb,#fff);transition:transform .15s ease}',
+      '.dshBridge_switch[data-on="true"] .dshBridge_switchKnob{transform:translateX(16px)}',
+      '.dshBridge_error{font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary,#d33)}',
+      '.dshBridge_toast{position:fixed;right:20px;bottom:20px;z-index:1400;max-width:360px;padding:9px 12px;border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-toast-bg,var(--dsw-alias-bg-layer-2,#fff));color:var(--dsw-alias-toast-label,inherit);box-shadow:var(--dsw-elevation-prominent,0 6px 24px rgba(0,0,0,.12));font-size:12px;line-height:18px}',
+      '@media (max-width:820px){.dshBridge_listPane{display:none}}',
     ].join('')
 
     function installStyles() {
@@ -243,31 +297,8 @@ window.__ModuleLoader__.load({
       } catch {
         body = { error: text }
       }
-      if (!response.ok || body?.ok === false) {
-        throw new Error(body?.error ?? `HTTP ${response.status}`)
-      }
+      if (!response.ok || body?.ok === false) throw new Error(body?.error ?? `HTTP ${response.status}`)
       return body
-    }
-
-    function shortPath(path) {
-      if (typeof path !== 'string') return ''
-      const home = typeof window !== 'undefined' ? window.__DSH_HOME__ : undefined
-      if (typeof home === 'string' && home !== '' && path.startsWith(home)) return `~${path.slice(home.length)}`
-      return path
-    }
-
-    function formatBytes(value) {
-      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return ''
-      if (value < 1024) return `${value} B`
-      if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`
-      return `${(value / (1024 * 1024)).toFixed(1)} MB`
-    }
-
-    function formatTime(value) {
-      if (typeof value !== 'string' && typeof value !== 'number') return ''
-      const time = new Date(value)
-      if (Number.isNaN(time.getTime())) return ''
-      return time.toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     }
 
     function textOf(content) {
@@ -279,202 +310,435 @@ window.__ModuleLoader__.load({
         .join('')
     }
 
-    function imageBlocks(content) {
-      if (!Array.isArray(content)) return []
-      return content.filter((block) => block && block.type === 'image')
+    function formatTime(value) {
+      if (typeof value !== 'string' && typeof value !== 'number') return ''
+      const time = new Date(value)
+      if (Number.isNaN(time.getTime())) return ''
+      return time.toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     }
 
-    function ToolCard({ item, t }) {
-      const [open, setOpen] = useState(false)
-      const status = item.status === 'running' ? t('toolRunning') : item.status === 'error' ? t('toolFailed') : t('toolDone')
-      return h(
-        'div',
-        { className: 'dshPi_toolCard' },
-        h(
-          'div',
-          { className: 'dshPi_toolHead' },
-          h('span', { className: 'dshPi_toolName' }, item.name ?? t('tool')),
-          h('span', { className: 'dshPi_toolStatus' }, status),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dshPi_iconButton',
-              style: { marginLeft: 'auto', width: 22, height: 22 },
-              title: open ? t('collapse') : t('expand'),
-              'aria-label': open ? t('collapse') : t('expand'),
-              onClick: () => setOpen(!open),
-            },
-            open ? '−' : '+',
-          ),
-        ),
-        open && item.arguments !== undefined
-          ? h('div', { className: 'dshPi_toolBody' }, safeJson(item.arguments))
-          : null,
-        open && item.output
-          ? h('div', { className: 'dshPi_toolBody' }, item.output)
-          : null,
-      )
+    function formatBytes(value) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return ''
+      if (value < 1024) return `${value} B`
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`
+      return `${(value / (1024 * 1024)).toFixed(1)} MB`
     }
 
     function safeJson(value) {
       const seen = new WeakSet()
       try {
-        return JSON.stringify(value, (key, item) => {
-          if (item !== null && typeof item === 'object') {
-            if (seen.has(item)) return '[circular]'
-            seen.add(item)
-          }
-          return item
-        }, 2)
+        return JSON.stringify(
+          value,
+          (key, item) => {
+            if (item !== null && typeof item === 'object') {
+              if (seen.has(item)) return '[circular]'
+              seen.add(item)
+            }
+            return item
+          },
+          2,
+        )
       } catch {
         return String(value)
       }
     }
 
-    function renderContent(content, t, keyPrefix) {
-      const nodes = []
-      if (typeof content === 'string') {
-        if (content !== '') nodes.push(h('div', { key: `${keyPrefix}-text`, className: 'dshPi_bubble' }, content))
-        return nodes
-      }
-      if (!Array.isArray(content)) return nodes
-      content.forEach((block, index) => {
-        if (block === null || typeof block !== 'object') return
-        const key = `${keyPrefix}-${index}`
-        if (block.type === 'text') {
-          nodes.push(h('div', { key, className: 'dshPi_block dshPi_bubble' }, block.text ?? ''))
-        } else if (block.type === 'thinking') {
-          nodes.push(h('div', { key, className: 'dshPi_block dshPi_thinking' }, block.thinking ?? ''))
-        } else if (block.type === 'toolCall') {
-          nodes.push(
-            h(
+    function useMarkdownLabels(t) {
+      return useMemo(
+        () => ({
+          code: { copyLabel: t('copy'), copiedLabel: t('copied') },
+          footnotes: 'Footnotes',
+        }),
+        [t],
+      )
+    }
+
+    function Markdown({ text, streaming, t, variant }) {
+      const labels = useMarkdownLabels(t)
+      return h(MarkdownText, { text, streaming, labels, variant })
+    }
+
+    function CopyButton({ text, t }) {
+      const [copied, setCopied] = useState(false)
+      useEffect(() => {
+        if (!copied) return undefined
+        const timer = setTimeout(() => setCopied(false), 1500)
+        return () => clearTimeout(timer)
+      }, [copied])
+      return h(
+        Tooltip,
+        { label: copied ? t('copied') : t('copy') },
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dshBridge_iconButton',
+            'aria-label': t('copy'),
+            onClick: async () => {
+              try {
+                await writeClipboard(text)
+                setCopied(true)
+              } catch {
+                setCopied(false)
+              }
+            },
+          },
+          copied ? h(IconCheckSmall) : h(IconCopySmall),
+        ),
+      )
+    }
+
+    function IconCopySmall() {
+      return h('svg', { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
+        h('rect', { x: 5.5, y: 5.5, width: 8, height: 8, rx: 2, stroke: 'currentColor', strokeWidth: 1.2 }),
+        h('path', { d: 'M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5', stroke: 'currentColor', strokeWidth: 1.2 }),
+      )
+    }
+
+    function IconCheckSmall() {
+      return h('svg', { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
+        h('path', { d: 'm3.5 8.5 3 3 6-6.5', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+      )
+    }
+
+    /** One tool call and its result, folded into dsh's shared disclosure row. */
+    function ToolRow({ item, t }) {
+      const [open, setOpen] = useState(false)
+      const status = item.status === 'running' ? t('toolRunning') : item.status === 'error' ? t('toolFailed') : t('toolDone')
+      const output = typeof item.output === 'string' && item.output !== '' ? item.output : null
+      return h(
+        'div',
+        null,
+        h(DisclosureRow, {
+          icon: h(IconCodeOutlineRegular, { size: 16 }),
+          title: `${item.name ?? 'tool'} · ${status}`,
+          open,
+          expandable: true,
+          onToggle: () => setOpen(!open),
+          expandOnRowClick: true,
+          running: item.status === 'running',
+        }, open
+          ? h(
               'div',
-              { key, className: 'dshPi_toolCard' },
-              h(
-                'div',
-                { className: 'dshPi_toolHead' },
-                h('span', { className: 'dshPi_toolName' }, block.name ?? t('tool')),
-                h('span', { className: 'dshPi_toolStatus' }, t('toolDone')),
-              ),
-              h('div', { className: 'dshPi_toolBody' }, safeJson(block.arguments)),
-            ),
-          )
+              { className: 'dshBridge_toolBody' },
+              item.arguments !== undefined ? h('div', { className: 'dshBridge_toolLabel' }, t('toolArguments')) : null,
+              item.arguments !== undefined ? h('pre', { className: 'dshBridge_pre' }, safeJson(item.arguments)) : null,
+              output !== null ? h('div', { className: 'dshBridge_toolLabel' }, t('toolResult')) : null,
+              output !== null ? h('pre', { className: 'dshBridge_pre' }, output) : null,
+            )
+          : null),
+      )
+    }
+
+    function ThinkingRow({ text, running, t }) {
+      const [open, setOpen] = useState(false)
+      return h(DisclosureRow, {
+        icon: h(IconApiOutlineRegular, { size: 14 }),
+        title: running ? h(TextShimmer, { active: true }, t('thinking')) : t('thinking'),
+        open,
+        expandable: true,
+        onToggle: () => setOpen(!open),
+        expandOnRowClick: true,
+        running,
+      }, open ? h('div', { className: 'dshBridge_toolBody' }, h(Markdown, { text, streaming: running, t, variant: 'compact' })) : null)
+    }
+
+    /** Render one durable or streaming assistant message body. */
+    function AssistantContent({ message, streaming, t }) {
+      const blocks = Array.isArray(message?.content) ? message.content : []
+      if (blocks.length === 0 && typeof message?.content === 'string') {
+        return message.content === '' ? null : h(Markdown, { text: message.content, streaming, t })
+      }
+      const nodes = []
+      blocks.forEach((block, index) => {
+        if (!block || typeof block !== 'object') return
+        if (block.type === 'text') {
+          nodes.push(h('div', { key: `t${index}`, className: 'dshBridge_assistantBody' }, h(Markdown, { text: block.text ?? '', streaming, t })))
+        } else if (block.type === 'thinking') {
+          nodes.push(h(ThinkingRow, { key: `k${index}`, text: block.thinking ?? '', running: streaming, t }))
+        } else if (block.type === 'toolCall') {
+          nodes.push(h(ToolRow, { key: `c${index}`, item: { name: block.name, arguments: block.arguments, status: streaming ? 'running' : 'done' }, t }))
         } else if (block.type === 'image') {
           const source = block.source ?? {}
           const src = typeof source.data === 'string' ? `data:${source.mediaType ?? 'image/png'};base64,${source.data}` : block.data
           if (typeof src === 'string') {
-            nodes.push(h('img', { key, src, alt: '', style: { maxWidth: '100%', borderRadius: 8, marginTop: 4 } }))
+            nodes.push(h('img', { key: `i${index}`, src, alt: '', style: { maxWidth: '100%', borderRadius: 12, marginTop: 6 } }))
           }
         }
       })
-      return nodes
+      return nodes.length === 0 ? null : h(React.Fragment, null, ...nodes)
     }
 
-    function MessageRow({ item, t }) {
-      if (item.kind === 'tool') return h(ToolCard, { item, t })
-      const message = item.message ?? item
-      const role = message.role ?? 'unknown'
-      const roleLabel = role === 'user' ? t('user') : role === 'assistant' ? t('assistant') : role === 'toolResult' ? t('tool') : role === 'custom' ? t('system') : role
-      const blocks = renderContent(message.content, t, String(item.id ?? message.timestamp ?? Math.random()))
+    function UserTurn({ message, t }) {
+      const text = textOf(message.content)
+      const images = Array.isArray(message.content) ? message.content.filter((block) => block && block.type === 'image') : []
       return h(
         'div',
-        { className: 'dshPi_msg', 'data-role': role, 'data-streaming': item.streaming === true ? 'true' : undefined },
+        { className: 'dshBridge_turn', 'data-role': 'user' },
         h(
           'div',
-          { className: 'dshPi_msgHead' },
-          h('span', { className: 'dshPi_role' }, roleLabel),
-          message.toolName ? h('span', { className: 'dshPi_mono' }, message.toolName) : null,
-          message.model ? h('span', null, message.model) : null,
+          { className: 'dshBridge_turnHead' },
+          h('span', { className: 'dshBridge_turnRole' }, t('userRole')),
+          message.timestamp ? h('span', null, formatTime(message.timestamp)) : null,
         ),
-        blocks.length > 0 ? blocks : h('div', { className: 'dshPi_bubble' }, t('emptyMessage')),
-      )
-    }
-
-    function ExtensionDialog({ request, t, onRespond }) {
-      const initial = request !== null && request.method === 'editor' ? request.prefill ?? '' : ''
-      const [value, setValue] = useState(initial)
-      useEffect(() => {
-        setValue(request !== null && request.method === 'editor' ? request.prefill ?? '' : '')
-      }, [request])
-      if (request === null) return null
-      const title = request.title ?? request.message ?? t('dialogConfirm')
-      const cancel = () => onRespond({ cancelled: true })
-      let body
-      if (request.method === 'select') {
-        body = h(
-          'div',
-          { className: 'dshPi_dialogActions', style: { justifyContent: 'flex-start' } },
-          ...(Array.isArray(request.options) ? request.options : []).map((option) =>
-            h('button', { key: option, type: 'button', className: 'dshPi_button', onClick: () => onRespond({ value: option }) }, option),
-          ),
-          h('button', { type: 'button', className: 'dshPi_button', onClick: cancel }, t('dialogCancel')),
-        )
-      } else if (request.method === 'input' || request.method === 'editor') {
-        body = h(
-          React.Fragment,
-          null,
-          h(
-            request.method === 'editor' ? 'textarea' : 'input',
-            {
-              className: 'dshPi_dialogInput',
-              style: request.method === 'editor' ? { minHeight: 140, resize: 'vertical', fontFamily: 'inherit' } : undefined,
-              value,
-              placeholder: request.placeholder,
-              onChange: (event) => setValue(event.target.value),
-              autoFocus: true,
-            },
-          ),
-          h(
-            'div',
-            { className: 'dshPi_dialogActions' },
-            h('button', { type: 'button', className: 'dshPi_button', onClick: cancel }, t('dialogCancel')),
-            h('button', { type: 'button', className: 'dshPi_button', 'data-variant': 'primary', onClick: () => onRespond({ value }) }, t('dialogSubmit')),
-          ),
-        )
-      } else {
-        body = h(
-          React.Fragment,
-          null,
-          request.message && request.message !== title ? h('div', { className: 'dshPi_dialogText' }, request.message) : null,
-          h(
-            'div',
-            { className: 'dshPi_dialogActions' },
-            h('button', { type: 'button', className: 'dshPi_button', onClick: cancel }, t('dialogCancel')),
-            h('button', { type: 'button', className: 'dshPi_button', 'data-variant': 'primary', onClick: () => onRespond({ confirmed: true }) }, t('dialogConfirm')),
-          ),
-        )
-      }
-      return h(
-        'div',
-        { className: 'dshPi_dialogBackdrop', role: 'presentation' },
-        h(
-          'div',
-          { className: 'dshPi_dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-          h('div', { className: 'dshPi_dialogTitle' }, title),
-          typeof request.timeout === 'number'
-            ? h('div', { className: 'dshPi_dialogText', style: { fontSize: 11 } }, `timeout ${Math.round(request.timeout / 1000)}s`)
-            : null,
-          body,
-        ),
-      )
-    }
-
-    function PiBridgeIcon({ size }) {
-      return h(
-        'svg',
-        { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': true },
-        h('path', {
-          d: 'M7 7h10v10H7zM4 12h3M17 12h3M12 4v3M12 17v3',
-          stroke: 'currentColor',
-          strokeWidth: 1.6,
-          strokeLinecap: 'round',
-          strokeLinejoin: 'round',
+        text !== '' ? h('div', { className: 'dshBridge_userText' }, text) : null,
+        ...images.map((block, index) => {
+          const source = block.source ?? {}
+          const src = typeof source.data === 'string' ? `data:${source.mediaType ?? 'image/png'};base64,${source.data}` : block.data
+          return typeof src === 'string' ? h('img', { key: `img${index}`, src, alt: '', style: { maxWidth: '100%', borderRadius: 12 } }) : null
         }),
       )
     }
 
-    function PiBridgePage(props) {
+    function AssistantTurn({ message, streaming, t }) {
+      const body = h(AssistantContent, { message, streaming, t })
+      const text = textOf(message?.content)
+      return h(
+        'div',
+        { className: 'dshBridge_turn', 'data-role': 'assistant' },
+        h(
+          'div',
+          { className: 'dshBridge_turnHead' },
+          h('span', { className: 'dshBridge_turnRole' }, t('assistantRole')),
+          message?.model ? h('span', null, message.model) : null,
+        ),
+        body === null && streaming ? h('div', { className: 'dshBridge_assistantBody dshBridge_streaming' }, h(TextShimmer, { active: true }, '…')) : body,
+        !streaming && message?.stopReason === 'aborted'
+          ? h('div', { className: 'dshBridge_turnFoot' }, t('stopped'))
+          : null,
+        !streaming && text !== ''
+          ? h('div', { className: 'dshBridge_turnFoot' },
+              h('span', null, t('turnCompleted')),
+              h(CopyButton, { text, t }))
+          : null,
+      )
+    }
+
+    function ToolItem({ item, t }) {
+      return h('div', { className: 'dshBridge_toolGroup' }, h(ToolRow, { item, t }))
+    }
+
+    function SettingsModal({ open, onClose, t, initial, onSaved, disabled }) {
+      const [backend, setBackend] = useState(initial?.settings?.backend ?? 'pi')
+      const [backends, setBackends] = useState(initial?.backends ?? [])
+      const [sessionsRoot, setSessionsRoot] = useState(initial?.settings?.pi?.sessionsRoot ?? '')
+      const [binary, setBinary] = useState(initial?.settings?.pi?.binary ?? '')
+      const [offline, setOffline] = useState(initial?.settings?.pi?.offline !== false)
+      const [saving, setSaving] = useState(false)
+      const [error, setError] = useState(null)
+      const [pickerOpen, setPickerOpen] = useState(false)
+
+      useEffect(() => {
+        if (!open) return
+        setBackend(initial?.settings?.backend ?? 'pi')
+        setBackends(initial?.backends ?? [])
+        setSessionsRoot(initial?.settings?.pi?.sessionsRoot ?? '')
+        setBinary(initial?.settings?.pi?.binary ?? '')
+        setOffline(initial?.settings?.pi?.offline !== false)
+        setError(null)
+      }, [open, initial])
+
+      const selected = backends.find((entry) => entry.id === backend)
+
+      const save = async () => {
+        setSaving(true)
+        setError(null)
+        try {
+          const body = await api('settings', {
+            method: 'PUT',
+            body: JSON.stringify({
+              backend,
+              pi: {
+                sessionsRoot: sessionsRoot.trim() === '' ? null : sessionsRoot.trim(),
+                binary: binary.trim() === '' ? null : binary.trim(),
+                offline,
+              },
+            }),
+          })
+          onSaved(body)
+          onClose()
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setSaving(false)
+        }
+      }
+
+      return h(
+        Modal,
+        {
+          open,
+          onClose,
+          title: t('settingsTitle'),
+          closeLabel: t('settingsClose'),
+          footer: h(
+            React.Fragment,
+            null,
+            h(Button, { variant: 'ghost', size: 'sm', onClick: onClose }, t('settingsClose')),
+            h(Button, { variant: 'primary', size: 'sm', onClick: save, disabled: saving || disabled }, saving ? t('settingsSaving') : t('settingsSave')),
+          ),
+        },
+        h(
+          'div',
+          { className: 'dshBridge_form' },
+          disabled ? h('div', { className: 'dshBridge_error' }, t('detachFirst')) : null,
+          h(
+            'div',
+            { className: 'dshBridge_field' },
+            h('div', { className: 'dshBridge_label' }, t('backend')),
+            h(
+              Menu,
+              {
+                open: pickerOpen,
+                onClose: () => setPickerOpen(false),
+                selectedId: backend,
+                items: backends.map((entry) => ({
+                  id: entry.id,
+                  label: entry.label,
+                  disabled: entry.available === false,
+                })),
+                onSelect: (id) => {
+                  setBackend(id)
+                  setPickerOpen(false)
+                },
+                portal: true,
+                anchor: h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dshBridge_picker',
+                    'aria-haspopup': 'menu',
+                    'aria-expanded': pickerOpen,
+                    onClick: () => setPickerOpen((value) => !value),
+                  },
+                  h(IconApiOutlineRegular, { size: 16 }),
+                  h('span', { className: 'dshBridge_pickerValue' }, selected?.label ?? backend),
+                  h(IconChevronDownOutlineRegular, { size: 14 }),
+                ),
+              },
+            ),
+            h('div', { className: 'dshBridge_desc' }, selected?.description ?? t('backendOnlyOne')),
+          ),
+          h(
+            'div',
+            { className: 'dshBridge_field' },
+            h('div', { className: 'dshBridge_label' }, t('sessionsRoot')),
+            h('input', {
+              className: 'dshBridge_input',
+              value: sessionsRoot,
+              placeholder: '~/.pi/agent/sessions',
+              onChange: (event) => setSessionsRoot(event.target.value),
+            }),
+            h('div', { className: 'dshBridge_desc' }, t('sessionsRootHint')),
+          ),
+          h(
+            'div',
+            { className: 'dshBridge_field' },
+            h('div', { className: 'dshBridge_label' }, t('binary')),
+            h('input', {
+              className: 'dshBridge_input',
+              value: binary,
+              placeholder: '~/.pi/agent/bin/pi',
+              onChange: (event) => setBinary(event.target.value),
+            }),
+            h('div', { className: 'dshBridge_desc' }, t('binaryHint')),
+          ),
+          h(
+            'div',
+            { className: 'dshBridge_switchRow' },
+            h(
+              'div',
+              { className: 'dshBridge_switchText' },
+              h('div', { className: 'dshBridge_label' }, t('offline')),
+              h('div', { className: 'dshBridge_desc' }, t('offlineHint')),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dshBridge_switch',
+                'data-on': offline ? 'true' : 'false',
+                role: 'switch',
+                'aria-checked': offline,
+                'aria-label': t('offline'),
+                onClick: () => setOffline(!offline),
+              },
+              h('span', { className: 'dshBridge_switchKnob' }),
+            ),
+          ),
+          error !== null ? h('div', { className: 'dshBridge_error' }, `${t('settingsFailed')}: ${error}`) : null,
+        ),
+      )
+    }
+
+    /**
+     * The gear beside the sidebar's Bridge row.
+     *
+     * The sidebar shell owns that row and exposes no trailing-action slot, so
+     * this overlay entry measures the row and pins itself to the row's right
+     * edge. It renders nothing while the row is absent (collapsed rail, other
+     * panel, or a page without that row).
+     */
+    function SettingsAnchor({ onOpen, t }) {
+      const [rect, setRect] = useState(null)
+      useEffect(() => {
+        let frame = 0
+        let last = null
+        const measure = () => {
+          frame = 0
+          const rows = [...document.querySelectorAll('nav button[aria-label]')]
+          const row = rows.find((button) => button.getAttribute('aria-label') === t('panel') && button.getBoundingClientRect().width > 96)
+          if (row === undefined) {
+            if (last !== null) {
+              last = null
+              setRect(null)
+            }
+            return
+          }
+          const box = row.getBoundingClientRect()
+          const next = { top: box.top + box.height / 2 - 12, left: box.right - 26 }
+          if (last === null || Math.abs(last.top - next.top) > 0.5 || Math.abs(last.left - next.left) > 0.5) {
+            last = next
+            setRect(next)
+          }
+        }
+        const schedule = () => {
+          if (frame !== 0) return
+          frame = requestAnimationFrame(measure)
+        }
+        measure()
+        const observer = new ResizeObserver(schedule)
+        observer.observe(document.body)
+        window.addEventListener('resize', schedule)
+        window.addEventListener('scroll', schedule, true)
+        const timer = setInterval(schedule, 500)
+        return () => {
+          if (frame !== 0) cancelAnimationFrame(frame)
+          observer.disconnect()
+          window.removeEventListener('resize', schedule)
+          window.removeEventListener('scroll', schedule, true)
+          clearInterval(timer)
+        }
+      }, [t])
+      if (rect === null) return null
+      return h(
+        Tooltip,
+        { label: t('settings') },
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dshBridge_gear',
+            style: { top: `${rect.top}px`, left: `${rect.left}px` },
+            'aria-label': t('settings'),
+            onClick: onOpen,
+          },
+          h(IconSettingsOutlineRegular, { size: 14 }),
+        ),
+      )
+    }
+
+    function BridgePage(props) {
       const { t } = props
       const [sessions, setSessions] = useState([])
       const [loading, setLoading] = useState(true)
@@ -498,8 +762,10 @@ window.__ModuleLoader__.load({
       const sourceRef = useRef(null)
       const firstSnapshotRef = useRef(true)
       const lastSeqRef = useRef(0)
-      const scrollRef = useRef(null)
       const selectedKeyRef = useRef(null)
+      const scrollRef = useRef(null)
+      const textareaRef = useRef(null)
+      const stickToBottomRef = useRef(true)
 
       const showNotice = useCallback((text, error = false) => {
         setNotice(text)
@@ -508,7 +774,7 @@ window.__ModuleLoader__.load({
 
       useEffect(() => {
         if (notice === null) return undefined
-        const timer = setTimeout(() => setNotice(null), 6000)
+        const timer = setTimeout(() => setNotice(null), 5000)
         return () => clearTimeout(timer)
       }, [notice])
 
@@ -529,9 +795,19 @@ window.__ModuleLoader__.load({
         loadSessions()
       }, [loadSessions])
 
+      useEffect(() => {
+        const onChange = () => loadSessions()
+        window.addEventListener('dsh-bridge:settings-changed', onChange)
+        return () => window.removeEventListener('dsh-bridge:settings-changed', onChange)
+      }, [loadSessions])
+
       const historyItems = useCallback((session) => {
         const messages = Array.isArray(session?.messages) ? session.messages : []
-        return messages.map((message, index) => ({ kind: 'message', id: `history-${index}-${message.timestamp ?? ''}`, message }))
+        return messages.map((message, index) => ({
+          kind: 'message',
+          id: `history-${index}-${message.timestamp ?? ''}`,
+          message,
+        }))
       }, [])
 
       const openSession = useCallback(
@@ -567,23 +843,12 @@ window.__ModuleLoader__.load({
         [historyItems],
       )
 
-      const refreshHistory = useCallback(async () => {
-        if (selectedKey === null) return
-        try {
-          const body = await api(`session?key=${encodeURIComponent(selectedKey)}`)
-          setDetail(body.session)
-          if (!attached) setTranscript(historyItems(body.session))
-        } catch (error) {
-          showNotice(error instanceof Error ? error.message : String(error), true)
-        }
-      }, [attached, historyItems, selectedKey, showNotice])
-
       const applyPiEvent = useCallback((record) => {
         const event = record?.type
         if (event === 'agent_start') {
-          setState((current) => current === null ? current : { ...current, isStreaming: true })
-        } else if (event === 'agent_settled') {
-          setState((current) => current === null ? current : { ...current, isStreaming: false })
+          setState((current) => (current === null ? current : { ...current, isStreaming: true }))
+        } else if (event === 'agent_settled' || event === 'agent_end') {
+          setState((current) => (current === null ? current : { ...current, isStreaming: false }))
         } else if (event === 'message_start') {
           if (record.message?.role === 'assistant') setStreamingMessage({ ...record.message })
         } else if (event === 'message_update') {
@@ -592,7 +857,12 @@ window.__ModuleLoader__.load({
           const message = record.message
           if (message === undefined) return
           if (message.role === 'assistant') setStreamingMessage(null)
-          setTranscript((current) => [...current, { kind: 'message', id: `${message.role}-${message.timestamp ?? Date.now()}-${current.length}`, message }])
+          // The system prompt is harness plumbing, never part of the transcript.
+          if (message.role === 'system') return
+          setTranscript((current) => [
+            ...current,
+            { kind: 'message', id: `${message.role}-${message.timestamp ?? Date.now()}-${current.length}`, message },
+          ])
         } else if (event === 'tool_execution_start') {
           setTranscript((current) => [
             ...current,
@@ -600,16 +870,22 @@ window.__ModuleLoader__.load({
           ])
         } else if (event === 'tool_execution_update') {
           setTranscript((current) =>
-            current.map((item) => item.kind === 'tool' && item.id === record.toolCallId ? { ...item, output: typeof record.delta === 'string' ? (item.output ?? '') + record.delta : safeJson(record) } : item),
+            current.map((item) =>
+              item.kind === 'tool' && item.id === record.toolCallId
+                ? { ...item, output: typeof record.delta === 'string' ? (item.output ?? '') + record.delta : item.output }
+                : item,
+            ),
           )
         } else if (event === 'tool_execution_end') {
           setTranscript((current) =>
-            current.map((item) => item.kind === 'tool' && item.id === record.toolCallId ? { ...item, status: record.isError === true ? 'error' : 'done', output: typeof record.result === 'string' ? record.result : item.output } : item),
+            current.map((item) =>
+              item.kind === 'tool' && item.id === record.toolCallId
+                ? { ...item, status: record.isError === true ? 'error' : 'done', output: typeof record.result === 'string' ? record.result : item.output }
+                : item,
+            ),
           )
         } else if (event === 'session_info_changed') {
-          setState((current) => current === null ? current : { ...current, sessionName: record.name })
-        } else if (event === 'agent_end') {
-          setState((current) => current === null ? current : { ...current, isStreaming: false })
+          setState((current) => (current === null ? current : { ...current, sessionName: record.name }))
         }
       }, [])
 
@@ -645,13 +921,11 @@ window.__ModuleLoader__.load({
             }
           })
           source.addEventListener('pi-event', (message) => {
-            let payload
             try {
-              payload = JSON.parse(message.data)
+              applyPiEvent(JSON.parse(message.data))
             } catch {
-              return
+              // Ignore a malformed frame; the next event repairs the view.
             }
-            applyPiEvent(payload)
           })
           source.addEventListener('pi-ui-request', (message) => {
             try {
@@ -663,20 +937,16 @@ window.__ModuleLoader__.load({
           source.addEventListener('pi-ui-notification', (message) => {
             try {
               const payload = JSON.parse(message.data)
-              if (typeof payload?.message === 'string') showNotice(`${t('notification')}: ${payload.message}`, payload.notifyType === 'error')
+              if (typeof payload?.message === 'string') {
+                showNotice(`${t('notification')}: ${payload.message}`, payload.notifyType === 'error')
+              }
             } catch {
               // Ignore malformed notifications.
             }
           })
-          source.addEventListener('pi-exit', (message) => {
+          source.addEventListener('pi-exit', () => {
             setAttached(false)
             setStreamingMessage(null)
-            try {
-              const payload = JSON.parse(message.data)
-              if (typeof payload?.stderr === 'string' && payload.stderr.trim() !== '') showNotice(payload.stderr.trim(), true)
-            } catch {
-              // Ignore malformed exit events.
-            }
           })
         },
         [applyPiEvent, showNotice, t],
@@ -691,6 +961,7 @@ window.__ModuleLoader__.load({
           setState(body.state ?? null)
           setAttached(true)
           setTranscript(historyItems(detail))
+          stickToBottomRef.current = true
           firstSnapshotRef.current = true
           connectEvents(selectedKey)
           showNotice(t('attachNotice'))
@@ -721,9 +992,11 @@ window.__ModuleLoader__.load({
         const message = draft.trim()
         if (message === '' || selectedKey === null || sending) return
         setSending(true)
+        stickToBottomRef.current = true
         try {
           await api('prompt', { method: 'POST', body: JSON.stringify({ key: selectedKey, message, mode: 'auto' }) })
           setDraft('')
+          if (textareaRef.current !== null) textareaRef.current.style.height = 'auto'
         } catch (error) {
           showNotice(`${t('promptFailed')}: ${error instanceof Error ? error.message : String(error)}`, true)
         } finally {
@@ -735,7 +1008,6 @@ window.__ModuleLoader__.load({
         if (selectedKey === null) return
         try {
           await api('abort', { method: 'POST', body: JSON.stringify({ key: selectedKey }) })
-          showNotice(t('stopped'))
         } catch (error) {
           showNotice(`${t('abortFailed')}: ${error instanceof Error ? error.message : String(error)}`, true)
         }
@@ -765,10 +1037,19 @@ window.__ModuleLoader__.load({
         [],
       )
 
+      // Auto-scroll only while the reader is already at the bottom, matching
+      // the transcript behaviour of the shipped chat surface.
       useEffect(() => {
         const node = scrollRef.current
-        if (node !== null) node.scrollTop = node.scrollHeight
+        if (node === null || !stickToBottomRef.current) return
+        node.scrollTop = node.scrollHeight
       }, [transcript, streamingMessage])
+
+      const onScroll = useCallback(() => {
+        const node = scrollRef.current
+        if (node === null) return
+        stickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64
+      }, [])
 
       const filtered = useMemo(() => {
         const query = search.trim().toLowerCase()
@@ -785,201 +1066,303 @@ window.__ModuleLoader__.load({
 
       return h(
         'section',
-        { className: 'dshPi_page', 'aria-label': t('title') },
+        { className: 'dshBridge_page', 'aria-label': t('title') },
         h(
-          'aside',
-          { className: 'dshPi_sidebar', 'aria-label': t('panel') },
+          'header',
+          { className: 'dshBridge_head' },
           h(
             'div',
-            { className: 'dshPi_sidebarHead' },
-            h('div', { className: 'dshPi_sidebarTitle' }, t('panel')),
-            h(
-              'button',
-              { type: 'button', className: 'dshPi_iconButton', title: t('refresh'), 'aria-label': t('refresh'), onClick: loadSessions, disabled: loading },
-              '↻',
-            ),
+            { className: 'dshBridge_headTitle' },
+            h(IconApiOutlineRegular, { size: 16 }),
+            h('span', { className: 'dshBridge_headTitleText' }, selectedKey === null ? t('panel') : title),
           ),
+          h('span', { className: 'dshBridge_headMeta' },
+            selectedKey === null
+              ? t('subtitle')
+              : [selectedSession?.cwd, attached ? (isStreaming ? t('running') : t('idle')) : t('notAttached')].filter(Boolean).join(' · ')),
+          h('span', { className: 'dshBridge_headSpacer' }),
+          selectedKey === null ? null : attached
+            ? [
+                h(Button, { key: 'detach', variant: 'ghost', size: 'sm', onClick: detach }, t('detach')),
+              ]
+            : h(Button, { key: 'attach', variant: 'primary', size: 'sm', onClick: attach, disabled: attaching || detailLoading || detail === null }, attaching ? t('attaching') : t('attach')),
           h(
-            'div',
-            { className: 'dshPi_searchWrap' },
-            h('input', {
-              className: 'dshPi_search',
-              type: 'search',
-              value: search,
-              placeholder: t('searchPlaceholder'),
-              'aria-label': t('search'),
-              onChange: (event) => setSearch(event.target.value),
-            }),
-          ),
-          h(
-            'div',
-            { className: 'dshPi_list' },
-            loading
-              ? h('div', { className: 'dshPi_rowMeta', style: { padding: '8px 10px' } }, t('loading'))
-              : loadError !== null
-                ? h('div', { className: 'dshPi_rowMeta', style: { padding: '8px 10px', color: 'var(--dsw-alias-state-error-primary,#c00)' } }, `${t('loadFailed')}: ${loadError}`)
-                : filtered.length === 0
-                  ? h('div', { className: 'dshPi_rowMeta', style: { padding: '8px 10px' } }, sessions.length === 0 ? t('empty') : t('noMatches'))
-                  : filtered.map((session) =>
-                      h(
-                        'button',
-                        {
-                          key: session.key,
-                          type: 'button',
-                          className: 'dshPi_row',
-                          'aria-current': session.key === selectedKey ? 'true' : undefined,
-                          onClick: () => openSession(session.key),
-                        },
-                        h(
-                          'div',
-                          { className: 'dshPi_rowTitle' },
-                          h('span', { className: 'dshPi_dot' }),
-                          h('span', { className: 'dshPi_rowTitleText' }, session.name ?? session.firstMessage ?? session.id ?? t('panel')),
-                        ),
-                        h(
-                          'div',
-                          { className: 'dshPi_rowMeta' },
-                          h('span', null, formatBytes(session.bytes)),
-                          session.modified ? h('span', null, formatTime(session.modified)) : null,
-                        ),
-                        session.firstMessage ? h('div', { className: 'dshPi_rowPreview' }, session.firstMessage) : null,
-                      ),
-                    ),
+            Tooltip,
+            { label: t('refresh') },
+            h('button', { type: 'button', className: 'dshBridge_iconButton', 'aria-label': t('refresh'), onClick: loadSessions, disabled: loading }, h(IconRefreshOutlineRegular, { size: 16 })),
           ),
         ),
+        notice !== null ? h('div', { className: 'dshBridge_notice', 'data-error': noticeError ? 'true' : undefined }, notice) : null,
+        streamState === 'disconnected' ? h('div', { className: 'dshBridge_notice' }, t('eventsDisconnected')) : null,
         h(
           'div',
-          { className: 'dshPi_main' },
+          { className: 'dshBridge_body' },
           h(
-            'header',
-            { className: 'dshPi_head' },
+            'aside',
+            { className: 'dshBridge_listPane', 'aria-label': t('panel') },
+            h('div', { className: 'dshBridge_searchWrap' },
+              h('input', {
+                className: 'dshBridge_search',
+                type: 'search',
+                value: search,
+                placeholder: t('searchPlaceholder'),
+                'aria-label': t('search'),
+                onChange: (event) => setSearch(event.target.value),
+              })),
             h(
               'div',
-              { className: 'dshPi_headText' },
-              h('h1', { className: 'dshPi_headTitle' }, selectedKey === null ? t('title') : title),
-              h(
-                'div',
-                { className: 'dshPi_headSub' },
-                selectedKey === null
-                  ? t('subtitle')
-                  : [selectedSession?.cwd ? shortPath(selectedSession.cwd) : null, selectedSession?.modified ? formatTime(selectedSession.modified) : null].filter(Boolean).join(' · '),
-              ),
-            ),
-            selectedKey === null
-              ? null
-              : h(
-                  'div',
-                  { className: 'dshPi_headActions' },
-                  h(
-                    'span',
-                    { className: 'dshPi_badge' },
-                    h('span', { className: 'dshPi_dot', 'data-running': isStreaming ? 'true' : undefined }),
-                    attached ? (isStreaming ? t('running') : t('idle')) : t('notAttached'),
-                  ),
-                  attached
-                    ? h(
-                        React.Fragment,
-                        null,
-                        h('button', { type: 'button', className: 'dshPi_button', onClick: refreshHistory }, t('refreshHistory')),
-                        h('button', { type: 'button', className: 'dshPi_button', 'data-variant': 'danger', onClick: detach }, t('detach')),
-                      )
-                    : h(
-                        'button',
-                        { type: 'button', className: 'dshPi_button', 'data-variant': 'primary', onClick: attach, disabled: attaching || detailLoading || detail === null },
-                        attaching ? t('attaching') : t('attach'),
+              { className: 'dshBridge_list' },
+              loading
+                ? h('div', { className: 'dshBridge_rowMeta', style: { padding: '8px 9px' } }, t('loading'))
+                : loadError !== null
+                  ? h('div', { className: 'dshBridge_rowMeta', style: { padding: '8px 9px' } }, `${t('loadFailed')}: ${loadError}`)
+                  : filtered.length === 0
+                    ? h('div', { className: 'dshBridge_rowMeta', style: { padding: '8px 9px' } }, sessions.length === 0 ? t('empty') : t('noMatches'))
+                    : filtered.map((session) =>
+                        h(
+                          'button',
+                          {
+                            key: session.key,
+                            type: 'button',
+                            className: 'dshBridge_row',
+                            'aria-current': session.key === selectedKey ? 'true' : undefined,
+                            onClick: () => openSession(session.key),
+                          },
+                          h('div', { className: 'dshBridge_rowLine' },
+                            h('span', { className: 'dshBridge_dot' }),
+                            h('span', { className: 'dshBridge_rowName' }, session.name ?? session.firstMessage ?? session.id ?? t('panel'))),
+                          h('div', { className: 'dshBridge_rowMeta' },
+                            h('span', null, formatBytes(session.bytes)),
+                            session.modified ? h('span', null, formatTime(session.modified)) : null),
+                          session.firstMessage ? h('div', { className: 'dshBridge_rowPreview' }, session.firstMessage) : null,
+                        ),
                       ),
-                ),
+            ),
           ),
-          notice !== null ? h('div', { className: 'dshPi_notice', 'data-error': noticeError ? 'true' : undefined }, notice) : null,
-          streamState === 'disconnected' ? h('div', { className: 'dshPi_notice' }, t('eventsDisconnected')) : null,
           h(
             'div',
-            { className: 'dshPi_scroll', ref: scrollRef },
-            selectedKey === null
+            { className: 'dshBridge_centre' },
+            h(
+              'div',
+              { className: 'dshBridge_scroll', ref: scrollRef, onScroll },
+              selectedKey === null
+                ? h('div', { className: 'dshBridge_blank' },
+                    h('div', { className: 'dshBridge_blankTitle' }, sessions.length === 0 ? t('empty') : t('selectHint')),
+                    h('div', { className: 'dshBridge_blankHint' }, t('emptyHint')))
+                : detailLoading
+                  ? h('div', { className: 'dshBridge_blank' }, t('loading'))
+                  : detailError !== null
+                    ? h('div', { className: 'dshBridge_blank' }, `${t('historyLoadFailed')}: ${detailError}`)
+                    : h(
+                        'div',
+                        { className: 'dshBridge_column' },
+                        ...transcript.map((item) => {
+                          if (item.kind === 'tool') return h(ToolItem, { key: item.id, item, t })
+                          if (item.message?.role === 'user') return h(UserTurn, { key: item.id, message: item.message, t })
+                          if (item.message?.role === 'assistant') return h(AssistantTurn, { key: item.id, message: item.message, t })
+                          if (item.message?.role === 'toolResult') {
+                            return h(AssistantTurn, {
+                              key: item.id,
+                              message: { role: 'assistant', content: item.message.content, model: item.message.toolName },
+                              t,
+                            })
+                          }
+                          return null
+                        }),
+                        streamingMessage !== null ? h(AssistantTurn, { key: 'streaming', message: streamingMessage, streaming: true, t }) : null,
+                      ),
+            ),
+            attached
               ? h(
                   'div',
-                  { className: 'dshPi_empty' },
-                  h('div', { className: 'dshPi_emptyTitle' }, sessions.length === 0 ? t('empty') : t('selectHint')),
-                  h('div', { className: 'dshPi_emptyHint' }, t('emptyHint')),
-                )
-              : detailLoading
-                ? h('div', { className: 'dshPi_empty' }, t('loading'))
-                : detailError !== null
-                  ? h('div', { className: 'dshPi_empty' }, `${t('historyLoadFailed')}: ${detailError}`)
-                  : h(
-                      React.Fragment,
-                      null,
-                      ...transcript.map((item) => h(MessageRow, { key: item.id, item, t })),
-                      streamingMessage !== null
-                        ? h(
-                            'div',
-                            { className: 'dshPi_msg dshPi_streaming', 'data-role': 'assistant' },
-                            h('div', { className: 'dshPi_msgHead' }, h('span', { className: 'dshPi_role' }, t('assistant')), h('span', null, streamingMessage.model ?? '')),
-                            renderContent(streamingMessage.content, t, 'streaming'),
-                          )
-                        : null,
-                      transcript.length === 0 && streamingMessage === null ? h('div', { className: 'dshPi_emptyHint' }, t('emptyMessage')) : null,
+                  { className: 'dshBridge_composerSeat' },
+                  h(
+                    'div',
+                    { className: 'dshBridge_composerStack' },
+                    h(
+                      'div',
+                      { className: 'dshBridge_card' },
+                      h('textarea', {
+                        ref: textareaRef,
+                        className: 'dshBridge_textarea',
+                        rows: 1,
+                        value: draft,
+                        placeholder: t('placeholder'),
+                        'aria-label': t('placeholder'),
+                        onChange: (event) => {
+                          setDraft(event.target.value)
+                          const node = event.target
+                          node.style.height = 'auto'
+                          node.style.height = `${Math.min(node.scrollHeight, 220)}px`
+                        },
+                        onKeyDown: (event) => {
+                          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                            event.preventDefault()
+                            send()
+                          }
+                        },
+                      }),
+                      h(
+                        'div',
+                        { className: 'dshBridge_toolbar' },
+                        h('span', { className: 'dshBridge_hint' }, state?.model?.id ?? ''),
+                        h('span', { className: 'dshBridge_toolbarSpacer' }),
+                        isStreaming
+                          ? h(
+                              Tooltip,
+                              { label: t('stop') },
+                              h(
+                                'button',
+                                { type: 'button', className: 'dshBridge_send', 'data-stop': 'true', 'aria-label': t('stop'), onClick: abort },
+                                h(IconPauseOutlineRegular, { size: 16 }),
+                              ),
+                            )
+                          : h(
+                              Tooltip,
+                              { label: t('send') },
+                              h(
+                                'button',
+                                {
+                                  type: 'button',
+                                  className: 'dshBridge_send',
+                                  'aria-label': t('send'),
+                                  disabled: sending || draft.trim() === '',
+                                  onClick: send,
+                                },
+                                h(IconSendOutlineRegular, { size: 16 }),
+                              ),
+                            ),
+                      ),
                     ),
+                  ),
+                )
+              : null,
           ),
-          attached
-            ? h(
-                'div',
-                { className: 'dshPi_composer' },
-                h(
-                  'div',
-                  { className: 'dshPi_composerBox' },
-                  h('textarea', {
-                    className: 'dshPi_textarea',
-                    value: draft,
-                    placeholder: t('placeholder'),
-                    'aria-label': t('placeholder'),
-                    onChange: (event) => setDraft(event.target.value),
-                    onKeyDown: (event) => {
-                      if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                        event.preventDefault()
-                        send()
-                      }
-                    },
-                  }),
-                  isStreaming
-                    ? h('button', { type: 'button', className: 'dshPi_button', 'data-variant': 'danger', onClick: abort }, t('stop'))
-                    : h('button', { type: 'button', className: 'dshPi_button', 'data-variant': 'primary', onClick: send, disabled: sending || draft.trim() === '' }, sending ? t('sending') : t('send')),
-                ),
-                h(
-                  'div',
-                  { className: 'dshPi_composerFoot' },
-                  h('span', null, isStreaming ? t('running') : t('idle')),
-                  state?.model ? h('span', null, `${t('model')}: ${state.model.id ?? ''}`) : null,
-                  state?.thinkingLevel ? h('span', null, `${t('thinking')}: ${state.thinkingLevel}`) : null,
-                ),
-              )
-            : null,
         ),
         h(ExtensionDialog, { request: dialog, t, onRespond: respondDialog }),
       )
     }
 
+    function ExtensionDialog({ request, t, onRespond }) {
+      const initial = request !== null && request.method === 'editor' ? request.prefill ?? '' : ''
+      const [value, setValue] = useState(initial)
+      useEffect(() => {
+        setValue(request !== null && request.method === 'editor' ? request.prefill ?? '' : '')
+      }, [request])
+      if (request === null) return null
+      const title = request.title ?? request.message ?? t('dialogConfirm')
+      let body
+      if (request.method === 'select') {
+        body = h(
+          'div',
+          { className: 'dshBridge_form' },
+          h(
+            'div',
+            { style: { display: 'flex', flexWrap: 'wrap', gap: 8 } },
+            ...(Array.isArray(request.options) ? request.options : []).map((option) =>
+              h(Button, { key: option, variant: 'outline', size: 'sm', onClick: () => onRespond({ value: option }) }, option),
+            ),
+          ),
+        )
+      } else if (request.method === 'input' || request.method === 'editor') {
+        body = h(
+          'div',
+          { className: 'dshBridge_form' },
+          request.method === 'editor'
+            ? h('textarea', {
+                className: 'dshBridge_input',
+                style: { height: 140, padding: 10, resize: 'vertical', lineHeight: '20px' },
+                value,
+                placeholder: request.placeholder,
+                onChange: (event) => setValue(event.target.value),
+                'data-modal-autofocus': true,
+              })
+            : h('input', {
+                className: 'dshBridge_input',
+                value,
+                placeholder: request.placeholder,
+                onChange: (event) => setValue(event.target.value),
+                'data-modal-autofocus': true,
+              }),
+        )
+      } else {
+        body = request.message !== undefined && request.message !== title
+          ? h('div', { className: 'dshBridge_desc' }, request.message)
+          : null
+      }
+      const footer = request.method === 'select'
+        ? h(Button, { variant: 'ghost', size: 'sm', onClick: () => onRespond({ cancelled: true }) }, t('dialogCancel'))
+        : h(
+            React.Fragment,
+            null,
+            h(Button, { variant: 'ghost', size: 'sm', onClick: () => onRespond({ cancelled: true }) }, t('dialogCancel')),
+            h(
+              Button,
+              {
+                variant: 'primary',
+                size: 'sm',
+                onClick: () => onRespond(request.method === 'confirm' ? { confirmed: true } : { value }),
+              },
+              request.method === 'confirm' ? t('dialogConfirm') : t('dialogSubmit'),
+            ),
+          )
+      return h(Modal, { open: true, onClose: () => onRespond({ cancelled: true }), title, closeLabel: t('dialogCancel'), footer }, body)
+    }
+
     function apply(ctx) {
-      ctx.effect(installStyles, 'pi-bridge: styles')
-      ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'pi-bridge: dictionaries')
-      ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS }, PiBridgePage))
+      ctx.effect(installStyles, 'bridge: styles')
+      ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'bridge: dictionaries')
+      const t = ctx.locale.bind(NS)
+      ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS }, BridgePage))
       ctx.slots.inject('sidebar.panellist', () =>
         ctx.slots.register(
-          {
-            name: 'sidebar.panellist',
-            id: PANEL_ID,
-            order: 20,
-            locale: NS,
-            label: () => ctx.locale.bind(NS)('panel'),
+          { name: 'sidebar.panellist', id: PANEL_ID, order: 20, locale: NS, label: () => t('panel') },
+          function BridgePanelIcon({ size }) {
+            return h(IconApiOutlineRegular, { size })
           },
-          PiBridgeIcon,
+        ),
+      )
+      ctx.slots.inject('shell.overlay', () =>
+        ctx.slots.register(
+          { name: 'shell.overlay', id: SETTINGS_ANCHOR_ID, locale: NS },
+          function BridgeSettingsAnchor() {
+            const [open, setOpen] = useState(false)
+            const [config, setConfig] = useState(null)
+            const openSettings = useCallback(async () => {
+              try {
+                setConfig(await api('settings'))
+              } catch {
+                setConfig(null)
+              }
+              setOpen(true)
+            }, [])
+            return h(
+              React.Fragment,
+              null,
+              h(SettingsAnchor, { onOpen: openSettings, t }),
+              h(SettingsModal, {
+                open,
+                onClose: () => setOpen(false),
+                t,
+                initial: config,
+                disabled: false,
+                onSaved: (body) => {
+                  setConfig(body)
+                  // The sessions list and the attach roster read the same
+                  // settings; tell the page to re-read instead of duplicating
+                  // settings state in both entries.
+                  window.dispatchEvent(new CustomEvent('dsh-bridge:settings-changed'))
+                },
+              }),
+            )
+          },
         ),
       )
     }
 
     exports.apply = apply
     exports.inject = ['slots', 'locale']
-    exports.__test = { textOf, shortPath, formatTime, formatBytes, safeJson }
+    exports.__test = { textOf, formatTime, formatBytes, safeJson }
     return module.exports
   },
 })

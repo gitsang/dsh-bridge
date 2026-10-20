@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 /**
- * The browser half is shipped as a ModuleLoader bundle, not an ES module.
- * This harness provides just enough React and window plumbing to load it and
- * exercise the plugin registration without a browser.
+ * The browser half ships as a ModuleLoader bundle. This harness provides the
+ * React and primitive surface it consumes so registration and helpers can be
+ * exercised without a browser.
  */
 const fakeReact = {
   createElement: (type, props, ...children) => ({ type, props: { ...(props ?? {}), children } }),
@@ -16,6 +16,17 @@ const fakeReact = {
   useRef: (value) => ({ current: value }),
 }
 
+/** Stand-in for every dsh primitive the bundle imports. */
+const fakePrimitives = new Proxy(
+  {},
+  {
+    get: (_target, name) => {
+      if (name === '__esModule') return undefined
+      return () => null
+    },
+  },
+)
+
 let loaded
 globalThis.window = {
   __ModuleLoader__: {
@@ -24,17 +35,19 @@ globalThis.window = {
     },
   },
 }
+globalThis.document = undefined
 
 await import('../src/client.js')
 
 function moduleExports() {
   return loaded.factory((id) => {
     if (id === 'react') return fakeReact
+    if (id === '@deepseek-ai/dsh-client-ui-primitives') return fakePrimitives
     throw new Error(`unexpected require ${id}`)
   })
 }
 
-test('registers a Pi panel and sidebar entry', () => {
+test('registers the Bridge panel, sidebar entry, and settings anchor', () => {
   const exports = moduleExports()
   assert.equal(typeof exports.apply, 'function')
   assert.deepEqual(exports.inject, ['slots', 'locale'])
@@ -64,24 +77,38 @@ test('registers a Pi panel and sidebar entry', () => {
     },
   }
   exports.apply(ctx)
+
   assert.equal(dictionaries.length, 1)
-  assert.equal(dictionaries[0].namespace, 'piBridge')
-  assert.equal(registered.length, 2)
-  assert.equal(registered[0].options.name, 'main')
-  assert.equal(registered[0].options.key, 'pi-bridge')
-  assert.equal(registered[1].options.name, 'sidebar.panellist')
-  assert.equal(registered[1].options.id, 'pi-bridge')
-  assert.equal(registered[1].options.order, 20)
-  assert.equal(registered[1].options.label(), 'panel')
+  assert.equal(dictionaries[0].namespace, 'bridge')
+
+  const bySlot = Object.fromEntries(registered.map((entry) => [entry.options.name, entry.options]))
+  assert.equal(bySlot.main.key, 'bridge')
+  assert.equal(bySlot['sidebar.panellist'].id, 'bridge')
+  assert.equal(bySlot['sidebar.panellist'].label(), 'panel')
+  assert.equal(bySlot['shell.overlay'].id, 'bridge.settings')
 })
 
-test('helper text extraction and JSON formatting are safe', () => {
+test('bridge dictionaries keep the panel named Bridge in both locales', () => {
   const exports = moduleExports()
-  const { textOf, shortPath, formatTime, safeJson } = exports.__test
+  const dictionaries = []
+  exports.apply({
+    effect: (factory) => factory(),
+    locale: { register: (namespace, dict) => dictionaries.push(dict), bind: () => (key) => key },
+    slots: { inject: () => {}, register: () => () => {} },
+  })
+  assert.equal(dictionaries[0].zh.panel, 'Bridge')
+  assert.equal(dictionaries[0].en.panel, 'Bridge')
+  assert.equal(dictionaries[0].zh.settings.includes('桥接'), true)
+})
+
+test('helper text extraction and formatting are safe', () => {
+  const exports = moduleExports()
+  const { textOf, formatTime, formatBytes, safeJson } = exports.__test
   assert.equal(textOf([{ type: 'text', text: 'a' }, { type: 'image', data: 'x' }, { type: 'text', text: 'b' }]), 'ab')
   assert.equal(textOf('plain'), 'plain')
-  assert.equal(shortPath('/home/sang/src/x'), '/home/sang/src/x')
   assert.equal(formatTime(undefined), '')
+  assert.equal(formatBytes(1536), '1.5 KB')
+  assert.equal(formatBytes(2 * 1024 * 1024), '2.0 MB')
   const cyclic = {}
   cyclic.self = cyclic
   assert.match(safeJson(cyclic), /circular/i)
