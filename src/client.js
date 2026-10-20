@@ -488,7 +488,17 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function hasRenderableContent(message) {
+      const content = message?.content
+      if (typeof content === 'string') return content.trim() !== ''
+      if (!Array.isArray(content)) return false
+      return content.some((block) => block && (block.type === 'text' || block.type === 'thinking' || block.type === 'image'))
+    }
+
     function AssistantTurn({ message, streaming, t }) {
+      // An assistant message that only carries tool calls is presented by the
+      // tool rows, not as an empty agent turn.
+      if (!streaming && !hasRenderableContent(message)) return null
       const body = h(AssistantContent, { message, streaming, t })
       const text = textOf(message?.content)
       return h(
@@ -903,18 +913,20 @@ window.__ModuleLoader__.load({
             { kind: 'tool', id: record.toolCallId ?? `tool-${Date.now()}`, toolCallId: record.toolCallId, name: record.toolName, arguments: record.args ?? record.arguments, output: '', status: 'running' },
           ])
         } else if (event === 'tool_execution_update') {
+          const partial = typeof record.partialResult === 'string' ? record.partialResult : textOf(record.partialResult?.content)
           setTranscript((current) =>
             current.map((item) =>
-              item.kind === 'tool' && item.id === record.toolCallId
-                ? { ...item, output: typeof record.delta === 'string' ? (item.output ?? '') + record.delta : item.output }
+              item.kind === 'tool' && item.toolCallId === record.toolCallId
+                ? { ...item, output: partial !== '' ? partial : item.output }
                 : item,
             ),
           )
         } else if (event === 'tool_execution_end') {
+          const output = typeof record.result === 'string' ? record.result : textOf(record.result?.content)
           setTranscript((current) =>
             current.map((item) =>
-              item.kind === 'tool' && item.id === record.toolCallId
-                ? { ...item, status: record.isError === true ? 'error' : 'done', output: typeof record.result === 'string' ? record.result : item.output }
+              item.kind === 'tool' && item.toolCallId === record.toolCallId
+                ? { ...item, status: record.isError === true ? 'error' : 'done', output: output !== '' ? output : item.output }
                 : item,
             ),
           )
