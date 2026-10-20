@@ -8,7 +8,7 @@
  * needs the durable view, and keeping the parser here avoids a hard runtime
  * dependency on one Pi version.
  */
-import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs'
+import { closeSync, createReadStream, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 
@@ -193,28 +193,75 @@ export function collectSessionFiles(root = piSessionsRoot()) {
   })
 }
 
+const SUMMARY_CHUNK_BYTES = 128 * 1024
+
 /**
- * List Pi sessions for the sidebar. This reads only the current branch and
- * clips previews, so a 1000-session home remains responsive.
+ * Read a cheap list summary without parsing the whole session.
+ *
+ * Session files routinely reach several megabytes. The sidebar needs only the
+ * header, the first user message, the last session name, and mtime, so this
+ * reads a bounded prefix and suffix. The full branch is parsed only after the
+ * user opens one session.
  */
+export function readPiSessionSummary(filePath) {
+  const stats = statSync(filePath)
+  if (stats.size <= SUMMARY_CHUNK_BYTES * 2) return summarizeSessionText(readFileSync(filePath, 'utf8'), filePath, stats)
+
+  const fd = openSync(filePath, 'r')
+  let head
+  let tail
+  try {
+    head = Buffer.alloc(SUMMARY_CHUNK_BYTES)
+    const headBytes = readSync(fd, head, 0, SUMMARY_CHUNK_BYTES, 0)
+    tail = Buffer.alloc(SUMMARY_CHUNK_BYTES)
+    const tailBytes = readSync(fd, tail, 0, SUMMARY_CHUNK_BYTES, stats.size - SUMMARY_CHUNK_BYTES)
+    const headText = head.subarray(0, headBytes).toString('utf8')
+    const tailText = tail.subarray(0, tailBytes).toString('utf8')
+    return summarizeSessionText(
+      headText.slice(0, headText.lastIndexOf('\n') + 1) + '\n' + tailText.slice(tailText.indexOf('\n') + 1),
+      filePath,
+      stats,
+    )
+  } finally {
+    closeSync(fd)
+  }
+}
+
+function summarizeSessionText(text, filePath, stats) {
+  const parsed = text
+    .split('\n')
+    .map(parseLine)
+    .filter((item) => item !== undefined)
+  const header = parsed.find((item) => item !== null && item.type === 'session')
+  if (header === undefined) throw new Error('not a Pi session file: missing session header')
+  let name
+  let firstUser
+  for (const entry of parsed) {
+    if (entry === null || typeof entry !== 'object') continue
+    if (entry.type === 'session_info' && typeof entry.name === 'string') name = entry.name
+    if (firstUser === undefined && entry.type === 'message' && entry.message?.role === 'user') firstUser = entry.message
+  }
+  return {
+    key: sessionKey(filePath),
+    id: typeof header.id === 'string' ? header.id : undefined,
+    name,
+    cwd: typeof header.cwd === 'string' ? header.cwd : undefined,
+    created: typeof header.timestamp === 'string' ? header.timestamp : undefined,
+    modified: stats.mtime.toISOString(),
+    bytes: stats.size,
+    messageCount: undefined,
+    firstMessage: clip(textOfContent(firstUser?.content)),
+  }
+}
+
+/** List Pi sessions for the sidebar without opening full histories. */
 export async function listPiSessions(root = piSessionsRoot(), options = {}) {
   const limit = Math.max(1, Math.min(options.limit ?? 200, 1000))
   const sessions = []
   for (const file of collectSessionFiles(root)) {
     if (sessions.length >= limit) break
     try {
-      const session = await readPiSession(file)
-      sessions.push({
-        key: session.key,
-        id: session.id,
-        name: session.name,
-        cwd: session.cwd,
-        created: session.created,
-        modified: session.modified,
-        bytes: session.bytes,
-        messageCount: session.messageCount,
-        firstMessage: session.firstMessage,
-      })
+      sessions.push(readPiSessionSummary(file))
     } catch {
       // A concurrently-written or malformed file should not hide every other
       // session from the list.

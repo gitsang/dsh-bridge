@@ -385,9 +385,10 @@ window.__ModuleLoader__.load({
     }
 
     function ExtensionDialog({ request, t, onRespond }) {
-      const [value, setValue] = useState(request.method === 'editor' ? request.prefill ?? '' : '')
+      const initial = request !== null && request.method === 'editor' ? request.prefill ?? '' : ''
+      const [value, setValue] = useState(initial)
       useEffect(() => {
-        setValue(request.method === 'editor' ? request.prefill ?? '' : '')
+        setValue(request !== null && request.method === 'editor' ? request.prefill ?? '' : '')
       }, [request])
       if (request === null) return null
       const title = request.title ?? request.message ?? t('dialogConfirm')
