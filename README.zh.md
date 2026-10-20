@@ -57,6 +57,10 @@ Pi 的 RPC 模式是稳定集成点：stdin 收 JSON 命令，stdout 发响应�
 
 ## 界面
 
+![Bridge 面板](docs/bridge-chat.png)
+
+![Bridge 设置](docs/bridge-settings.png)
+
 侧栏按钮是 **Bridge**，右侧齿轮打开桥接设置：切换后端（目前仅 Pi）、指定
 会话根目录、指定 Pi 可执行文件、开关离线启动。面板复用 dsh 自己的
 `dsh-client-ui-primitives`、`--dsw-*` token、Markdown 渲染和输入卡片样式。

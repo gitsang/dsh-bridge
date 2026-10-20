@@ -1,6 +1,6 @@
 {
   "name": "@gitsang/dsh-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Bridge Pi Coding Agent sessions into the DeepSeek Harness (dsh) web UI.",
   "license": "MIT",
   "type": "module",

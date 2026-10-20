@@ -79,6 +79,10 @@ Environment variables read by the host plugin:
 
 ## Browser panel
 
+![Bridge panel](docs/bridge-chat.png)
+
+![Bridge settings](docs/bridge-settings.png)
+
 The client half registers:
 
 - a **Bridge** entry in the sidebar panel list;
