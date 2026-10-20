@@ -456,8 +456,6 @@ window.__ModuleLoader__.load({
           nodes.push(h('div', { key: `t${index}`, className: 'dshBridge_assistantBody' }, h(Markdown, { text: block.text ?? '', streaming, t })))
         } else if (block.type === 'thinking') {
           nodes.push(h(ThinkingRow, { key: `k${index}`, text: block.thinking ?? '', running: streaming, t }))
-        } else if (block.type === 'toolCall') {
-          nodes.push(h(ToolRow, { key: `c${index}`, item: { name: block.name, arguments: block.arguments, status: streaming ? 'running' : 'done' }, t }))
         } else if (block.type === 'image') {
           const source = block.source ?? {}
           const src = typeof source.data === 'string' ? `data:${source.mediaType ?? 'image/png'};base64,${source.data}` : block.data
@@ -803,11 +801,36 @@ window.__ModuleLoader__.load({
 
       const historyItems = useCallback((session) => {
         const messages = Array.isArray(session?.messages) ? session.messages : []
-        return messages.map((message, index) => ({
-          kind: 'message',
-          id: `history-${index}-${message.timestamp ?? ''}`,
-          message,
-        }))
+        // Tool results are not conversation turns: fold each into the matching
+        // tool call so the transcript has one row per call, as the shipped chat
+        // surface does.
+        const results = new Map()
+        for (const message of messages) {
+          if (message?.role === 'toolResult' && typeof message.toolCallId === 'string') {
+            results.set(message.toolCallId, message)
+          }
+        }
+        const items = []
+        messages.forEach((message, index) => {
+          if (message?.role === 'toolResult') return
+          const id = `history-${index}-${message.timestamp ?? ''}`
+          items.push({ kind: 'message', id, message })
+          if (message?.role !== 'assistant' || !Array.isArray(message.content)) return
+          message.content.forEach((block, blockIndex) => {
+            if (!block || block.type !== 'toolCall') return
+            const result = results.get(block.id)
+            items.push({
+              kind: 'tool',
+              id: `history-tool-${index}-${blockIndex}-${block.id ?? ''}`,
+              toolCallId: block.id,
+              name: block.name,
+              arguments: block.arguments,
+              output: result === undefined ? null : textOf(result.content),
+              status: result === undefined ? 'done' : result.isError === true ? 'error' : 'done',
+            })
+          })
+        })
+        return items
       }, [])
 
       const openSession = useCallback(
@@ -859,6 +882,17 @@ window.__ModuleLoader__.load({
           if (message.role === 'assistant') setStreamingMessage(null)
           // The system prompt is harness plumbing, never part of the transcript.
           if (message.role === 'system') return
+          if (message.role === 'toolResult') {
+            const output = textOf(message.content)
+            setTranscript((current) =>
+              current.map((item) =>
+                item.kind === 'tool' && item.toolCallId === message.toolCallId
+                  ? { ...item, status: message.isError === true ? 'error' : 'done', output }
+                  : item,
+              ),
+            )
+            return
+          }
           setTranscript((current) => [
             ...current,
             { kind: 'message', id: `${message.role}-${message.timestamp ?? Date.now()}-${current.length}`, message },
@@ -866,7 +900,7 @@ window.__ModuleLoader__.load({
         } else if (event === 'tool_execution_start') {
           setTranscript((current) => [
             ...current,
-            { kind: 'tool', id: record.toolCallId ?? `tool-${Date.now()}`, name: record.toolName, arguments: record.args ?? record.arguments, output: '', status: 'running' },
+            { kind: 'tool', id: record.toolCallId ?? `tool-${Date.now()}`, toolCallId: record.toolCallId, name: record.toolName, arguments: record.args ?? record.arguments, output: '', status: 'running' },
           ])
         } else if (event === 'tool_execution_update') {
           setTranscript((current) =>
@@ -1160,13 +1194,6 @@ window.__ModuleLoader__.load({
                           if (item.kind === 'tool') return h(ToolItem, { key: item.id, item, t })
                           if (item.message?.role === 'user') return h(UserTurn, { key: item.id, message: item.message, t })
                           if (item.message?.role === 'assistant') return h(AssistantTurn, { key: item.id, message: item.message, t })
-                          if (item.message?.role === 'toolResult') {
-                            return h(AssistantTurn, {
-                              key: item.id,
-                              message: { role: 'assistant', content: item.message.content, model: item.message.toolName },
-                              t,
-                            })
-                          }
                           return null
                         }),
                         streamingMessage !== null ? h(AssistantTurn, { key: 'streaming', message: streamingMessage, streaming: true, t }) : null,
