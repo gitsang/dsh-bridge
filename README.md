@@ -14,8 +14,8 @@ session layer are the product; the UI will grow in later commits.
 
 - [x] Read Pi session files (`~/.pi/agent/sessions/**/*.jsonl`)
 - [x] Current-branch reconstruction, tool-call extraction, list previews
-- [ ] Pi RPC process attachment
-- [ ] Event fan-out and prompt/steer/abort routes
+- [x] Pi RPC process attachment
+- [x] Event fan-out and prompt/steer/abort routes
 - [ ] dsh browser panel
 - [ ] Install into a dsh profile
 
@@ -36,13 +36,36 @@ Pi's RPC mode is the stable integration point: commands are JSON lines on
 stdin, responses and events are JSON lines on stdout. The bridge never writes
 the session file itself, so it cannot corrupt Pi's branch structure.
 
+## Host routes
+
+All routes sit below dsh's authenticated `/api` channel and inherit its
+Host/Origin fence and signed browser cookie.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/pi-bridge/sessions` | List Pi sessions (read-only JSONL scan) |
+| `GET /api/pi-bridge/session?key=…` | One session with current-branch history |
+| `GET /api/pi-bridge/capabilities` | Bridge protocol and live attachment table |
+| `POST /api/pi-bridge/attach` | Spawn `pi --mode rpc --session <file>` |
+| `POST /api/pi-bridge/detach` | Close the owned Pi child |
+| `GET /api/pi-bridge/state?key=…` | `get_state` snapshot |
+| `GET /api/pi-bridge/events?key=…` | SSE stream of Pi events and extension UI |
+| `POST /api/pi-bridge/prompt` | Prompt, steer, or follow up |
+| `POST /api/pi-bridge/abort` | Abort the running turn |
+| `POST /api/pi-bridge/ui-response` | Answer a blocking extension dialog |
+| `GET /api/pi-bridge/models?key=…` | Provider/model catalog |
+| `GET /api/pi-bridge/history-message?key=…` | Concatenated plain-text history |
+
+A session is keyed by a base64url encoding of its absolute JSONL path. The Host
+rejects any key that resolves outside the configured Pi sessions root.
+
 ## Configuration
 
 Environment variables read by the host plugin:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PI_BIN` | `pi` | Pi executable, resolved via `PATH` |
+| `PI_BIN` | `pi` | Pi executable, resolved via `PATH`; when absent the globally installed `@earendil-works/pi-coding-agent` package is used |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi config directory |
 | `PI_CODING_AGENT_SESSION_DIR` | `$PI_CODING_AGENT_DIR/sessions` | Session storage root |
 
