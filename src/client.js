@@ -1367,11 +1367,15 @@ window.__ModuleLoader__.load({
           function BridgeSettingsAnchor() {
             const [open, setOpen] = useState(false)
             const [config, setConfig] = useState(null)
+            const [attached, setAttached] = useState(false)
             const openSettings = useCallback(async () => {
               try {
-                setConfig(await api('settings'))
+                const [settings, capabilities] = await Promise.all([api('settings'), api('capabilities')])
+                setConfig(settings)
+                setAttached(Array.isArray(capabilities?.attachments) && capabilities.attachments.length > 0)
               } catch {
                 setConfig(null)
+                setAttached(false)
               }
               setOpen(true)
             }, [])
@@ -1384,7 +1388,7 @@ window.__ModuleLoader__.load({
                 onClose: () => setOpen(false),
                 t,
                 initial: config,
-                disabled: false,
+                disabled: attached,
                 onSaved: (body) => {
                   setConfig(body)
                   // The sessions list and the attach roster read the same
