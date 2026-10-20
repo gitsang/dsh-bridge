@@ -39,6 +39,7 @@ Pi 的 RPC 模式是稳定集成点：stdin 收 JSON 命令，stdout 发响应�
 | 路由 | 用途 |
 | --- | --- |
 | `GET /api/pi-bridge/sessions` | 列出 Pi 会话（只读 JSONL 摘要） |
+| `GET/PUT /api/pi-bridge/settings` | 读取或修改桥接后端与 Pi 设置 |
 | `GET /api/pi-bridge/session?key=…` | 单个会话及当前分支历史 |
 | `GET /api/pi-bridge/capabilities` | 协议版本与当前 attachment 表 |
 | `POST /api/pi-bridge/attach` | 启动 `pi --mode rpc --session <file>` |
@@ -53,6 +54,15 @@ Pi 的 RPC 模式是稳定集成点：stdin 收 JSON 命令，stdout 发响应�
 
 会话 key 是绝对 JSONL 路径的 base64url 编码；Host 会拒绝解析到 Pi 会话根目录
 之外的 key。
+
+## 界面
+
+侧栏按钮是 **Bridge**，右侧齿轮打开桥接设置：切换后端（目前仅 Pi）、指定
+会话根目录、指定 Pi 可执行文件、开关离线启动。面板复用 dsh 自己的
+`dsh-client-ui-primitives`、`--dsw-*` token、Markdown 渲染和输入卡片样式。
+
+设置保存在 `$DSH_HOME/pi-bridge.json`（0600）；有 Pi 子进程附加时 Host 会
+拒绝修改后端或会话根目录。
 
 ## 安装
 

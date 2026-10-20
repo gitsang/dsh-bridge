@@ -8,8 +8,12 @@ streams agent events into dsh, and sends prompts, steering messages, and aborts
 back to Pi.
 
 The browser panel lists Pi sessions, shows the current branch, attaches a Pi
-child on demand, renders streaming assistant text and tool calls, sends
+child on demand, renders streaming Markdown, thinking and tool calls, sends
 prompts, aborts a turn, and forwards blocking extension dialogs.
+
+The page uses the same `dsh-client-ui-primitives` and `--dsw-*` tokens as the
+shipped chat surface (centred content column, dsh Markdown, disclosure rows,
+composer card).
 
 ## Status
 
@@ -17,7 +21,8 @@ prompts, aborts a turn, and forwards blocking extension dialogs.
 - [x] Current-branch reconstruction, tool-call extraction, list previews
 - [x] Pi RPC process attachment
 - [x] Event fan-out and prompt/steer/abort routes
-- [x] dsh browser panel (Pi Sessions main panel + sidebar entry)
+- [x] dsh browser panel (Bridge main panel + sidebar entry + settings gear)
+- [x] Persisted backend selection (Pi only for now)
 - [ ] Install into a dsh profile
 
 ## How it works
@@ -45,6 +50,7 @@ Host/Origin fence and signed browser cookie.
 | Route | Purpose |
 | --- | --- |
 | `GET /api/pi-bridge/sessions` | List Pi sessions (read-only JSONL scan) |
+| `GET/PUT /api/pi-bridge/settings` | Read or update the backend and Pi settings |
 | `GET /api/pi-bridge/session?key=…` | One session with current-branch history |
 | `GET /api/pi-bridge/capabilities` | Bridge protocol and live attachment table |
 | `POST /api/pi-bridge/attach` | Spawn `pi --mode rpc --session <file>` |
@@ -75,9 +81,16 @@ Environment variables read by the host plugin:
 
 The client half registers:
 
-- a **Pi Sessions** entry in the sidebar panel list;
+- a **Bridge** entry in the sidebar panel list;
+- a settings gear pinned to that row, opening the backend picker;
 - a `main` panel that renders the session list, transcript, composer, and
   extension dialogs.
+
+Backend settings live in `$DSH_HOME/pi-bridge.json` (mode 0600). `backend`
+selects the agent backend (Pi is the only entry), `pi.sessionsRoot` overrides
+the session directory, `pi.binary` overrides `PI_BIN`, and `pi.offline` starts
+attached Pi with `PI_OFFLINE=1`. The Host refuses backend or root changes while
+a Pi child is attached.
 
 It talks only to the host routes above, with `credentials: 'same-origin'`.
 Live updates arrive over `EventSource`; the host keeps a bounded event ring so
