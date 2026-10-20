@@ -8,9 +8,16 @@
  */
 import { PiAttachment, messageText } from './pi-attachment.js'
 import {
+  BACKENDS,
+  normalizeSettings,
+  readSettings,
+  resolveSessionsRoot,
+  validateSettingsPatch,
+  writeSettings,
+} from './settings.js'
+import {
   listPiSessions,
   pathFromSessionKey,
-  piSessionsRoot,
   readPiSession,
   sessionKey,
 } from './session-store.js'
@@ -171,12 +178,22 @@ class AttachmentSession {
 export function apply(ctx) {
   const attachments = new Map()
   const logger = ctx.logger
+  let settings = readSettings(process.env, logger)
+
+  const sessionsRoot = () => resolveSessionsRoot(settings, process.env)
 
   const sessionFor = async (key) => {
-    const file = pathFromSessionKey(key)
+    const file = pathFromSessionKey(key, sessionsRoot())
     const session = await readPiSession(file)
     return { file, session }
   }
+
+  /** Settings view shared with the browser: values plus the backend menu. */
+  const settingsView = () => ({
+    settings,
+    backends: BACKENDS,
+    sessionsRoot: sessionsRoot(),
+  })
 
   const attachmentFor = (key) => {
     const live = attachments.get(key)
@@ -188,7 +205,12 @@ export function apply(ctx) {
     const existing = attachments.get(key)
     if (existing !== undefined) return existing
     const { file, session } = await sessionFor(key)
-    const attachment = new PiAttachment({ file, cwd: session.cwd, env: process.env })
+    const env = {
+      ...process.env,
+      ...(settings.pi.binary === null ? {} : { PI_BIN: settings.pi.binary }),
+      ...(settings.pi.offline ? { PI_BRIDGE_OFFLINE: '1' } : { PI_BRIDGE_OFFLINE: '0' }),
+    }
+    const attachment = new PiAttachment({ file, cwd: session.cwd, env })
     attachment.on('exit', (info) => {
       if (info?.stderr) logger?.warn?.(`pi-bridge: Pi exited for ${file}: ${info.stderr.trim()}`)
     })
@@ -229,7 +251,7 @@ export function apply(ctx) {
       requestBody: 'buffered',
       fetch: async () => {
         try {
-          const root = piSessionsRoot()
+          const root = sessionsRoot()
           const sessions = await listPiSessions(root)
           return json(200, { ok: true, root, sessions })
         } catch (error) {
@@ -264,7 +286,8 @@ export function apply(ctx) {
         }))
         return json(200, {
           ok: true,
-          sessionsRoot: piSessionsRoot(),
+          backend: settings.backend,
+          sessionsRoot: sessionsRoot(),
           attachments: live,
           protocol: 1,
         })
@@ -376,6 +399,29 @@ export function apply(ctx) {
           return json(202, { ok: true })
         } catch (error) {
           return failure(error, error.status ?? 409)
+        }
+      },
+    },
+    {
+      path: `${ROUTE}/settings`,
+      methods: ['GET', 'PUT'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        try {
+          if (request.method === 'GET') return json(200, { ok: true, ...settingsView() })
+          const body = await readJson(request)
+          const next = validateSettingsPatch(body, settings)
+          if (next.backend !== settings.backend && attachments.size > 0) {
+            return json(409, { ok: false, error: 'detach every Pi session before switching the backend' })
+          }
+          if (next.pi.sessionsRoot !== settings.pi.sessionsRoot && attachments.size > 0) {
+            return json(409, { ok: false, error: 'detach every Pi session before changing the sessions root' })
+          }
+          settings = writeSettings(next, process.env)
+          logger?.info?.(`pi-bridge: backend=${settings.backend} sessionsRoot=${sessionsRoot()}`)
+          return json(200, { ok: true, ...settingsView() })
+        } catch (error) {
+          return failure(error, error.status ?? 500)
         }
       },
     },

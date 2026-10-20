@@ -71,6 +71,7 @@ test('registers the full Pi bridge route table', () => {
     '/api/pi-bridge/prompt',
     '/api/pi-bridge/session',
     '/api/pi-bridge/sessions',
+    '/api/pi-bridge/settings',
     '/api/pi-bridge/state',
     '/api/pi-bridge/ui-response',
   ])
@@ -161,4 +162,75 @@ test('rejects unknown session keys', async () => {
   assert.equal(response.status, 400)
   const body = await response.json()
   assert.match(body.error, /outside the Pi sessions root/)
+})
+
+test('reads and updates backend settings without touching a live attachment', async () => {
+  const { root } = await fixtureSession()
+  const home = await mkdtemp(join(tmpdir(), 'pi-bridge-home-'))
+  const previousRoot = process.env.PI_CODING_AGENT_SESSION_DIR
+  const previousHome = process.env.DSH_HOME
+  process.env.PI_CODING_AGENT_SESSION_DIR = root
+  process.env.DSH_HOME = home
+  try {
+    const { ctx, routes } = host()
+    apply(ctx)
+    const initial = await (await call(routes, 'settings')).json()
+    assert.equal(initial.ok, true)
+    assert.equal(initial.settings.backend, 'pi')
+    assert.deepEqual(initial.backends.map((entry) => entry.id), ['pi'])
+    assert.equal(initial.sessionsRoot, root)
+
+    const updated = await (await call(routes, 'settings', {
+      method: 'PUT',
+      body: JSON.stringify({ backend: 'pi', pi: { sessionsRoot: root, offline: false } }),
+      headers: { 'content-type': 'application/json' },
+    })).json()
+    assert.equal(updated.ok, true)
+    assert.equal(updated.settings.pi.offline, false)
+    assert.equal(updated.sessionsRoot, root)
+
+    const rejected = await call(routes, 'settings', {
+      method: 'PUT',
+      body: JSON.stringify({ backend: 'not-a-backend' }),
+      headers: { 'content-type': 'application/json' },
+    })
+    assert.equal(rejected.status, 400)
+  } finally {
+    if (previousRoot === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR
+    else process.env.PI_CODING_AGENT_SESSION_DIR = previousRoot
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+  }
+})
+
+test('a configured sessions root gates session keys', async () => {
+  const first = await fixtureSession()
+  const second = await fixtureSession()
+  const home = await mkdtemp(join(tmpdir(), 'pi-bridge-home-'))
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  try {
+    const { ctx, routes } = host()
+    apply(ctx)
+    await call(routes, 'settings', {
+      method: 'PUT',
+      body: JSON.stringify({ pi: { sessionsRoot: first.root } }),
+      headers: { 'content-type': 'application/json' },
+    })
+    const listed = await (await call(routes, 'sessions')).json()
+    assert.equal(listed.sessions.length, 1)
+    const key = listed.sessions[0].key
+
+    await call(routes, 'settings', {
+      method: 'PUT',
+      body: JSON.stringify({ pi: { sessionsRoot: second.root } }),
+      headers: { 'content-type': 'application/json' },
+    })
+    const response = await call(routes, `session?key=${encodeURIComponent(key)}`)
+    assert.equal(response.status, 400)
+    assert.match((await response.json()).error, /outside the Pi sessions root/)
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+  }
 })
