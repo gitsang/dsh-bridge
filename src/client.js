@@ -256,6 +256,13 @@ window.__ModuleLoader__.load({
       return path
     }
 
+    function formatBytes(value) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return ''
+      if (value < 1024) return `${value} B`
+      if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`
+      return `${(value / (1024 * 1024)).toFixed(1)} MB`
+    }
+
     function formatTime(value) {
       if (typeof value !== 'string' && typeof value !== 'number') return ''
       const time = new Date(value)
@@ -832,7 +839,7 @@ window.__ModuleLoader__.load({
                         h(
                           'div',
                           { className: 'dshPi_rowMeta' },
-                          h('span', null, t('messages', { count: session.messageCount ?? 0 })),
+                          h('span', null, formatBytes(session.bytes)),
                           session.modified ? h('span', null, formatTime(session.modified)) : null,
                         ),
                         session.firstMessage ? h('div', { className: 'dshPi_rowPreview' }, session.firstMessage) : null,
@@ -972,7 +979,7 @@ window.__ModuleLoader__.load({
 
     exports.apply = apply
     exports.inject = ['slots', 'locale']
-    exports.__test = { textOf, shortPath, formatTime, safeJson }
+    exports.__test = { textOf, shortPath, formatTime, formatBytes, safeJson }
     return module.exports
   },
 })

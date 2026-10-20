@@ -38,6 +38,14 @@ export function resolvePiCommand(env = process.env) {
   if (typeof env.PI_BIN === 'string' && env.PI_BIN !== '') {
     return { command: env.PI_BIN, prefixArgs: [] }
   }
+  // The supported Pi installation keeps a stable launcher beside the agent
+  // state directory. Prefer it over any copy bundled into another package:
+  // a managed launcher knows its own runtime and tolerates a read-only agent
+  // directory, while an older bundled copy may exit on a settings lock.
+  const agentDir = env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent')
+  for (const candidate of [join(agentDir, 'bin', 'pi'), join(homedir(), '.pi', 'agent', 'bin', 'pi')]) {
+    if (existsSync(candidate)) return { command: candidate, prefixArgs: [] }
+  }
   try {
     const packageFile = require.resolve('@earendil-works/pi-coding-agent/package.json')
     const cli = join(dirname(packageFile), 'dist', 'cli.js')
@@ -198,9 +206,14 @@ export class PiAttachment extends EventEmitter {
     if (this.exited) return
     this.exited = true
     const reason = error ?? info ?? {}
+    const detail = this.stderr.trim()
     for (const entry of this.pending.values()) {
       clearTimeout(entry.timer)
-      const failure = new Error('Pi process exited before responding')
+      const failure = new Error(
+        detail === ''
+          ? 'Pi process exited before responding'
+          : `Pi process exited before responding: ${detail}`,
+      )
       failure.cause = reason
       entry.reject(failure)
     }

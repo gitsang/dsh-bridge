@@ -16,6 +16,7 @@
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
+    "icon.svg",
     "LICENSE"
   ],
   "scripts": {
@@ -45,5 +46,10 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.4"
+  },
+  "icon": "./icon.svg",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gitsang/dsh-bridge.git"
   }
 }

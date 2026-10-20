@@ -189,6 +189,9 @@ export function apply(ctx) {
     if (existing !== undefined) return existing
     const { file, session } = await sessionFor(key)
     const attachment = new PiAttachment({ file, cwd: session.cwd, env: process.env })
+    attachment.on('exit', (info) => {
+      if (info?.stderr) logger?.warn?.(`pi-bridge: Pi exited for ${file}: ${info.stderr.trim()}`)
+    })
     await attachment.start()
     const live = new AttachmentSession(attachment, {
       key,
