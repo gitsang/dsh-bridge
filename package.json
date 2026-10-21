@@ -20,7 +20,11 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test --test-concurrency=1 test/*.test.js"
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "test:secrets": "./tests/check-secrets.sh",
+    "test:live": "node tests/live-smoke.mjs",
+    "test:live:attach": "DSH_SMOKE_ATTACH=1 node tests/live-smoke.mjs",
+    "setup:live": "node tests/live-setup.mjs"
   },
   "keywords": [
     "dsh",

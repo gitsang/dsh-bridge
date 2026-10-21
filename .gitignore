@@ -3,5 +3,9 @@ node_modules/
 .DS_Store
 .pi-bridge/
 
+# Local test artifacts and any exported auth state.
 .cookie
 .keys
+.smoke/
+tests/.artifacts/
+*.har
