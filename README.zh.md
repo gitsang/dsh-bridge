@@ -1,124 +1,182 @@
 # dsh-bridge
 
-把 **Pi Coding Agent** 的会话桥接进 **DeepSeek Harness (dsh)** Web UI。
+把外部 coding agent 的会话桥接进 **DeepSeek Harness (dsh)** Web UI。
 
-当前仓库只实现 **Pi 桥接**：dsh 的 Host 插件列出 Pi 会话、按需启动
-`pi --mode rpc` 子进程、把 Pi 事件通过 SSE 推给浏览器，并把提问、steer、
-abort、扩展对话框回传给 Pi。
+Bridge 采用**实例模型**：用户可以先创建多个已保存的桥接，每个桥接有自己的
+名称、传输模式、引擎和配置。同一个引擎可以对应多个桥接，比如两个 Pi 桥接分别
+指向不同的 Session 根目录。左上角 dsh 图标的下拉框固定保留 **本机**（原生 dsh
+对话），并列出所有已配置桥接；选择某个桥接后，侧边栏和右侧对话区会一起切换到
+该桥接。
 
-## 状态
+Pi 是第一个完整支持的引擎。Codex、OpenCode、远程 DSH 会出现在新增桥接表单里，
+在适配器接入前明确标记为暂不可用。
 
-- [x] 读取 Pi 会话文件（`~/.pi/agent/sessions/**/*.jsonl`）
-- [x] 当前分支还原、tool call 提取、列表摘要
-- [x] 附加到 Pi RPC 进程
-- [x] 事件广播与 prompt / steer / abort 路由
-- [x] dsh 浏览器面板（Pi Sessions 主面板 + 侧栏入口）
-- [x] 安装进 dsh web profile
+## 当前状态
 
-## 工作方式
+- [x] 桥接实例模型（`bridges[]`，不再是全局“当前后端”）
+- [x] 同一引擎可配置多个桥接，各自独立配置
+- [x] 设置悬浮层内新增 / 编辑 / 删除桥接
+- [x] CLI / Web 模式与按模式过滤的引擎列表
+- [x] Pi 引擎完整可用：JSONL 会话、RPC attach、事件归一化、prompt
+- [x] 左上角「本机 + 已配置桥接」下拉框
+- [x] 选中桥接后由侧边栏直接展示该桥接的工作区 / 会话
+- [x] dsh 风格对话界面与 composer
+- [ ] Codex 引擎适配器
+- [ ] OpenCode 引擎适配器
+- [ ] 远程 DSH Web 引擎适配器
+
+## 交互
+
+### 左上角切换器
+
+点击左上角 dsh 品牌图标展开：
 
 ```text
-Browser
-  └─ dsh web
-       └─ @gitsang/dsh-bridge（Host 插件）
-            ├─ session-store.js   只读扫描 Pi JSONL
-            └─ pi-attachment.js   spawn `pi --mode rpc --session <file>`
-                 │ stdin/stdout JSONL
-                 ▼
-            Pi Coding Agent
+本机                      回到 DeepSeek Harness
+────────────────────────────────────────────────────
+工作 Pi                   CLI · Pi
+临时 Pi                   CLI · Pi
+公司 Codex                CLI · Codex          （适配器待接入）
+Bridge 设置
 ```
 
-Pi 的 RPC 模式是稳定集成点：stdin 收 JSON 命令，stdout 发响应和事件。
-桥接层从不直接写 session 文件，因此不会破坏 Pi 的 branch 结构。
+- **本机**：回到 dsh 原生对话，同时恢复原生侧边栏。
+- 每个已配置桥接都是独立一行；同一个引擎出现多行是正常的。
+- 未接入的引擎仍然展示，但不可选择。
+- **Bridge 设置**：在当前页面上悬浮打开设置弹窗，不跳转页面。
+
+### 设置悬浮层
+
+设置弹窗左侧是导航，右侧是内容：
+
+- **管理桥接**：列出已配置桥接，可新增、编辑、删除。
+- 新增桥接：
+  - **桥接模式**：CLI / Web
+  - **引擎**：
+    - CLI → Pi、Codex、OpenCode
+    - Web → DSH
+  - 不同引擎展示不同配置项。Pi 当前包括：
+    - Session 根目录
+    - Bin 地址
+    - 离线启动
+  - DSH 包括服务地址和访问令牌。令牌不会出现在 API 响应里；编辑时留空会保留原值。
+
+### 选中桥接后
+
+1. 打开 Bridge 主面板；
+2. 用一个 `sidebar.workspaces` occupant 替换原生工作区浏览器，展示该桥接的
+   工作区 / 会话树；
+3. 右侧加载会话历史；
+4. composer 和实时流继续绑定该桥接。
+
+选择 **本机** 后释放 Bridge 侧边栏 occupant，恢复 dsh 原生侧边栏。
+
+## 架构
+
+```text
+Browser (dsh web)
+  ├─ 品牌下拉框 ───────────> GET /api/bridge/settings
+  ├─ Bridge 设置悬浮层 ────> POST/PUT/DELETE /api/bridge/bridges
+  └─ Bridge 主面板 ────────> GET /api/bridge/sessions?bridge=<id>
+                              /api/bridge/{session,attach,prompt,events,…}
+
+Host bridge core
+  ├─ 桥接实例存储（bridge.json）
+  ├─ 引擎注册表（Pi / Codex / OpenCode / DSH）
+  ├─ 不透明 key（`bridgeId.base64url(nativeKey)`）
+  └─ 通用 attachment + SSE 生命周期
+
+Engine adapters
+  ├─ Pi（已实现）
+  ├─ Codex（待接入）
+  ├─ OpenCode（待接入）
+  └─ DSH（待接入）
+```
+
+Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 import 任何
+引擎或 CLI 实现。
+
+### 引擎适配器契约
+
+| 成员 | 作用 |
+| --- | --- |
+| `id`, `label`, `mode` | 身份与 `cli`/`web` 传输类型 |
+| `available`, `unavailableReason` | 未完成适配时如实显示状态 |
+| `capabilities` | UI 可开放的能力 |
+| `configFields`, `defaultConfig()` | 新增/编辑表单字段 |
+| `listSessions(config, env)` | 工作区 / 会话摘要 |
+| `readSession(nativeKey, config, env)` | 归一化历史 |
+| `createAttachment({session, config, env})` | 实时 agent 句柄 |
+| `normalizeEvent(nativeEvent)` | 原生事件 → Bridge 事件 |
+
+统一事件为 `agent-start`、`agent-end`、`message-start`、`message-update`、
+`message-end`、`tool-start`、`tool-update`、`tool-end`、`session-name`、
+`backend-event`。
 
 ## Host 路由
 
-所有路由都在 dsh 已鉴权的 `/api` 下，自动继承 Host/Origin 校验和浏览器
-会话 Cookie。
-
 | 路由 | 用途 |
 | --- | --- |
-| `GET /api/pi-bridge/sessions` | 列出 Pi 会话（只读 JSONL 摘要） |
-| `GET/PUT /api/pi-bridge/settings` | 读取或修改桥接后端与 Pi 设置 |
-| `GET /api/pi-bridge/session?key=…` | 单个会话及当前分支历史 |
-| `GET /api/pi-bridge/capabilities` | 协议版本与当前 attachment 表 |
-| `POST /api/pi-bridge/attach` | 启动 `pi --mode rpc --session <file>` |
-| `POST /api/pi-bridge/detach` | 关闭该 Pi 子进程 |
-| `GET /api/pi-bridge/state?key=…` | `get_state` 快照 |
-| `GET /api/pi-bridge/events?key=…` | Pi 事件与扩展 UI 的 SSE 流 |
-| `POST /api/pi-bridge/prompt` | 提问、steer、follow up |
-| `POST /api/pi-bridge/abort` | 中断当前回复 |
-| `POST /api/pi-bridge/ui-response` | 回复阻塞式扩展对话框 |
-| `GET /api/pi-bridge/models?key=…` | 模型目录 |
-| `GET /api/pi-bridge/history-message?key=…` | 纯文本历史 |
+| `GET /api/bridge/settings` | 模式、引擎和脱敏后的桥接列表 |
+| `GET/POST/PUT/DELETE /api/bridge/bridges` | 管理桥接 |
+| `GET /api/bridge/sessions?bridge=<id>` | 某个桥接的会话/工作区 |
+| `GET /api/bridge/session?key=…` | 单个会话历史 |
+| `GET /api/bridge/capabilities` | 协议版本与 attachment 表 |
+| `POST /api/bridge/attach` | 启动实时 attachment |
+| `POST /api/bridge/detach` | 关闭 attachment |
+| `GET /api/bridge/state?key=…` | 引擎状态快照 |
+| `GET /api/bridge/events?key=…` | 归一化事件与扩展 UI 的 SSE |
+| `POST /api/bridge/prompt` | 提问、steer、follow up |
+| `POST /api/bridge/abort` | 中断当前回复 |
+| `POST /api/bridge/ui-response` | 回复扩展对话框 |
+| `GET /api/bridge/models?key=…` | 模型目录 |
+| `GET /api/bridge/history-message?key=…` | 纯文本历史 |
 
-会话 key 是绝对 JSONL 路径的 base64url 编码；Host 会拒绝解析到 Pi 会话根目录
-之外的 key。
-
-## 界面
-
-![Bridge 面板](docs/bridge-chat.png)
-
-![Bridge 设置](docs/bridge-settings.png)
-
-侧栏按钮是 **Bridge**。进入面板后，右上角刷新按钮右侧是设置图标，打开桥接
-设置：切换后端（目前仅 Pi）、指定会话根目录、指定 Pi 可执行文件、开关离线
-启动。两个图标按钮都只显示图标，悬停只改变 dsh 通用按钮底色，不换图标也不
-出现文字。面板复用 dsh 自己的 `dsh-client-ui-primitives`、`--dsw-*` token、
-Markdown 渲染和输入卡片样式。
-
-![右上角操作](docs/header-actions.png)
-
-设置保存在 `$DSH_HOME/pi-bridge.json`（0600）；有 Pi 子进程附加时 Host 会
-拒绝修改后端或会话根目录。
-
-## 安装
-
-```bash
-dsh plugin --profile web add github:gitsang/dsh-bridge
-dsh web
-```
-
-重启后侧栏会出现 **Pi Sessions**。
+会话 key 为 `<bridgeId>.<base64url(nativeKey)>`，只能解析到该桥接；修改桥接的
+会话根目录后，旧路径会像之前一样被拒绝。
 
 ## 配置
 
-环境变量：
+桥接保存在 `$DSH_HOME/bridge.json`（0600，原子写入）。旧的
+`$DSH_HOME/pi-bridge.json` 和更早的按引擎 `backends` 结构会自动迁移。
+
+```json
+{
+  "version": 3,
+  "bridges": [
+    {
+      "id": "pi-local",
+      "name": "Pi",
+      "mode": "cli",
+      "engine": "pi",
+      "config": {
+        "sessionsRoot": null,
+        "binPath": null,
+        "offline": true
+      }
+    }
+  ]
+}
+```
+
+Pi 环境变量仍作为适配器默认值：
 
 | 变量 | 默认值 | 含义 |
 | --- | --- | --- |
-| `PI_BIN` | 自动探测 | 探测顺序：`$PI_CODING_AGENT_DIR/bin/pi`、`~/.pi/agent/bin/pi`、dsh 可见的 `@earendil-works/pi-coding-agent`、`PATH` 上的 `pi` |
-| `PI_BRIDGE_OFFLINE` | `1` | 附加的 Pi 以 `PI_OFFLINE=1` 启动，避免启动时安装包或写 agent 目录；设为 `0` 可允许联网启动 |
+| `PI_BIN` | 自动探测 | 桥接未设置 `binPath` 时使用 |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi 配置目录 |
-| `PI_CODING_AGENT_SESSION_DIR` | `$PI_CODING_AGENT_DIR/sessions` | 会话根目录 |
-
-## 已知限制
-
-- 同一 Pi 会话同时只允许一个写入者。dsh 会 attach 一个受管子进程；已有 Pi
-  TUI 正在写同一个文件时不要再次 attach。
-- 浏览器面板是独立渲染器，不复用 dsh 原生 Conversation；工具调用先以卡片
-  形式展示。
-- 扩展 UI 的 blocking dialog 已支持；TUI 专属组件（`ctx.ui.custom`）在 RPC
-  模式下不可用，这是 Pi 自身的限制。
+| `PI_CODING_AGENT_SESSION_DIR` | `$PI_CODING_AGENT_DIR/sessions` | Session 根目录 |
 
 ## 开发
 
 ```bash
 npm test              # 单元测试
-npm run test:secrets  # 检查已跟踪文件是否泄露凭据
+npm run test:secrets  # 凭证泄漏检查
+node tests/live-smoke.mjs                    # 只读实时检查
+DSH_SMOKE_ATTACH=1 node tests/live-smoke.mjs # attach、prompt、stream、detach
 ```
 
-### 实机验证
-
-`tests/` 下是跑在真实 `dsh web` 上的脚本。它只在运行时从
-`$DSH_HOME/.credentials.yaml` 读取浏览器会话签名密钥，用于在内存里签一个
-cookie；密钥不会被打印、写盘或提交，`npm run test:secrets` 会扫描已跟踪文件。
-
-```bash
-node tests/live-smoke.mjs                     # 只读检查
-DSH_SMOKE_ATTACH=1 node tests/live-smoke.mjs  # 连接、发问、收流、断开
-node tests/live-setup.mjs                     # 把 profile 指向当前 checkout
-```
+完整设计见 [docs/architecture.md](docs/architecture.md)。
 
 ## License
 

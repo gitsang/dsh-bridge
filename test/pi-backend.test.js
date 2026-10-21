@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { once } from 'node:events'
-import { PiAttachment, createLineDecoder } from '../src/pi-attachment.js'
+import { PiAttachment, createLineDecoder } from '../src/backends/pi/attachment.js'
 
 const fake = new URL('./fixtures/fake-pi.mjs', import.meta.url).pathname
 
@@ -97,13 +97,36 @@ test('request rejects after dispose', async () => {
   await assert.rejects(bridge.getState(), /not running/)
 })
 
-test('resolves PI_BIN and forces offline startup by default', () => {
-  const bridge = attachment()
-  assert.equal(bridge.env.PI_OFFLINE, '1')
-  assert.equal(bridge.env.PI_BIN, fake)
-  const online = new PiAttachment({
-    file: '/tmp/fake-session.jsonl',
-    env: { ...process.env, PI_BIN: fake, PI_BRIDGE_OFFLINE: '0', PI_OFFLINE: '' },
+test('Pi adapter maps native events onto the backend-neutral vocabulary', async () => {
+  const { piEngine } = await import('../src/backends/pi/index.js')
+  assert.deepEqual(piEngine.normalizeEvent({ type: 'agent_start' }), { type: 'agent-start' })
+  assert.deepEqual(piEngine.normalizeEvent({ type: 'agent_settled' }), { type: 'agent-end' })
+  assert.deepEqual(
+    piEngine.normalizeEvent({ type: 'tool_execution_start', toolCallId: 't1', toolName: 'read', args: { path: 'x' } }),
+    { type: 'tool-start', toolCallId: 't1', name: 'read', arguments: { path: 'x' } },
+  )
+  assert.deepEqual(
+    piEngine.normalizeEvent({ type: 'session_info_changed', name: 'Demo' }),
+    { type: 'session-name', name: 'Demo' },
+  )
+  assert.equal(piEngine.normalizeEvent({ type: 'future_event', value: 1 }).type, 'backend-event')
+})
+
+test('adapter passes executable and offline startup environment to Pi', async () => {
+  const { piEngine } = await import('../src/backends/pi/index.js')
+  const child = await piEngine.createAttachment({
+    session: { nativeKey: Buffer.from('/tmp/fake-session.jsonl').toString('base64url'), cwd: '/tmp' },
+    config: { sessionsRoot: '/tmp', binPath: fake, offline: true },
+    env: { ...process.env },
+    logger: { warn() {} },
+  })
+  assert.equal(child.env.PI_OFFLINE, '1')
+  assert.equal(child.env.PI_BIN, fake)
+  const online = await piEngine.createAttachment({
+    session: { nativeKey: Buffer.from('/tmp/fake-session.jsonl').toString('base64url'), cwd: '/tmp' },
+    config: { sessionsRoot: '/tmp', binPath: fake, offline: false },
+    env: { ...process.env, PI_OFFLINE: '' },
+    logger: { warn() {} },
   })
   assert.equal(online.env.PI_OFFLINE, '')
 })

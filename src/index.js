@@ -1,31 +1,36 @@
 /**
- * Host half of dsh-bridge: authenticated HTTP routes over Pi Coding Agent.
+ * Host half of dsh-bridge.
  *
- * The browser never talks to Pi directly. Every route here is registered on
- * dsh's `/api` channel, so it inherits the Host/Origin fence and the signed
- * browser-session cookie. A route only opens a Pi child for an explicit
- * attach; listing and history stay read-only JSONL reads.
+ * The host is bridge-instance oriented: every request names a saved bridge
+ * (or carries an opaque session key containing one), resolves its engine, and
+ * then delegates to that engine adapter. No engine-specific protocol lives in
+ * this module.
  */
-import { PiAttachment, messageText } from './pi-attachment.js'
 import {
-  BACKENDS,
+  BRIDGE_MODES,
+  ENGINES,
+  bridgeView,
+  bridgeViews,
+  engineView,
+  getEngine,
+} from './backends/registry.js'
+import { decodeSessionKey, encodeSessionKey } from './backends/keys.js'
+import { messageText } from './message.js'
+import {
+  createBridge,
+  deleteBridge,
+  findBridge,
+  normalizeEngineConfig,
   normalizeSettings,
   readSettings,
-  resolveSessionsRoot,
-  validateSettingsPatch,
+  updateBridge,
   writeSettings,
 } from './settings.js'
-import {
-  listPiSessions,
-  pathFromSessionKey,
-  readPiSession,
-  sessionKey,
-} from './session-store.js'
 
-export const name = 'pi-bridge'
+export const name = 'bridge'
 export const inject = ['connection']
 
-const ROUTE = '/api/pi-bridge'
+const ROUTE = '/api/bridge'
 const MAX_BODY_BYTES = 1024 * 1024
 const EVENT_RING = 400
 const KEEPALIVE_MS = 15_000
@@ -72,7 +77,6 @@ function requireString(value, field) {
   return value
 }
 
-/** Keep only JSON-safe data on the wire. */
 function wireSafe(value) {
   try {
     return JSON.parse(JSON.stringify(value))
@@ -81,10 +85,19 @@ function wireSafe(value) {
   }
 }
 
-/**
- * One browser subscriber. Events are appended to the SSE stream; a bounded
- * ring lets a late subscriber catch up without replaying the whole agent run.
- */
+function publicSession(bridge, engine, session) {
+  if (session === null || typeof session !== 'object') throw new Error('engine returned an invalid session')
+  const nativeKey = session.nativeKey ?? session.key
+  if (typeof nativeKey !== 'string' || nativeKey === '') throw new Error('engine returned a session without a key')
+  const { nativeKey: _nativeKey, ...rest } = session
+  return {
+    ...rest,
+    engine: engine.id,
+    bridge: bridge.id,
+    key: encodeSessionKey(bridge.id, nativeKey),
+  }
+}
+
 class EventClient {
   constructor(controller) {
     this.controller = controller
@@ -111,11 +124,15 @@ class EventClient {
   }
 }
 
-/** One live Pi child plus its browser fan-out. */
 class AttachmentSession {
-  constructor(attachment, session) {
+  constructor({ bridge, engine, attachment, session, key }) {
+    this.bridge = bridge
+    this.bridgeId = bridge.id
+    this.engine = engine
+    this.engineId = engine.id
     this.attachment = attachment
     this.session = session
+    this.key = key
     this.clients = new Set()
     this.ring = []
     this.subscriptions = []
@@ -136,6 +153,8 @@ class AttachmentSession {
     this.clients.add(client)
     client.send('snapshot', {
       ok: true,
+      bridge: this.bridgeId,
+      engine: this.engineId,
       session: this.session,
       pid: this.attachment.pid,
       running: this.attachment.running,
@@ -151,14 +170,20 @@ class AttachmentSession {
       this.subscriptions.push(() => this.attachment.off(event, handler))
     }
     const forward = (event) => (record) => this.publish(event, record)
-    listen('event', forward('pi-event'))
-    listen('ui-request', forward('pi-ui-request'))
-    listen('ui-notification', forward('pi-ui-notification'))
-    listen('extension-error', forward('pi-extension-error'))
-    listen('protocol-error', forward('pi-protocol-error'))
-    listen('spawn', forward('pi-spawn'))
+    listen('event', (record) => {
+      const normalized = typeof this.engine.normalizeEvent === 'function'
+        ? this.engine.normalizeEvent(record)
+        : { type: 'backend-event', event: record }
+      const events = Array.isArray(normalized) ? normalized : normalized === null ? [] : [normalized]
+      for (const event of events) this.publish('bridge-event', event)
+    })
+    listen('ui-request', forward('bridge-ui-request'))
+    listen('ui-notification', forward('bridge-ui-notification'))
+    listen('extension-error', forward('bridge-extension-error'))
+    listen('protocol-error', forward('bridge-protocol-error'))
+    listen('spawn', forward('bridge-spawn'))
     listen('exit', (info) => {
-      this.publish('pi-exit', info)
+      this.publish('bridge-exit', info)
       this.onExit?.()
     })
     return this
@@ -180,39 +205,73 @@ export function apply(ctx) {
   const logger = ctx.logger
   let settings = readSettings(process.env, logger)
 
-  const sessionsRoot = () => resolveSessionsRoot(settings, process.env)
+  const engineAvailable = (engine) => engine.available !== false
 
-  const sessionFor = async (key) => {
-    const file = pathFromSessionKey(key, sessionsRoot())
-    const session = await readPiSession(file)
-    return { file, session }
+  const bridgeFor = (id) => {
+    const bridge = findBridge(settings, requireString(id, 'bridge'))
+    if (bridge === undefined) throw Object.assign(new Error(`unknown bridge: ${id}`), { status: 404 })
+    return bridge
   }
 
-  /** Settings view shared with the browser: values plus the backend menu. */
+  const engineFor = (bridge) => {
+    const engine = getEngine(bridge.engine)
+    if (engine === undefined) throw Object.assign(new Error(`unknown bridge engine: ${bridge.engine}`), { status: 500 })
+    return engine
+  }
+
+  const configFor = (bridge, engine) => normalizeEngineConfig(engine, bridge.config)
+
+  const resolveSessionKey = (key) => {
+    let decoded
+    try {
+      decoded = decodeSessionKey(key)
+    } catch (error) {
+      throw Object.assign(error, { status: 400 })
+    }
+    const bridge = findBridge(settings, decoded.bridgeId)
+    if (bridge === undefined) throw Object.assign(new Error(`unknown bridge: ${decoded.bridgeId}`), { status: 404 })
+    const engine = engineFor(bridge)
+    if (!engineAvailable(engine)) {
+      throw Object.assign(new Error(`${engine.label} is not available yet: ${engine.unavailableReason}`), { status: 409 })
+    }
+    return { bridge, engine, nativeKey: decoded.nativeKey }
+  }
+
+  const sessionFor = async (key) => {
+    const { bridge, engine, nativeKey } = resolveSessionKey(key)
+    const session = await engine.readSession(nativeKey, configFor(bridge, engine), process.env)
+    return { bridge, engine, nativeKey, session: publicSession(bridge, engine, session) }
+  }
+
   const settingsView = () => ({
-    settings,
-    backends: BACKENDS,
-    sessionsRoot: sessionsRoot(),
+    settings: {
+      version: settings.version,
+      bridges: bridgeViews(settings.bridges),
+    },
+    bridges: bridgeViews(settings.bridges),
+    engines: ENGINES.map(engineView),
+    modes: BRIDGE_MODES,
   })
 
   const attachmentFor = (key) => {
     const live = attachments.get(key)
     if (live !== undefined) return live
-    throw Object.assign(new Error('Pi session is not attached'), { status: 409 })
+    throw Object.assign(new Error('session is not attached'), { status: 409 })
   }
+
+  const liveAttachmentForBridge = (bridgeId) =>
+    [...attachments.values()].some((live) => live.bridgeId === bridgeId)
 
   const attach = async (key) => {
     const existing = attachments.get(key)
     if (existing !== undefined) return existing
-    const { file, session } = await sessionFor(key)
-    const env = {
-      ...process.env,
-      ...(settings.pi.binary === null ? {} : { PI_BIN: settings.pi.binary }),
-      ...(settings.pi.offline ? { PI_BRIDGE_OFFLINE: '1' } : { PI_BRIDGE_OFFLINE: '0' }),
-    }
-    const attachment = new PiAttachment({ file, cwd: session.cwd, env })
-    attachment.on('exit', (info) => {
-      if (info?.stderr) logger?.warn?.(`pi-bridge: Pi exited for ${file}: ${info.stderr.trim()}`)
+    const { bridge, engine, nativeKey, session } = await sessionFor(key)
+    const config = configFor(bridge, engine)
+    const attachment = await engine.createAttachment({
+      session: { ...session, nativeKey },
+      config,
+      env: process.env,
+      logger,
     })
     await attachment.start()
     try {
@@ -222,25 +281,18 @@ export function apply(ctx) {
       await attachment.dispose()
       const failure = new Error(
         detail === ''
-          ? `Pi exited during startup (${error instanceof Error ? error.message : String(error)})`
-          : `Pi exited during startup: ${detail}`,
+          ? `${engine.label} exited during startup (${error instanceof Error ? error.message : String(error)})`
+          : `${engine.label} exited during startup: ${detail}`,
       )
       failure.status = 502
       throw failure
     }
-    const live = new AttachmentSession(attachment, {
-      key,
-      id: session.id,
-      name: session.name,
-      cwd: session.cwd,
-      file,
-      messageCount: session.messageCount,
-    }).watch()
+    const live = new AttachmentSession({ bridge, engine, attachment, session, key }).watch()
     live.onExit = () => {
       if (attachments.get(key) === live) attachments.delete(key)
     }
     attachments.set(key, live)
-    logger?.info?.(`pi-bridge: attached ${file} (pid ${attachment.pid})`)
+    logger?.info?.(`bridge: attached ${bridge.name} (${bridge.id}) session ${session.id ?? nativeKey} (pid ${attachment.pid})`)
     return live
   }
 
@@ -249,13 +301,39 @@ export function apply(ctx) {
       path: `${ROUTE}/sessions`,
       methods: ['GET'],
       requestBody: 'buffered',
-      fetch: async () => {
+      fetch: async (request) => {
         try {
-          const root = sessionsRoot()
-          const sessions = await listPiSessions(root)
-          return json(200, { ok: true, root, sessions })
+          const id = requireString(new URL(request.url).searchParams.get('bridge'), 'bridge')
+          const bridge = bridgeFor(id)
+          const engine = engineFor(bridge)
+          if (!engineAvailable(engine)) {
+            return json(200, {
+              ok: true,
+              bridge: bridgeView(bridge),
+              engine: engine.id,
+              available: false,
+              unavailableReason: engine.unavailableReason,
+              sessions: [],
+              workspaces: [],
+            })
+          }
+          const config = configFor(bridge, engine)
+          const result = await engine.listSessions(config, process.env)
+          const sessions = Array.isArray(result.sessions)
+            ? result.sessions.map((session) => publicSession(bridge, engine, session))
+            : []
+          const workspaces = Array.isArray(result.workspaces) ? result.workspaces : []
+          return json(200, {
+            ok: true,
+            bridge: bridgeView(bridge),
+            engine: engine.id,
+            available: true,
+            root: result.root,
+            workspaces,
+            sessions,
+          })
         } catch (error) {
-          return failure(error)
+          return failure(error, error.status ?? 500)
         }
       },
     },
@@ -280,16 +358,19 @@ export function apply(ctx) {
       fetch: async () => {
         const live = [...attachments.entries()].map(([key, value]) => ({
           key,
+          bridge: value.bridgeId,
+          engine: value.engineId,
           pid: value.attachment.pid,
           running: value.attachment.running,
           clients: value.clients.size,
         }))
         return json(200, {
           ok: true,
-          backend: settings.backend,
-          sessionsRoot: sessionsRoot(),
+          bridges: bridgeViews(settings.bridges),
+          engines: ENGINES.map(engineView),
+          modes: BRIDGE_MODES,
           attachments: live,
-          protocol: 1,
+          protocol: 3,
         })
       },
     },
@@ -303,8 +384,8 @@ export function apply(ctx) {
           const key = requireString(body.key, 'key')
           const live = await attach(key)
           const state = await live.attachment.snapshot()
-          live.publish('pi-state', state)
-          return json(200, { ok: true, state })
+          live.publish('bridge-state', state)
+          return json(200, { ok: true, bridge: live.bridgeId, engine: live.engineId, state })
         } catch (error) {
           return failure(error, error.status ?? 500)
         }
@@ -335,8 +416,7 @@ export function apply(ctx) {
       fetch: async (request) => {
         try {
           const key = requireString(new URL(request.url).searchParams.get('key'), 'key')
-          const live = attachmentFor(key)
-          return json(200, { ok: true, state: await live.attachment.snapshot() })
+          return json(200, { ok: true, state: await attachmentFor(key).attachment.snapshot() })
         } catch (error) {
           return failure(error, error.status ?? 400)
         }
@@ -357,11 +437,8 @@ export function apply(ctx) {
           let accepted
           if (mode === 'steer') accepted = await live.attachment.steer(message)
           else if (mode === 'followUp') accepted = await live.attachment.followUp(message)
-          else if (state.isStreaming === true) {
-            accepted = await live.attachment.steer(message)
-          } else {
-            accepted = await live.attachment.prompt(message)
-          }
+          else if (state.isStreaming === true) accepted = await live.attachment.steer(message)
+          else accepted = await live.attachment.prompt(message)
           return json(202, { ok: true, accepted })
         } catch (error) {
           return failure(error, error.status ?? 409)
@@ -404,21 +481,37 @@ export function apply(ctx) {
     },
     {
       path: `${ROUTE}/settings`,
-      methods: ['GET', 'PUT'],
+      methods: ['GET'],
+      requestBody: 'buffered',
+      fetch: async () => json(200, { ok: true, ...settingsView() }),
+    },
+    {
+      path: `${ROUTE}/bridges`,
+      methods: ['GET', 'POST', 'PUT', 'DELETE'],
       requestBody: 'buffered',
       fetch: async (request) => {
         try {
           if (request.method === 'GET') return json(200, { ok: true, ...settingsView() })
           const body = await readJson(request)
-          const next = validateSettingsPatch(body, settings)
-          if (next.backend !== settings.backend && attachments.size > 0) {
-            return json(409, { ok: false, error: 'detach every Pi session before switching the backend' })
+          if (request.method === 'POST') {
+            const result = createBridge(settings, body)
+            settings = writeSettings(result.settings, process.env)
+            logger?.info?.(`bridge: created ${result.bridge.id}`)
+            return json(201, { ok: true, bridge: bridgeView(result.bridge), ...settingsView() })
           }
-          if (next.pi.sessionsRoot !== settings.pi.sessionsRoot && attachments.size > 0) {
-            return json(409, { ok: false, error: 'detach every Pi session before changing the sessions root' })
+          const id = requireString(body.id, 'id')
+          if (liveAttachmentForBridge(id)) {
+            return json(409, { ok: false, error: 'detach every session for this bridge before changing it' })
           }
-          settings = writeSettings(next, process.env)
-          logger?.info?.(`pi-bridge: backend=${settings.backend} sessionsRoot=${sessionsRoot()}`)
+          if (request.method === 'PUT') {
+            const result = updateBridge(settings, id, body)
+            settings = writeSettings(result.settings, process.env)
+            logger?.info?.(`bridge: updated ${id}`)
+            return json(200, { ok: true, bridge: bridgeView(result.bridge), ...settingsView() })
+          }
+          const result = deleteBridge(settings, id)
+          settings = writeSettings(result.settings, process.env)
+          logger?.info?.(`bridge: deleted ${id}`)
           return json(200, { ok: true, ...settingsView() })
         } catch (error) {
           return failure(error, error.status ?? 500)
@@ -496,7 +589,7 @@ export function apply(ctx) {
   ]
 
   for (const route of routes) {
-    ctx.effect(() => ctx.connection.fetch.register(route), `pi-bridge: ${route.path}`)
+    ctx.effect(() => ctx.connection.fetch.register(route), `bridge: ${route.path}`)
   }
 
   ctx.effect(
@@ -505,8 +598,9 @@ export function apply(ctx) {
       attachments.clear()
       await Promise.allSettled(live.map((entry) => entry.close()))
     },
-    'pi-bridge: attachments',
+    'bridge: attachments',
   )
 }
 
-export { sessionKey }
+export { encodeSessionKey as sessionKey, decodeSessionKey }
+export { normalizeSettings }

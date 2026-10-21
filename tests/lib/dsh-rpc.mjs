@@ -43,7 +43,7 @@ export function createClient({ port, cookie, authority = `127.0.0.1:${port}`, cr
 
   /** Call one exact Fetch route registered by the bridge. */
   async function route(path, init = {}) {
-    const response = await fetch(`${base}/api/pi-bridge/${path}`, {
+    const response = await fetch(`${base}/api/bridge/${path}`, {
       ...init,
       headers: {
         cookie: header,

@@ -1,45 +1,54 @@
 /**
- * Persisted bridge backends.
+ * Persisted Bridge configuration.
  *
- * The browser chooses which agent backend the Bridge panel talks to. Pi is the
- * only backend at this stage; the record keeps the shape generic so a second
- * backend can be added without rewriting the settings file.
+ * A user can create several bridges, including several instances of the same
+ * engine. Each bridge record carries its mode, engine and engine-specific
+ * config; the settings layer never interprets CLI protocols or session paths.
  */
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
+import {
+  ENGINES,
+  engineConfigDefaults,
+  getEngine,
+  resolveEngine,
+} from './backends/registry.js'
 
-export const SETTINGS_VERSION = 1
-export const DEFAULT_BACKEND = 'pi'
-
-/** Backends the host can serve, in menu order. */
-export const BACKENDS = [
-  {
-    id: 'pi',
-    label: 'Pi Coding Agent',
-    description: 'Attach to a Pi session through `pi --mode rpc`.',
-    available: true,
-    capabilities: ['sessions', 'attach', 'prompt', 'abort', 'extension-ui'],
-  },
-]
+export const SETTINGS_VERSION = 3
+export const DEFAULT_BRIDGE_ID = 'pi-local'
 
 export function bridgeHome(env = process.env) {
   return env.DSH_HOME || join(homedir(), '.dsh')
 }
 
 export function settingsPath(env = process.env) {
+  return join(bridgeHome(env), 'bridge.json')
+}
+
+/** Pre-0.3 settings were named after Pi; keep reading them for migration. */
+export function legacySettingsPath(env = process.env) {
   return join(bridgeHome(env), 'pi-bridge.json')
+}
+
+function piDefaultConfig() {
+  const engine = getEngine('pi')
+  return engineConfigDefaults(engine)
 }
 
 export function defaultSettings() {
   return {
     version: SETTINGS_VERSION,
-    backend: DEFAULT_BACKEND,
-    pi: {
-      sessionsRoot: null,
-      binary: null,
-      offline: true,
-    },
+    bridges: [
+      {
+        id: DEFAULT_BRIDGE_ID,
+        name: 'Pi',
+        mode: 'cli',
+        engine: 'pi',
+        config: piDefaultConfig(),
+      },
+    ],
   }
 }
 
@@ -47,33 +56,121 @@ function stringOrNull(value) {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
 }
 
-/** Coerce a stored or submitted record into the current schema. */
-export function normalizeSettings(input) {
-  const base = defaultSettings()
-  if (input === null || typeof input !== 'object') return base
-  const backend = typeof input.backend === 'string' && BACKENDS.some((entry) => entry.id === input.backend)
-    ? input.backend
-    : base.backend
-  const pi = input.pi !== null && typeof input.pi === 'object' ? input.pi : {}
+function defaultBridgeName(engine) {
+  return engine?.label ?? 'Bridge'
+}
+
+function bridgeId(prefix = 'bridge') {
+  return `${prefix}-${randomUUID()}`
+}
+
+/** Coerce one engine config record into the engine's declared field set. */
+export function normalizeEngineConfig(engine, input) {
+  const next = engineConfigDefaults(engine)
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return next
+  for (const field of engine.configFields ?? []) {
+    const value = input[field.key]
+    if (value === undefined) continue
+    next[field.key] = field.type === 'boolean' ? value !== false : stringOrNull(value)
+  }
+  return next
+}
+
+function normalizeBridge(input, index = 0) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return null
+  const engine = getEngine(input.engine)
+  if (engine === undefined) return null
+  const mode = typeof input.mode === 'string' && input.mode === engine.mode ? input.mode : engine.mode
+  const id = typeof input.id === 'string' && input.id.trim() !== ''
+    ? input.id.trim()
+    : index === 0 ? DEFAULT_BRIDGE_ID : bridgeId(engine.id)
+  const name = typeof input.name === 'string' && input.name.trim() !== ''
+    ? input.name.trim()
+    : defaultBridgeName(engine)
   return {
-    version: SETTINGS_VERSION,
-    backend,
-    pi: {
-      sessionsRoot: stringOrNull(pi.sessionsRoot),
-      binary: stringOrNull(pi.binary),
-      offline: pi.offline === undefined ? true : pi.offline !== false,
-    },
+    id,
+    name,
+    mode,
+    engine: engine.id,
+    config: normalizeEngineConfig(engine, input.config),
   }
 }
 
-/** Read settings, falling back to defaults for a missing or corrupt file. */
+function legacyEngineConfig(engineId, legacy) {
+  if (legacy === null || typeof legacy !== 'object') return {}
+  const migrated = { ...legacy }
+  if (migrated.binPath === undefined && (migrated.executable !== undefined || migrated.binary !== undefined)) {
+    migrated.binPath = migrated.executable ?? migrated.binary
+  }
+  delete migrated.executable
+  delete migrated.binary
+  return migrated
+}
+
+function hasConfiguredValue(engine, config) {
+  return Object.values(normalizeEngineConfig(engine, config)).some((value) => value !== null && value !== false)
+}
+
+function migrateLegacySettings(input) {
+  const legacyBackends = input?.backends !== null && typeof input?.backends === 'object'
+    ? input.backends
+    : {}
+  const piLegacy = legacyBackends.pi ?? input?.pi ?? {}
+  const bridges = [{
+    id: DEFAULT_BRIDGE_ID,
+    name: 'Pi',
+    mode: 'cli',
+    engine: 'pi',
+    config: normalizeEngineConfig(getEngine('pi'), legacyEngineConfig('pi', piLegacy)),
+  }]
+
+  for (const engine of ENGINES) {
+    if (engine.id === 'pi') continue
+    const legacy = legacyBackends[engine.id] ?? (engine.id === 'dsh' ? legacyBackends['dsh-web'] : undefined)
+    if (!hasConfiguredValue(engine, legacyEngineConfig(engine.id, legacy))) continue
+    bridges.push({
+      id: `${engine.id}-local`,
+      name: engine.label,
+      mode: engine.mode,
+      engine: engine.id,
+      config: normalizeEngineConfig(engine, legacyEngineConfig(engine.id, legacy)),
+    })
+  }
+  return bridges
+}
+
+/** Coerce a stored or submitted record into the current bridge-list schema. */
+export function normalizeSettings(input) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return defaultSettings()
+  let rawBridges
+  if (Array.isArray(input.bridges)) rawBridges = input.bridges
+  else if (input.backends !== undefined || input.pi !== undefined || input.backend !== undefined) {
+    rawBridges = migrateLegacySettings(input)
+  } else {
+    return defaultSettings()
+  }
+
+  const seen = new Set()
+  const bridges = []
+  rawBridges.forEach((raw, index) => {
+    const bridge = normalizeBridge(raw, index)
+    if (bridge === null || seen.has(bridge.id)) return
+    seen.add(bridge.id)
+    bridges.push(bridge)
+  })
+  return { version: SETTINGS_VERSION, bridges }
+}
+
+/** Read settings from the current file, falling back to the legacy Pi file. */
 export function readSettings(env = process.env, logger) {
   const file = settingsPath(env)
-  if (!existsSync(file)) return defaultSettings()
+  const legacy = legacySettingsPath(env)
+  const source = existsSync(file) ? file : existsSync(legacy) ? legacy : undefined
+  if (source === undefined) return defaultSettings()
   try {
-    return normalizeSettings(JSON.parse(readFileSync(file, 'utf8')))
+    return normalizeSettings(JSON.parse(readFileSync(source, 'utf8')))
   } catch (error) {
-    logger?.warn?.(`pi-bridge: ignoring unreadable settings file ${file}: ${error instanceof Error ? error.message : String(error)}`)
+    logger?.warn?.(`bridge: ignoring unreadable settings file ${source}: ${error instanceof Error ? error.message : String(error)}`)
     return defaultSettings()
   }
 }
@@ -89,48 +186,89 @@ export function writeSettings(settings, env = process.env) {
   return normalized
 }
 
-/**
- * Resolve the Pi session root from settings, environment, then the Pi default.
- * An explicit settings value wins so the settings page can point the panel at a
- * test or alternate Pi home without restarting dsh.
- */
-export function resolveSessionsRoot(settings, env = process.env) {
-  if (settings?.pi?.sessionsRoot) return resolve(settings.pi.sessionsRoot)
-  if (env.PI_CODING_AGENT_SESSION_DIR) return resolve(env.PI_CODING_AGENT_SESSION_DIR)
-  const agentDir = env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent')
-  return resolve(join(agentDir, 'sessions'))
+export function findBridge(settings, id) {
+  return settings?.bridges?.find((bridge) => bridge.id === id)
 }
 
-/** Reject a settings patch before it reaches the file. */
-export function validateSettingsPatch(patch, current) {
-  if (patch === null || typeof patch !== 'object') {
-    throw Object.assign(new Error('settings body must be an object'), { status: 400 })
-  }
-  if (patch.backend !== undefined && !BACKENDS.some((entry) => entry.id === patch.backend)) {
-    throw Object.assign(new Error(`unknown backend: ${String(patch.backend)}`), { status: 400 })
-  }
-  const next = { ...current }
-  if (patch.backend !== undefined) next.backend = patch.backend
-  if (patch.pi !== undefined) {
-    if (patch.pi === null || typeof patch.pi !== 'object') {
-      throw Object.assign(new Error('pi settings must be an object'), { status: 400 })
+function assertConfigValue(engine, field, value) {
+  if (field.type === 'boolean') {
+    if (typeof value !== 'boolean') {
+      throw Object.assign(new Error(`${engine.id}.${field.key} must be a boolean`), { status: 400 })
     }
-    const pi = { ...current.pi }
-    for (const field of ['sessionsRoot', 'binary']) {
-      if (patch.pi[field] !== undefined) {
-        if (patch.pi[field] !== null && typeof patch.pi[field] !== 'string') {
-          throw Object.assign(new Error(`pi.${field} must be a string or null`), { status: 400 })
-        }
-        pi[field] = stringOrNull(patch.pi[field])
-      }
-    }
-    if (patch.pi.offline !== undefined) {
-      if (typeof patch.pi.offline !== 'boolean') {
-        throw Object.assign(new Error('pi.offline must be a boolean'), { status: 400 })
-      }
-      pi.offline = patch.pi.offline
-    }
-    next.pi = pi
+    return
   }
-  return normalizeSettings(next)
+  if (value !== null && typeof value !== 'string') {
+    throw Object.assign(new Error(`${engine.id}.${field.key} must be a string or null`), { status: 400 })
+  }
+}
+
+function applyConfigPatch(engine, current, patch, { preserveSecret = false } = {}) {
+  if (patch === undefined) return normalizeEngineConfig(engine, current)
+  if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw Object.assign(new Error('config must be an object'), { status: 400 })
+  }
+  const next = normalizeEngineConfig(engine, current)
+  for (const [key, value] of Object.entries(patch)) {
+    const field = (engine.configFields ?? []).find((candidate) => candidate.key === key)
+    if (field === undefined) {
+      throw Object.assign(new Error(`unknown ${engine.id} setting: ${key}`), { status: 400 })
+    }
+    assertConfigValue(engine, field, value)
+    if (field.type === 'secret' && preserveSecret && (value === null || value === '')) continue
+    next[field.key] = field.type === 'boolean' ? value : stringOrNull(value)
+  }
+  return next
+}
+
+function bridgePayload(input, existing, { preserveSecret = false } = {}) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw Object.assign(new Error('bridge body must be an object'), { status: 400 })
+  }
+  const mode = input.mode ?? existing?.mode
+  const engineId = input.engine ?? existing?.engine
+  const engine = resolveEngine(mode, engineId)
+  const name = input.name === undefined ? existing?.name : input.name
+  if (typeof name !== 'string' || name.trim() === '') {
+    throw Object.assign(new Error('bridge name is required'), { status: 400 })
+  }
+  const currentConfig = existing !== undefined && existing.engine === engine.id ? existing.config : {}
+  const config = applyConfigPatch(engine, currentConfig, input.config, { preserveSecret })
+  return {
+    name: name.trim(),
+    mode: engine.mode,
+    engine: engine.id,
+    config,
+  }
+}
+
+/** Append a new bridge and return the new settings + record. */
+export function createBridge(settings, input) {
+  const next = normalizeSettings(settings)
+  const bridge = bridgePayload(input, undefined)
+  const created = { id: bridgeId(bridge.engine), ...bridge }
+  return {
+    settings: { ...next, bridges: [...next.bridges, created] },
+    bridge: created,
+  }
+}
+
+/** Update one bridge in place. Empty secret fields preserve the stored value. */
+export function updateBridge(settings, id, input) {
+  const next = normalizeSettings(settings)
+  const index = next.bridges.findIndex((bridge) => bridge.id === id)
+  if (index === -1) throw Object.assign(new Error(`unknown bridge: ${id}`), { status: 404 })
+  const existing = next.bridges[index]
+  const bridge = { id, ...bridgePayload(input, existing, { preserveSecret: true }) }
+  const bridges = [...next.bridges]
+  bridges[index] = bridge
+  return { settings: { ...next, bridges }, bridge }
+}
+
+export function deleteBridge(settings, id) {
+  const next = normalizeSettings(settings)
+  const bridges = next.bridges.filter((bridge) => bridge.id !== id)
+  if (bridges.length === next.bridges.length) {
+    throw Object.assign(new Error(`unknown bridge: ${id}`), { status: 404 })
+  }
+  return { settings: { ...next, bridges } }
 }

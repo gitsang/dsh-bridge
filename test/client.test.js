@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 /**
@@ -47,13 +48,15 @@ function moduleExports() {
   })
 }
 
-test('registers the Bridge panel and sidebar entry', () => {
+test('registers the Bridge panel, brand bridge switcher, shell settings overlay, and sidebar', () => {
   const exports = moduleExports()
   assert.equal(typeof exports.apply, 'function')
-  assert.deepEqual(exports.inject, ['slots', 'locale'])
+  assert.deepEqual(exports.inject, ['slots', 'locale', 'layout'])
 
   const registered = []
   const dictionaries = []
+  let panelId = 'bridge'
+  const panelListeners = new Set()
   const ctx = {
     effect(factory) {
       return factory()
@@ -64,6 +67,16 @@ test('registers the Bridge panel and sidebar entry', () => {
       },
       bind() {
         return (key) => key
+      },
+    },
+    layout: {
+      selectPanel(id) { panelId = id },
+      panelInfo: {
+        getSnapshot: () => ({ activePanelId: panelId }),
+        subscribe(listener) {
+          panelListeners.add(listener)
+          return () => panelListeners.delete(listener)
+        },
       },
     },
     slots: {
@@ -83,24 +96,42 @@ test('registers the Bridge panel and sidebar entry', () => {
 
   const bySlot = Object.fromEntries(registered.map((entry) => [entry.options.name, entry.options]))
   assert.equal(bySlot.main.key, 'bridge')
-  assert.equal(bySlot['sidebar.panellist'].id, 'bridge')
-  assert.equal(bySlot['sidebar.panellist'].label(), 'panel')
-  // Settings live in the page header, so no shell overlay entry is registered.
-  assert.equal(bySlot['shell.overlay'], undefined)
-  assert.equal(registered.length, 2)
+  assert.equal(bySlot['sidebar.panellist'], undefined)
+  assert.equal(bySlot['sidebar.brand.mark'].name, 'sidebar.brand.mark')
+  assert.equal(bySlot['sidebar.workspaces'].name, 'sidebar.workspaces')
+  assert.equal(bySlot['shell.overlay'].id, 'bridge-settings')
+  assert.equal(registered.length, 4)
 })
 
-test('bridge dictionaries keep the panel named Bridge in both locales', () => {
+test('bridge dictionaries describe bridges as saved instances, not engines', () => {
   const exports = moduleExports()
   const dictionaries = []
   exports.apply({
     effect: (factory) => factory(),
+    layout: {
+      selectPanel() {},
+      panelInfo: { getSnapshot: () => ({ activePanelId: null }), subscribe: () => () => {} },
+    },
     locale: { register: (namespace, dict) => dictionaries.push(dict), bind: () => (key) => key },
     slots: { inject: () => {}, register: () => () => {} },
   })
   assert.equal(dictionaries[0].zh.panel, 'Bridge')
   assert.equal(dictionaries[0].en.panel, 'Bridge')
-  assert.equal(dictionaries[0].zh.settings.includes('桥接'), true)
+  assert.equal(dictionaries[0].zh.manageBridges, '管理桥接')
+  assert.equal(dictionaries[0].zh.local, '本机')
+  assert.equal(dictionaries[0].zh.addBridge, '新增桥接')
+  assert.equal(dictionaries[0].zh.bridgeMode, '桥接模式')
+  assert.equal(dictionaries[0].en.bridgeEngine, 'Engine')
+  assert.equal(dictionaries[0].zh.backendPi, undefined)
+  assert.doesNotMatch(dictionaries[0].en.emptyHint, /\bpi\b/i)
+})
+
+test('browser bundle has no Pi-specific route, env, or runtime coupling', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /\/api\/pi-bridge/)
+  assert.doesNotMatch(source, /PI_OFFLINE|PI_CODING_AGENT|PI_BIN/)
+  assert.doesNotMatch(source, /pi --mode rpc/)
+  assert.doesNotMatch(source, /new PiAttachment|PiAttachment/)
 })
 
 test('helper text extraction and formatting are safe', () => {

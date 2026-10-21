@@ -8,7 +8,7 @@ import {
   pathFromSessionKey,
   readPiSession,
   sessionKey,
-} from '../src/session-store.js'
+} from '../src/backends/pi/session-store.js'
 
 function header(id = 'session-1', cwd = '/work/demo') {
   return { type: 'session', version: 3, id, timestamp: '2026-10-20T00:00:00.000Z', cwd }

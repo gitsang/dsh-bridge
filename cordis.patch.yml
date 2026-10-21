@@ -1,9 +1,9 @@
 # dsh-bridge bundle patch.
 #
-# Adds one Host row. The row registers the authenticated /api/pi-bridge
-# routes and owns the Pi RPC child-process attachments. The browser half is
+# Adds one Host row. The row registers the authenticated /api/bridge
+# routes and owns live backend attachments. The browser half is
 # discovered from package.json dsh.client and registers a sidebar panel.
 - insert:
-    - id: pi-bridge
+    - id: bridge
       name: '@gitsang/dsh-bridge'
       inject: [connection]

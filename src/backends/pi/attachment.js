@@ -12,6 +12,9 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
+import { messageText } from '../../message.js'
+
+export { messageText }
 
 const require = createRequire(import.meta.url)
 const DEFAULT_RESPONSE_TIMEOUT_MS = 60_000
@@ -81,17 +84,6 @@ export function createLineDecoder(onLine) {
   }
 }
 
-/** Concatenate the text blocks of a Pi message. */
-export function messageText(message) {
-  const content = message?.content
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  return content
-    .filter((block) => block && block.type === 'text' && typeof block.text === 'string')
-    .map((block) => block.text)
-    .join('')
-}
-
 export class PiAttachment extends EventEmitter {
   /**
    * @param {object} options
@@ -109,9 +101,7 @@ export class PiAttachment extends EventEmitter {
     // A bridge child must not mutate the user's Pi installation or block on
     // startup package installs. Offline startup still loads installed
     // extensions, models, and credentials; callers can opt out explicitly.
-    this.env = baseEnv.PI_BRIDGE_OFFLINE === '0'
-      ? { ...baseEnv }
-      : { ...baseEnv, PI_OFFLINE: baseEnv.PI_OFFLINE ?? '1' }
+    this.env = { ...baseEnv }
     this.extraArgs = options.extraArgs ?? []
     this.responseTimeoutMs = options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS
     this.pending = new Map()

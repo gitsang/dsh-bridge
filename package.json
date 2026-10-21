@@ -1,7 +1,7 @@
 {
   "name": "@gitsang/dsh-bridge",
-  "version": "0.2.0",
-  "description": "Bridge Pi Coding Agent sessions into the DeepSeek Harness (dsh) web UI.",
+  "version": "0.4.0",
+  "description": "Bridge multiple external coding agents (Pi, Codex, OpenCode, remote DSH) into the DeepSeek Harness web UI.",
   "license": "MIT",
   "type": "module",
   "main": "src/index.js",
@@ -29,9 +29,11 @@
   "keywords": [
     "dsh",
     "deepseek-harness",
-    "pi",
-    "pi-coding-agent",
     "bridge",
+    "agent",
+    "pi",
+    "codex",
+    "opencode",
     "web"
   ],
   "dsh": {

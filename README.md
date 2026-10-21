@@ -1,132 +1,199 @@
 # dsh-bridge
 
-Bridge **Pi Coding Agent** sessions into the **DeepSeek Harness (dsh)** web UI.
+Bridge external coding-agent sessions into the **DeepSeek Harness (dsh)** web UI.
 
-This repository currently implements the **Pi bridge only**: the host plugin
-lists Pi sessions, attaches to a Pi process over the documented RPC protocol,
-streams agent events into dsh, and sends prompts, steering messages, and aborts
-back to Pi.
+The Bridge is **instance-based**: users create one or more saved bridges, each
+with its own transport mode, engine, name, and configuration. The same engine can
+appear in several bridges (for example two Pi bridges with different session
+roots). The top-left dsh mark shows **Local** (the native dsh conversation) plus
+every saved bridge, and selecting one switches both the sidebar and the main
+conversation area to that bridge.
 
-The browser panel lists Pi sessions, shows the current branch, attaches a Pi
-child on demand, renders streaming Markdown, thinking and tool calls, sends
-prompts, aborts a turn, and forwards blocking extension dialogs.
-
-The page uses the same `dsh-client-ui-primitives` and `--dsw-*` tokens as the
-shipped chat surface (centred content column, dsh Markdown, disclosure rows,
-composer card).
+Pi is the first fully supported engine. Codex, OpenCode, and remote DSH appear in
+the add-bridge form but are marked as pending until their adapters are connected.
 
 ## Status
 
-- [x] Read Pi session files (`~/.pi/agent/sessions/**/*.jsonl`)
-- [x] Current-branch reconstruction, tool-call extraction, list previews
-- [x] Pi RPC process attachment
-- [x] Event fan-out and prompt/steer/abort routes
-- [x] dsh browser panel (Bridge main panel + sidebar entry + header settings)
-- [x] Persisted backend selection (Pi only for now)
-- [ ] Install into a dsh profile
+- [x] Bridge-instance host model (`bridges[]`, no global “active backend”)
+- [x] Multiple bridges per engine with independent config
+- [x] Create/edit/delete bridges from the settings overlay
+- [x] CLI / Web mode selection and mode-specific engine list
+- [x] Confirmed Pi engine: JSONL sessions, RPC attach, normalized events, prompts
+- [x] Top-left “Local + configured bridges” dropdown
+- [x] Bridge-owned sidebar while a bridge is selected
+- [x] dsh-styled transcript and composer
+- [ ] Codex engine adapter
+- [ ] OpenCode engine adapter
+- [ ] Remote DSH Web engine adapter
 
-## How it works
+## UX
+
+### Top-left switcher
+
+The dsh brand mark opens a menu:
 
 ```text
-Browser
-  └─ dsh web
-       └─ @gitsang/dsh-bridge (host plugin)
-            ├─ session-store.js   read-only Pi JSONL listing/history
-            └─ pi-attachment.js   spawn `pi --mode rpc --session <file>`
-                 │ JSONL over stdin/stdout
-                 ▼
-            Pi Coding Agent
+Local                     Return to DeepSeek Harness
+────────────────────────────────────────────────────
+Work Pi                   CLI · Pi
+Scratch Pi                CLI · Pi
+Company Codex             CLI · Codex          (adapter pending)
+Bridge settings
 ```
 
-Pi's RPC mode is the stable integration point: commands are JSON lines on
-stdin, responses and events are JSON lines on stdout. The bridge never writes
-the session file itself, so it cannot corrupt Pi's branch structure.
+- **Local** returns to the native dsh conversation and restores the stock
+  sidebar.
+- Each configured bridge is a separate row. Bridges are not engines, so two Pi
+  rows are normal and expected.
+- Unavailable engines are shown but disabled.
+- **Bridge settings** opens the settings overlay in place; it does not navigate
+  away from the current page.
+
+### Settings overlay
+
+The settings dialog floats above the current page with a left navigation column
+and a right content area:
+
+- **Manage bridges**: list every saved bridge, add a bridge, edit its name/mode/
+  engine/config, or delete it.
+- Add-bridge form:
+  - **Bridge mode**: CLI or Web
+  - **Engine**:
+    - CLI → Pi, Codex, OpenCode
+    - Web → DSH
+  - engine-specific fields. Pi currently uses:
+    - Sessions root
+    - Bin path
+    - Offline startup
+  - DSH uses Base URL and Access token. Tokens are redacted from API responses
+    and preserved when an edit leaves the secret field blank.
+
+### Selected bridge
+
+Selecting a saved bridge:
+
+1. opens the Bridge main panel;
+2. replaces the stock `sidebar.workspaces` browser with the bridge's workspace/
+   session tree;
+3. loads session history into the main transcript;
+4. keeps the composer and live streaming attached to that bridge.
+
+Returning to **Local** disposes the Bridge sidebar occupant and restores dsh's
+native workspace browser.
+
+## Architecture
+
+```text
+Browser (dsh web)
+  ├─ Brand switcher ────────> GET /api/bridge/settings
+  ├─ Bridge settings overlay > POST/PUT/DELETE /api/bridge/bridges
+  └─ Bridge main panel ─────> GET /api/bridge/sessions?bridge=<id>
+                              /api/bridge/{session,attach,prompt,events,…}
+
+Host bridge core
+  ├─ bridge instance store (bridge.json)
+  ├─ engine registry (Pi / Codex / OpenCode / DSH)
+  ├─ opaque keys (`bridgeId.base64url(nativeKey)`)
+  └─ generic attachment + SSE lifecycle
+
+Engine adapters
+  ├─ Pi (implemented)
+  ├─ Codex (planned)
+  ├─ OpenCode (planned)
+  └─ DSH (planned)
+```
+
+The host imports concrete adapters only in `src/backends/registry.js`. The browser
+never imports an engine/CLI implementation.
+
+### Engine adapter contract
+
+An engine provides:
+
+| Member | Purpose |
+| --- | --- |
+| `id`, `label`, `mode` | Identity and `cli`/`web` transport classification |
+| `available`, `unavailableReason` | Honest state for unfinished adapters |
+| `capabilities` | Features the UI may expose |
+| `configFields`, `defaultConfig()` | Fields rendered in the add/edit form |
+| `listSessions(config, env)` | Workspace/session summaries |
+| `readSession(nativeKey, config, env)` | Normalized history |
+| `createAttachment({session, config, env})` | Live agent handle |
+| `normalizeEvent(nativeEvent)` | Native events → bridge event vocabulary |
+
+Normalized events are `agent-start`, `agent-end`, `message-start`,
+`message-update`, `message-end`, `tool-start`, `tool-update`, `tool-end`,
+`session-name`, and `backend-event`.
 
 ## Host routes
 
-All routes sit below dsh's authenticated `/api` channel and inherit its
-Host/Origin fence and signed browser cookie.
+All routes sit below dsh's authenticated `/api` channel.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/pi-bridge/sessions` | List Pi sessions (read-only JSONL scan) |
-| `GET/PUT /api/pi-bridge/settings` | Read or update the backend and Pi settings |
-| `GET /api/pi-bridge/session?key=…` | One session with current-branch history |
-| `GET /api/pi-bridge/capabilities` | Bridge protocol and live attachment table |
-| `POST /api/pi-bridge/attach` | Spawn `pi --mode rpc --session <file>` |
-| `POST /api/pi-bridge/detach` | Close the owned Pi child |
-| `GET /api/pi-bridge/state?key=…` | `get_state` snapshot |
-| `GET /api/pi-bridge/events?key=…` | SSE stream of Pi events and extension UI |
-| `POST /api/pi-bridge/prompt` | Prompt, steer, or follow up |
-| `POST /api/pi-bridge/abort` | Abort the running turn |
-| `POST /api/pi-bridge/ui-response` | Answer a blocking extension dialog |
-| `GET /api/pi-bridge/models?key=…` | Provider/model catalog |
-| `GET /api/pi-bridge/history-message?key=…` | Concatenated plain-text history |
+| `GET /api/bridge/settings` | Modes, engines, and redacted bridge list |
+| `GET/POST/PUT/DELETE /api/bridge/bridges` | Manage saved bridges |
+| `GET /api/bridge/sessions?bridge=<id>` | List one bridge's sessions/workspaces |
+| `GET /api/bridge/session?key=…` | One normalized session history |
+| `GET /api/bridge/capabilities` | Protocol and live attachment table |
+| `POST /api/bridge/attach` | Start a live attachment |
+| `POST /api/bridge/detach` | Close it |
+| `GET /api/bridge/state?key=…` | Engine state snapshot |
+| `GET /api/bridge/events?key=…` | SSE stream of normalized events/UI |
+| `POST /api/bridge/prompt` | Prompt, steer, or follow up |
+| `POST /api/bridge/abort` | Abort the running turn |
+| `POST /api/bridge/ui-response` | Answer an extension dialog |
+| `GET /api/bridge/models?key=…` | Provider/model catalog |
+| `GET /api/bridge/history-message?key=…` | Concatenated plain-text history |
 
-A session is keyed by a base64url encoding of its absolute JSONL path. The Host
-rejects any key that resolves outside the configured Pi sessions root.
+A session key is `<bridgeId>.<base64url(nativeKey)>`. It resolves only against
+that bridge; changing a bridge's session root invalidates old paths exactly as
+before.
 
 ## Configuration
 
-Environment variables read by the host plugin:
+Bridges live in `$DSH_HOME/bridge.json` (mode 0600), written atomically. The old
+`$DSH_HOME/pi-bridge.json` and older per-engine `backends` schema are migrated
+automatically.
+
+```json
+{
+  "version": 3,
+  "bridges": [
+    {
+      "id": "pi-local",
+      "name": "Pi",
+      "mode": "cli",
+      "engine": "pi",
+      "config": {
+        "sessionsRoot": null,
+        "binPath": null,
+        "offline": true
+      }
+    }
+  ]
+}
+```
+
+Pi-specific environment variables still work as adapter defaults:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `PI_BIN` | auto | Pi executable. Resolution order: `$PI_CODING_AGENT_DIR/bin/pi`, `~/.pi/agent/bin/pi`, the `@earendil-works/pi-coding-agent` package visible to dsh, then `pi` on `PATH` |
-| `PI_BRIDGE_OFFLINE` | `1` | Start attached Pi with `PI_OFFLINE=1` so startup never installs packages or writes the agent directory. Set `0` to allow online startup |
+| `PI_BIN` | auto | Pi executable when the bridge's `binPath` is unset |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi config directory |
 | `PI_CODING_AGENT_SESSION_DIR` | `$PI_CODING_AGENT_DIR/sessions` | Session storage root |
-
-## Browser panel
-
-![Bridge panel](docs/bridge-chat.png)
-
-![Bridge settings](docs/bridge-settings.png)
-
-The client half registers:
-
-- a **Bridge** entry in the sidebar panel list;
-
-- a `main` panel that renders the session list, transcript, composer, and
-  extension dialogs.
-
-Backend settings live in `$DSH_HOME/pi-bridge.json` (mode 0600). `backend`
-selects the agent backend (Pi is the only entry), `pi.sessionsRoot` overrides
-the session directory, `pi.binary` overrides `PI_BIN`, and `pi.offline` starts
-attached Pi with `PI_OFFLINE=1`. The Host refuses backend or root changes while
-a Pi child is attached.
-
-It talks only to the host routes above, with `credentials: 'same-origin'`.
-Live updates arrive over `EventSource`; the host keeps a bounded event ring so
-a reconnecting browser can catch up.
 
 ## Development
 
 ```bash
 npm test              # unit tests
-npm run test:secrets  # fail if a tracked file looks like a credential
-```
-
-### Live verification
-
-`tests/` holds opt-in tooling that drives a running `dsh web`. It reads the
-local browser-session signing secret from `$DSH_HOME/.credentials.yaml` only to
-mint an in-memory cookie, so the secret is never printed, logged, or written to
-disk, and `npm run test:secrets` guards tracked files against leaks.
-
-```bash
-node tests/live-smoke.mjs                    # read-only checks
+npm run test:secrets  # credential leak guard
+node tests/live-smoke.mjs                    # read-only live checks
 DSH_SMOKE_ATTACH=1 node tests/live-smoke.mjs # attach, prompt, stream, detach
-node tests/live-setup.mjs                    # point the profile at this checkout
 ```
 
-`tests/lib/browser-cookie.mjs` and `tests/lib/dsh-rpc.mjs` are the reusable
-pieces.
-
-`scripts/dev-rpc.sh` is a local debugging helper for calling a dsh Remote
-endpoint with a signed browser cookie. It is not loaded by the plugin. Set
-`DSH_BROWSER_SECRET` from `~/.dsh/.credentials.yaml` and call it as
-`scripts/dev-rpc.sh pluginManager/listBundles '{}'`.
+See [docs/architecture.md](docs/architecture.md) for the detailed design and
+adapter roadmap.
 
 ## License
 
