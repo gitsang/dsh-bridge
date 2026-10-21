@@ -100,7 +100,20 @@ dsh web
 ## 开发
 
 ```bash
-npm test
+npm test              # 单元测试
+npm run test:secrets  # 检查已跟踪文件是否泄露凭据
+```
+
+### 实机验证
+
+`tests/` 下是跑在真实 `dsh web` 上的脚本。它只在运行时从
+`$DSH_HOME/.credentials.yaml` 读取浏览器会话签名密钥，用于在内存里签一个
+cookie；密钥不会被打印、写盘或提交，`npm run test:secrets` 会扫描已跟踪文件。
+
+```bash
+node tests/live-smoke.mjs                     # 只读检查
+DSH_SMOKE_ATTACH=1 node tests/live-smoke.mjs  # 连接、发问、收流、断开
+node tests/live-setup.mjs                     # 把 profile 指向当前 checkout
 ```
 
 ## License

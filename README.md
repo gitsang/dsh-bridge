@@ -21,7 +21,7 @@ composer card).
 - [x] Current-branch reconstruction, tool-call extraction, list previews
 - [x] Pi RPC process attachment
 - [x] Event fan-out and prompt/steer/abort routes
-- [x] dsh browser panel (Bridge main panel + sidebar entry + settings gear)
+- [x] dsh browser panel (Bridge main panel + sidebar entry + header settings)
 - [x] Persisted backend selection (Pi only for now)
 - [ ] Install into a dsh profile
 
@@ -86,7 +86,7 @@ Environment variables read by the host plugin:
 The client half registers:
 
 - a **Bridge** entry in the sidebar panel list;
-- a settings gear pinned to that row, opening the backend picker;
+
 - a `main` panel that renders the session list, transcript, composer, and
   extension dialogs.
 
@@ -103,8 +103,25 @@ a reconnecting browser can catch up.
 ## Development
 
 ```bash
-npm test
+npm test              # unit tests
+npm run test:secrets  # fail if a tracked file looks like a credential
 ```
+
+### Live verification
+
+`tests/` holds opt-in tooling that drives a running `dsh web`. It reads the
+local browser-session signing secret from `$DSH_HOME/.credentials.yaml` only to
+mint an in-memory cookie, so the secret is never printed, logged, or written to
+disk, and `npm run test:secrets` guards tracked files against leaks.
+
+```bash
+node tests/live-smoke.mjs                    # read-only checks
+DSH_SMOKE_ATTACH=1 node tests/live-smoke.mjs # attach, prompt, stream, detach
+node tests/live-setup.mjs                    # point the profile at this checkout
+```
+
+`tests/lib/browser-cookie.mjs` and `tests/lib/dsh-rpc.mjs` are the reusable
+pieces.
 
 `scripts/dev-rpc.sh` is a local debugging helper for calling a dsh Remote
 endpoint with a signed browser cookie. It is not loaded by the plugin. Set
