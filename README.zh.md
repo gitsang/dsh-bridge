@@ -61,9 +61,13 @@ Pi 的 RPC 模式是稳定集成点：stdin 收 JSON 命令，stdout 发响应�
 
 ![Bridge 设置](docs/bridge-settings.png)
 
-侧栏按钮是 **Bridge**，右侧齿轮打开桥接设置：切换后端（目前仅 Pi）、指定
-会话根目录、指定 Pi 可执行文件、开关离线启动。面板复用 dsh 自己的
-`dsh-client-ui-primitives`、`--dsw-*` token、Markdown 渲染和输入卡片样式。
+侧栏按钮是 **Bridge**。进入面板后，右上角刷新按钮右侧是设置图标，打开桥接
+设置：切换后端（目前仅 Pi）、指定会话根目录、指定 Pi 可执行文件、开关离线
+启动。两个图标按钮都只显示图标，悬停只改变 dsh 通用按钮底色，不换图标也不
+出现文字。面板复用 dsh 自己的 `dsh-client-ui-primitives`、`--dsw-*` token、
+Markdown 渲染和输入卡片样式。
+
+![右上角操作](docs/header-actions.png)
 
 设置保存在 `$DSH_HOME/pi-bridge.json`（0600）；有 Pi 子进程附加时 Host 会
 拒绝修改后端或会话根目录。
