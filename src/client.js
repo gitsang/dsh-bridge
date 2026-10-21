@@ -41,7 +41,6 @@ window.__ModuleLoader__.load({
 
     const NS = 'bridge'
     const PANEL_ID = 'bridge'
-    const SETTINGS_ANCHOR_ID = 'bridge.settings'
 
     const zh = {
       panel: 'Bridge',
@@ -75,8 +74,8 @@ window.__ModuleLoader__.load({
       searchPlaceholder: '搜索名称、路径或首条消息',
       noMatches: '没有匹配的会话',
       selectHint: '从左侧选择一个会话',
-      attach: '附加并继续',
-      attaching: '正在附加…',
+      attach: '连接会话',
+      attaching: '正在连接…',
       detach: '断开',
       attached: '已连接',
       notAttached: '未连接',
@@ -88,7 +87,7 @@ window.__ModuleLoader__.load({
       stopped: '已停止',
       copy: '复制',
       copied: '已复制',
-      attachFailed: '附加失败',
+      attachFailed: '连接失败',
       promptFailed: '发送失败',
       abortFailed: '停止失败',
       detachFailed: '断开失败',
@@ -103,7 +102,7 @@ window.__ModuleLoader__.load({
       toolArguments: '参数',
       toolResult: '结果',
       emptyMessage: '（空消息）',
-      attachNotice: '已附加到 Pi 进程。',
+      attachNotice: '已连接会话。',
       detachedNotice: '已断开；会话文件保持不变。',
       turnCompleted: '已完成',
       thinking: '思考',
@@ -146,8 +145,8 @@ window.__ModuleLoader__.load({
       searchPlaceholder: 'Search name, path, or first message',
       noMatches: 'No matching sessions',
       selectHint: 'Select a session on the left',
-      attach: 'Attach & continue',
-      attaching: 'Attaching…',
+      attach: 'Connect session',
+      attaching: 'Connecting…',
       detach: 'Detach',
       attached: 'Connected',
       notAttached: 'Not connected',
@@ -159,7 +158,7 @@ window.__ModuleLoader__.load({
       stopped: 'Stopped',
       copy: 'Copy',
       copied: 'Copied',
-      attachFailed: 'Attach failed',
+      attachFailed: 'Could not connect',
       promptFailed: 'Send failed',
       abortFailed: 'Stop failed',
       detachFailed: 'Detach failed',
@@ -174,7 +173,7 @@ window.__ModuleLoader__.load({
       toolArguments: 'Arguments',
       toolResult: 'Result',
       emptyMessage: '(empty message)',
-      attachNotice: 'Attached to the Pi process.',
+      attachNotice: 'Session connected.',
       detachedNotice: 'Detached; the session file is unchanged.',
       turnCompleted: 'Completed',
       thinking: 'Thinking',
@@ -243,9 +242,6 @@ window.__ModuleLoader__.load({
       '.dshBridge_send:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover,#333)}',
       '.dshBridge_send:disabled{opacity:.35;cursor:default}',
       '.dshBridge_send[data-stop="true"]{background:var(--dsw-alias-state-error-primary,#d33)}',
-      '.dshBridge_gear{position:fixed;z-index:900;pointer-events:auto;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-tertiary,currentColor);cursor:pointer}',
-      '.dshBridge_gear:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.08));color:var(--dsw-alias-label-primary,currentColor)}',
-      '.dshBridge_gear:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#3b82f6));outline-offset:1px}',
       '.dshBridge_form{display:flex;flex-direction:column;gap:16px;min-width:0}',
       '.dshBridge_field{display:flex;flex-direction:column;gap:6px;min-width:0}',
       '.dshBridge_label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary,currentColor)}',
@@ -679,73 +675,6 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /**
-     * The gear beside the sidebar's Bridge row.
-     *
-     * The sidebar shell owns that row and exposes no trailing-action slot, so
-     * this overlay entry measures the row and pins itself to the row's right
-     * edge. It renders nothing while the row is absent (collapsed rail, other
-     * panel, or a page without that row).
-     */
-    function SettingsAnchor({ onOpen, t }) {
-      const [rect, setRect] = useState(null)
-      useEffect(() => {
-        let frame = 0
-        let last = null
-        const measure = () => {
-          frame = 0
-          const rows = [...document.querySelectorAll('nav button[aria-label]')]
-          const row = rows.find((button) => button.getAttribute('aria-label') === t('panel') && button.getBoundingClientRect().width > 96)
-          if (row === undefined) {
-            if (last !== null) {
-              last = null
-              setRect(null)
-            }
-            return
-          }
-          const box = row.getBoundingClientRect()
-          const next = { top: box.top + box.height / 2 - 12, left: box.right - 26 }
-          if (last === null || Math.abs(last.top - next.top) > 0.5 || Math.abs(last.left - next.left) > 0.5) {
-            last = next
-            setRect(next)
-          }
-        }
-        const schedule = () => {
-          if (frame !== 0) return
-          frame = requestAnimationFrame(measure)
-        }
-        measure()
-        const observer = new ResizeObserver(schedule)
-        observer.observe(document.body)
-        window.addEventListener('resize', schedule)
-        window.addEventListener('scroll', schedule, true)
-        const timer = setInterval(schedule, 500)
-        return () => {
-          if (frame !== 0) cancelAnimationFrame(frame)
-          observer.disconnect()
-          window.removeEventListener('resize', schedule)
-          window.removeEventListener('scroll', schedule, true)
-          clearInterval(timer)
-        }
-      }, [t])
-      if (rect === null) return null
-      return h(
-        Tooltip,
-        { label: t('settings') },
-        h(
-          'button',
-          {
-            type: 'button',
-            className: 'dshBridge_gear',
-            style: { top: `${rect.top}px`, left: `${rect.left}px` },
-            'aria-label': t('settings'),
-            onClick: onOpen,
-          },
-          h(IconSettingsOutlineRegular, { size: 14 }),
-        ),
-      )
-    }
-
     function BridgePage(props) {
       const { t } = props
       const [sessions, setSessions] = useState([])
@@ -767,6 +696,9 @@ window.__ModuleLoader__.load({
       const [noticeError, setNoticeError] = useState(false)
       const [dialog, setDialog] = useState(null)
       const [streamState, setStreamState] = useState('idle')
+      const [settingsOpen, setSettingsOpen] = useState(false)
+      const [config, setConfig] = useState(null)
+      const [attachedCount, setAttachedCount] = useState(0)
       const sourceRef = useRef(null)
       const firstSnapshotRef = useRef(true)
       const lastSeqRef = useRef(0)
@@ -1097,6 +1029,18 @@ window.__ModuleLoader__.load({
         stickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64
       }, [])
 
+      const openSettings = useCallback(async () => {
+        try {
+          const [settings, capabilities] = await Promise.all([api('settings'), api('capabilities')])
+          setConfig(settings)
+          setAttachedCount(Array.isArray(capabilities?.attachments) ? capabilities.attachments.length : 0)
+        } catch {
+          setConfig(null)
+          setAttachedCount(0)
+        }
+        setSettingsOpen(true)
+      }, [])
+
       const filtered = useMemo(() => {
         const query = search.trim().toLowerCase()
         if (query === '') return sessions
@@ -1128,15 +1072,24 @@ window.__ModuleLoader__.load({
               : [selectedSession?.cwd, attached ? (isStreaming ? t('running') : t('idle')) : t('notAttached')].filter(Boolean).join(' · ')),
           h('span', { className: 'dshBridge_headSpacer' }),
           selectedKey === null ? null : attached
-            ? [
-                h(Button, { key: 'detach', variant: 'ghost', size: 'sm', onClick: detach }, t('detach')),
-              ]
+            ? h(Button, { key: 'detach', variant: 'ghost', size: 'sm', onClick: detach }, t('detach'))
             : h(Button, { key: 'attach', variant: 'primary', size: 'sm', onClick: attach, disabled: attaching || detailLoading || detail === null }, attaching ? t('attaching') : t('attach')),
-          h(
-            Tooltip,
-            { label: t('refresh') },
-            h('button', { type: 'button', className: 'dshBridge_iconButton', 'aria-label': t('refresh'), onClick: loadSessions, disabled: loading }, h(IconRefreshOutlineRegular, { size: 16 })),
-          ),
+          h('button', {
+            key: 'refresh',
+            type: 'button',
+            className: 'dshBridge_iconButton',
+            'aria-label': t('refresh'),
+            onClick: loadSessions,
+            disabled: loading,
+          }, h(IconRefreshOutlineRegular, { size: 16 })),
+          h('button', {
+            key: 'settings',
+            type: 'button',
+            className: 'dshBridge_iconButton',
+            'aria-label': t('settings'),
+            'aria-haspopup': 'dialog',
+            onClick: openSettings,
+          }, h(IconSettingsOutlineRegular, { size: 16 })),
         ),
         notice !== null ? h('div', { className: 'dshBridge_notice', 'data-error': noticeError ? 'true' : undefined }, notice) : null,
         streamState === 'disconnected' ? h('div', { className: 'dshBridge_notice' }, t('eventsDisconnected')) : null,
@@ -1279,6 +1232,19 @@ window.__ModuleLoader__.load({
           ),
         ),
         h(ExtensionDialog, { request: dialog, t, onRespond: respondDialog }),
+        h(SettingsModal, {
+          open: settingsOpen,
+          onClose: () => setSettingsOpen(false),
+          t,
+          initial: config,
+          disabled: attachedCount > 0,
+          onSaved: (body) => {
+            setConfig(body)
+            setAttachedCount(0)
+            showNotice(t('settingsSaved'))
+            loadSessions()
+          },
+        }),
       )
     }
 
@@ -1358,46 +1324,6 @@ window.__ModuleLoader__.load({
           { name: 'sidebar.panellist', id: PANEL_ID, order: 20, locale: NS, label: () => t('panel') },
           function BridgePanelIcon({ size }) {
             return h(IconApiOutlineRegular, { size })
-          },
-        ),
-      )
-      ctx.slots.inject('shell.overlay', () =>
-        ctx.slots.register(
-          { name: 'shell.overlay', id: SETTINGS_ANCHOR_ID, locale: NS },
-          function BridgeSettingsAnchor() {
-            const [open, setOpen] = useState(false)
-            const [config, setConfig] = useState(null)
-            const [attached, setAttached] = useState(false)
-            const openSettings = useCallback(async () => {
-              try {
-                const [settings, capabilities] = await Promise.all([api('settings'), api('capabilities')])
-                setConfig(settings)
-                setAttached(Array.isArray(capabilities?.attachments) && capabilities.attachments.length > 0)
-              } catch {
-                setConfig(null)
-                setAttached(false)
-              }
-              setOpen(true)
-            }, [])
-            return h(
-              React.Fragment,
-              null,
-              h(SettingsAnchor, { onOpen: openSettings, t }),
-              h(SettingsModal, {
-                open,
-                onClose: () => setOpen(false),
-                t,
-                initial: config,
-                disabled: attached,
-                onSaved: (body) => {
-                  setConfig(body)
-                  // The sessions list and the attach roster read the same
-                  // settings; tell the page to re-read instead of duplicating
-                  // settings state in both entries.
-                  window.dispatchEvent(new CustomEvent('dsh-bridge:settings-changed'))
-                },
-              }),
-            )
           },
         ),
       )

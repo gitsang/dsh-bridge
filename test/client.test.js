@@ -47,7 +47,7 @@ function moduleExports() {
   })
 }
 
-test('registers the Bridge panel, sidebar entry, and settings anchor', () => {
+test('registers the Bridge panel and sidebar entry', () => {
   const exports = moduleExports()
   assert.equal(typeof exports.apply, 'function')
   assert.deepEqual(exports.inject, ['slots', 'locale'])
@@ -85,7 +85,9 @@ test('registers the Bridge panel, sidebar entry, and settings anchor', () => {
   assert.equal(bySlot.main.key, 'bridge')
   assert.equal(bySlot['sidebar.panellist'].id, 'bridge')
   assert.equal(bySlot['sidebar.panellist'].label(), 'panel')
-  assert.equal(bySlot['shell.overlay'].id, 'bridge.settings')
+  // Settings live in the page header, so no shell overlay entry is registered.
+  assert.equal(bySlot['shell.overlay'], undefined)
+  assert.equal(registered.length, 2)
 })
 
 test('bridge dictionaries keep the panel named Bridge in both locales', () => {
