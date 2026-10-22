@@ -95,6 +95,26 @@ A browser-facing session key is:
 
 Bridge edits/deletes are rejected while that bridge has a live attachment.
 
+## Connection lifecycle and status
+
+The host keeps a per-bridge connection state, not a per-session one:
+
+```text
+connections: bridgeId -> { state: idle|connecting|connected|failed,
+                           error, checkedAt, latencyMs, detail }
+```
+
+On host start (unless `BRIDGE_AUTO_CONNECT=0`) every bridge is auto-connected:
+the engine probe validates the launcher/session root, the newest session is
+listed, and Pi is attached over RPC. That attachment stays in the host
+`attachments` map and survives browser disconnects; closing the browser only
+removes an SSE subscriber.
+
+`GET /api/bridge/status` exposes the states and `POST` re-runs a probe.
+`attach()` deduplicates concurrent spawns with a pending-attachment map, so
+startup auto-connect and a user attach cannot spawn two Pi children for one
+session.
+
 ## Browser integration
 
 ### Brand switcher

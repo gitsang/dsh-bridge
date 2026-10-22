@@ -69,6 +69,19 @@ if (listed.data.sessions.length > 0) {
     assert.equal(state.status, 200)
     ok(state.data.state.model?.id ?? 'unknown model')
 
+    step('GET /api/bridge/models')
+    const models = await client.route(`models?key=${encodeURIComponent(newest.key)}`)
+    assert.equal(models.status, 200, JSON.stringify(models.data))
+    const catalog = Array.isArray(models.data.models) ? models.data.models : models.data.models?.models
+    assert.ok(Array.isArray(catalog) && catalog.length > 0, 'expected a non-empty model catalog')
+    ok(`${catalog.length} models`)
+
+    step('GET /api/bridge/stats')
+    const stats = await client.route(`stats?key=${encodeURIComponent(newest.key)}`)
+    assert.equal(stats.status, 200, JSON.stringify(stats.data))
+    assert.equal(typeof stats.data.stats, 'object')
+    ok(stats.data.stats.totalMessages === undefined ? 'stats' : `${stats.data.stats.totalMessages} messages`)
+
     if (attach) {
       step('SSE /api/bridge/events')
       const controller = new AbortController()

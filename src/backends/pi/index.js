@@ -5,9 +5,10 @@
  * file parsing, the RPC attachment, and the settings fields Pi needs. The
  * generic bridge host only sees the BackendAdapter contract.
  */
+import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { PiAttachment } from './attachment.js'
+import { delimiter, isAbsolute, join, resolve } from 'node:path'
+import { PiAttachment, resolvePiCommand } from './attachment.js'
 import {
   listPiSessions,
   pathFromSessionKey,
@@ -35,6 +36,46 @@ function decorateSession(session) {
   return {
     ...session,
     nativeKey: session.key,
+  }
+}
+
+/** Find an executable on PATH without launching a process. */
+function executableOnPath(command, env) {
+  if (command.includes('/') || isAbsolute(command)) return existsSync(command)
+  const pathValue = env.PATH ?? env.Path ?? ''
+  for (const directory of pathValue.split(delimiter)) {
+    if (directory === '') continue
+    const candidate = join(directory, command)
+    if (existsSync(candidate)) return true
+    if (process.platform === 'win32' && existsSync(`${candidate}.exe`)) return true
+  }
+  return false
+}
+
+/**
+ * Bridge-level readiness probe. It answers "would an attach for this bridge
+ * be able to start?" without spawning a Pi process: the launcher must resolve
+ * and the session root must be a readable directory.
+ */
+function probePi(config, env) {
+  const root = resolvePiSessionsRoot(config, env)
+  if (!existsSync(root)) {
+    throw new Error(`sessions root does not exist: ${root}`)
+  }
+  const stats = statSync(root)
+  if (!stats.isDirectory()) throw new Error(`sessions root is not a directory: ${root}`)
+  const childEnv = {
+    ...env,
+    ...(config.binPath === null || config.binPath === undefined ? {} : { PI_BIN: config.binPath }),
+  }
+  const resolved = resolvePiCommand(childEnv)
+  if (!executableOnPath(resolved.command, childEnv)) {
+    throw new Error(`Pi executable was not found: ${resolved.command}`)
+  }
+  return {
+    sessionsRoot: root,
+    command: resolved.command,
+    prefixArgs: resolved.prefixArgs,
   }
 }
 
@@ -105,6 +146,10 @@ export const piEngine = {
       if (info?.stderr) logger?.warn?.(`bridge: Pi exited for ${file}: ${info.stderr.trim()}`)
     })
     return attachment
+  },
+
+  probe(config, env) {
+    return probePi(config, env)
   },
 
   /** Map Pi's wire events onto the backend-neutral bridge event vocabulary. */

@@ -9,15 +9,22 @@ const fake = new URL('./fixtures/fake-pi.mjs', import.meta.url).pathname
 
 // Never let a host test touch the real ~/.dsh bridge store.
 let originalHome
+let originalAutoConnect
 let testHome
 beforeEach(async () => {
   originalHome = process.env.DSH_HOME
+  originalAutoConnect = process.env.BRIDGE_AUTO_CONNECT
   testHome = await mkdtemp(join(tmpdir(), 'bridge-plugin-env-'))
   process.env.DSH_HOME = testHome
+  // Most tests drive routes directly; the auto-connect probe is covered by its
+  // own test. Disabling it keeps unit tests from spawning agent processes.
+  process.env.BRIDGE_AUTO_CONNECT = '0'
 })
 afterEach(async () => {
   if (originalHome === undefined) delete process.env.DSH_HOME
   else process.env.DSH_HOME = originalHome
+  if (originalAutoConnect === undefined) delete process.env.BRIDGE_AUTO_CONNECT
+  else process.env.BRIDGE_AUTO_CONNECT = originalAutoConnect
   if (testHome !== undefined) await rm(testHome, { recursive: true, force: true })
 })
 
@@ -100,6 +107,8 @@ test('registers the bridge-instance route table', () => {
     '/api/bridge/sessions',
     '/api/bridge/settings',
     '/api/bridge/state',
+    '/api/bridge/stats',
+    '/api/bridge/status',
     '/api/bridge/ui-response',
   ])
 })
@@ -263,6 +272,25 @@ test('attaches a Pi child, prompts it, and detaches', async () => {
       assert.equal(state.ok, true)
       assert.equal(state.state.sessionId, 'fake-session')
 
+      const models = await (await call(routes, `models?key=${encodeURIComponent(key)}`)).json()
+      assert.equal(models.ok, true)
+      assert.equal(models.models.models.length, 2)
+      assert.equal(models.models.models[1].name, 'Fake Two')
+
+      const selected = await (await call(routes, 'models', post({
+        key,
+        provider: 'fake',
+        model: 'fake-model-2',
+      }))).json()
+      assert.equal(selected.ok, true)
+      assert.equal(selected.model.id, 'fake-model-2')
+
+      const stats = await (await call(routes, `stats?key=${encodeURIComponent(key)}`)).json()
+      assert.equal(stats.ok, true)
+      assert.equal(stats.stats.tokens.input, 12)
+      assert.equal(stats.stats.tokens.cacheRead, 30)
+      assert.equal(stats.stats.totalMessages, 2)
+
       const blocked = await call(routes, 'bridges', put({ id: 'pi-local', config: { offline: false } }))
       assert.equal(blocked.status, 409)
 
@@ -318,6 +346,60 @@ test('planned engines can be saved and report an unavailable adapter', async () 
   } finally {
     if (previousHome === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previousHome
+  }
+})
+
+test('connection status starts idle, probes on demand, and reports per-bridge state', async () => {
+  const { root } = await fixtureSession()
+  const { ctx, routes } = host()
+  apply(ctx)
+  const initial = await (await call(routes, 'status')).json()
+  assert.equal(initial.ok, true)
+  assert.equal(initial.bridges.length, 1)
+  assert.equal(initial.bridges[0].state, 'idle')
+
+  await call(routes, 'bridges', put({ id: 'pi-local', config: { sessionsRoot: root } }))
+  const probed = await (await call(routes, 'status', post({}))).json()
+  assert.equal(probed.bridges.length, 1)
+  assert.equal(probed.bridges[0].state, 'connected')
+  assert.equal(probed.bridges[0].engine, 'pi')
+})
+
+test('a failing connection probe reports a red state with the reason', async () => {
+  const { ctx, routes } = host()
+  apply(ctx)
+  await call(routes, 'bridges', put({ id: 'pi-local', config: { sessionsRoot: '/definitely/missing/sessions' } }))
+  const probed = await (await call(routes, 'status', post({}))).json()
+  assert.equal(probed.bridges[0].state, 'failed')
+  assert.match(probed.bridges[0].error, /does not exist/)
+})
+
+test('auto-connect warms the newest session at host startup when enabled', async () => {
+  const { root } = await fixtureSession()
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const previousHome = process.env.DSH_HOME
+  const previousAuto = process.env.BRIDGE_AUTO_CONNECT
+  process.env.DSH_HOME = home
+  process.env.BRIDGE_AUTO_CONNECT = '1'
+  try {
+    const { ctx, routes, disposers } = host()
+    apply(ctx)
+    await call(routes, 'bridges', put({
+      id: 'pi-local',
+      config: { sessionsRoot: root, binPath: fake },
+    }))
+    // The startup effect schedules its work on the next tick.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const status = await (await call(routes, 'status')).json()
+    assert.equal(status.bridges[0].state, 'connected')
+    assert.match(status.bridges[0].detail.warmSession, /^pi-local\./)
+    for (const dispose of disposers.reverse()) await dispose?.()
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    if (previousAuto === undefined) delete process.env.BRIDGE_AUTO_CONNECT
+    else process.env.BRIDGE_AUTO_CONNECT = previousAuto
   }
 })
 

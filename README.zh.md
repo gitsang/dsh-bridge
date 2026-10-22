@@ -18,12 +18,14 @@ Pi 是第一个完整支持的引擎。Codex、OpenCode、远程 DSH 会出现�
 - [x] 设置悬浮层内新增 / 编辑 / 删除桥接
 - [x] CLI / Web 模式与按模式过滤的引擎列表
 - [x] Pi 引擎完整可用：JSONL 会话、RPC attach、事件归一化、prompt
-- [x] 左上角「本机 + 已配置桥接」下拉框
+- [x] 左上角「本机 + 已配置桥接」下拉框，带实时连接状态点
+- [x] 启动自动连接：每个桥接预热最新会话
 - [x] 选中桥接后由侧边栏直接展示该桥接的工作区 / 会话
 - [x] 与 dsh Web 一致的侧边栏浏览器：按工作区 / 工作区树 / 单列表分组、手动 / 最近更新排序、会话筛选
 - [x] dsh 风格搜索按钮与结果列表
 - [x] dsh 风格“选择工作区目录”弹窗，可新建文件夹并加入工作区
 - [x] dsh 风格对话界面与 composer
+- [x] composer 模型选择器与 dsh 风格 statusline（轮次/步数、Token、缓存命中）
 - [ ] Codex 引擎适配器
 - [ ] OpenCode 引擎适配器
 - [ ] 远程 DSH Web 引擎适配器
@@ -45,8 +47,21 @@ Bridge 设置
 
 - **本机**：回到 dsh 原生对话，同时恢复原生侧边栏。
 - 每个已配置桥接都是独立一行；同一个引擎出现多行是正常的。
+- 每个桥接右侧有状态点：绿色=已连接、橙色=正在连接、红色=连接失败；悬停可看原因。
 - 未接入的引擎仍然展示，但不可选择。
 - **Bridge 设置**：在当前页面上悬浮打开设置弹窗，不跳转页面。
+
+### 连接生命周期
+
+dsh Host 启动时会自动连接所有已配置桥接。对 Pi 来说：
+
+1. 探测可执行文件和 Session 根目录；
+2. 列出该桥接的会话；
+3. 用 Pi RPC 连接最新会话，并保持该进程存活。
+
+`GET /api/bridge/status` 返回每个桥接的连接状态，下拉框打开时会轮询刷新。
+连接断开后状态点变红；重新检测或再次 attach 会恢复绿色。设置
+`BRIDGE_AUTO_CONNECT=0` 可以关闭自动连接，恢复按需连接。
 
 ### 设置悬浮层
 
@@ -73,6 +88,18 @@ Bridge 设置
    更新排序，归档筛选，搜索按钮和目录选择弹窗；
 3. 右侧加载会话历史；
 4. composer 和实时流继续绑定该桥接。
+
+composer 采用 dsh 的停靠卡片规格（`--dsh-composer-*` 尺寸、面板圆角、输入
+surface 和阴影）。右下角控制行包含：
+
+- **模型选择器**：读取当前 attachment 的模型目录，按 provider 分组，切换时
+  调用引擎原生的 `set_model` RPC；
+- 圆形**发送**按钮，agent 运行时切换为**停止**。
+
+卡片下方是仿 dsh 的 statusline：仪表盘 pill 展示轮次/步数，数据库 pill 展示
+总 Token 与缓存命中率；点击可展开同款详情面板。Bridge 的统计来自引擎的
+`get_session_stats` RPC，不支持统计的引擎则回退到对话记录汇总。这里是视觉
+与交互对齐，而不是复用 dsh 的 session projection：外部 agent 有自己的会话模型。
 
 选择 **本机** 后释放 Bridge 侧边栏 occupant，恢复 dsh 原生侧边栏。
 
@@ -124,6 +151,7 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 | --- | --- |
 | `GET /api/bridge/settings` | 模式、引擎和脱敏后的桥接列表 |
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | 管理桥接 |
+| `GET/POST /api/bridge/status` | 读取或刷新每个桥接的连接状态 |
 | `GET /api/bridge/sessions?bridge=<id>` | 某个桥接的会话/工作区 |
 | `GET/POST /api/bridge/directories` | 浏览 / 新建本地工作区目录 |
 | `GET /api/bridge/session?key=…` | 单个会话历史 |
@@ -136,6 +164,8 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 | `POST /api/bridge/abort` | 中断当前回复 |
 | `POST /api/bridge/ui-response` | 回复扩展对话框 |
 | `GET /api/bridge/models?key=…` | 模型目录 |
+| `POST /api/bridge/models` | 在实时 attachment 上选择 provider/model |
+| `GET /api/bridge/stats?key=…` | 引擎会话统计 |
 | `GET /api/bridge/history-message?key=…` | 纯文本历史 |
 
 会话 key 为 `<bridgeId>.<base64url(nativeKey)>`，只能解析到该桥接；修改桥接的

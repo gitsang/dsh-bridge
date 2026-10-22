@@ -39,8 +39,10 @@ window.__ModuleLoader__.load({
       IconEditOutlineRegular,
       IconEllipsisOutlineRegular,
       IconFlatListOutlineRegular,
+      IconDatabaseOutlineRegular,
       IconFolderCloseRegular,
       IconFolderOpenRegular,
+      IconGaugeOutlineRegular,
       IconPauseOutlineRegular,
       IconPlusOutlineRegular,
       IconProjectAddOutlineRegular,
@@ -143,6 +145,29 @@ window.__ModuleLoader__.load({
 
     function notifyBridgeConfigChanged(payload) {
       if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(CONFIG_CHANGED_EVENT, { detail: payload }))
+    }
+
+    function connectionState(bridge, t) {
+      const connection = bridge?.connection ?? { state: 'idle' }
+      const state = connection.state ?? 'idle'
+      const label = state === 'connected'
+        ? t('connectionConnected')
+        : state === 'connecting'
+          ? t('connectionConnecting')
+          : state === 'failed'
+            ? t('connectionFailed')
+            : t('connectionIdle')
+      return { state, label, error: connection.error ?? null }
+    }
+
+    function StatusDot({ state, label }) {
+      return h('span', {
+        className: 'dshBridge_statusDot',
+        'data-state': state,
+        role: 'img',
+        'aria-label': label,
+        title: label,
+      })
     }
 
     function useBridgeUi() {
@@ -830,6 +855,11 @@ window.__ModuleLoader__.load({
       settingsFailed: '保存失败',
       local: '本机',
       bridgeMenu: '选择桥接',
+      connectionConnected: '已连接',
+      connectionConnecting: '正在连接',
+      connectionFailed: '连接失败',
+      connectionIdle: '未检测',
+      reconnect: '重新检测连接',
       manageBridges: '管理桥接',
       bridgeSettingsTitle: 'Bridge 设置',
       bridgeSettingsHint: '选择一个已配置的桥接，或新增一个 Bridge。',
@@ -941,6 +971,23 @@ window.__ModuleLoader__.load({
       idle: '空闲',
       send: '发送',
       placeholder: '给这个会话发送消息…',
+      chooseModel: '选择模型',
+      modelLoading: '正在加载模型…',
+      modelLoadFailed: '无法加载模型目录',
+      modelSelectFailed: '切换模型失败',
+      statsCounts: '{turns} 轮 {steps} 步',
+      statsCacheHit: '缓存命中 {percent}%',
+      statsDialogTitle: '会话统计',
+      statsUsageTitle: 'Token 用量',
+      statsTurns: '用户消息',
+      statsSteps: '助手步骤',
+      statsToolCalls: '工具调用',
+      statsTotalMessages: '消息总数',
+      statsUncachedInput: '未缓存输入',
+      statsCacheRead: '缓存读取',
+      statsCacheWrite: '缓存写入',
+      statsOutput: '输出',
+      statsTokens: '{count} tok',
       stop: '停止',
       stopped: '已停止',
       copy: '复制',
@@ -985,6 +1032,11 @@ window.__ModuleLoader__.load({
       settingsFailed: 'Could not save',
       local: 'Local',
       bridgeMenu: 'Choose a bridge',
+      connectionConnected: 'Connected',
+      connectionConnecting: 'Connecting…',
+      connectionFailed: 'Connection failed',
+      connectionIdle: 'Not checked',
+      reconnect: 'Check connection again',
       manageBridges: 'Manage bridges',
       bridgeSettingsTitle: 'Bridge settings',
       bridgeSettingsHint: 'Pick a configured bridge, or add another Bridge.',
@@ -1096,6 +1148,23 @@ window.__ModuleLoader__.load({
       idle: 'Idle',
       send: 'Send',
       placeholder: 'Message this session…',
+      chooseModel: 'Choose model',
+      modelLoading: 'Loading models…',
+      modelLoadFailed: 'Could not load models',
+      modelSelectFailed: 'Could not switch model',
+      statsCounts: '{turns} turns {steps} steps',
+      statsCacheHit: 'Cache hit {percent}%',
+      statsDialogTitle: 'Session statistics',
+      statsUsageTitle: 'Token usage',
+      statsTurns: 'User messages',
+      statsSteps: 'Assistant steps',
+      statsToolCalls: 'Tool calls',
+      statsTotalMessages: 'Total messages',
+      statsUncachedInput: 'Uncached input',
+      statsCacheRead: 'Cached input',
+      statsCacheWrite: 'Cache write',
+      statsOutput: 'Output',
+      statsTokens: '{count} tok',
       stop: 'Stop',
       stopped: 'Stopped',
       copy: 'Copy',
@@ -1154,21 +1223,45 @@ window.__ModuleLoader__.load({
       '.dshBridge_blankHint{font-size:12px;line-height:20px;max-width:420px}',
       '.dshBridge_notice{margin:0 auto;max-width:712px;padding:0 24px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,currentColor)}',
       '.dshBridge_notice[data-error="true"]{color:var(--dsw-alias-state-error-primary,#d33)}',
-      '.dshBridge_composerSeat{flex:none;padding:0 0 18px}',
-      '.dshBridge_composerStack{box-sizing:border-box;max-width:744px;margin:0 auto;padding:0 16px;display:flex;flex-direction:column;gap:6px}',
-      '.dshBridge_card{display:flex;flex-direction:column;gap:0;border-radius:var(--dsw-radius-panel,28px);background:var(--dsw-alias-bg-base,Canvas);box-shadow:var(--dsw-elevation-prominent,0 0 0 .5px rgba(0,0,0,.1),0 4px 16px rgba(0,0,0,.03));padding:8px 0 0}',
-      '.dshBridge_textarea{box-sizing:border-box;display:block;width:100%;min-height:48px;max-height:220px;padding:6px 20px 2px;border:0;outline:none;resize:none;background:transparent;color:inherit;font:inherit;font-size:14px;line-height:24px}',
-      '.dshBridge_textarea::placeholder{color:var(--dsw-alias-label-dimmed,currentColor)}',
-      '.dshBridge_toolbar{display:flex;align-items:center;gap:6px;padding:2px 12px 10px 12px;min-height:36px}',
+      '.dshBridge_composerSeat{flex:none;padding:0 var(--dsh-composer-side-clearance,16px) 4px}',
+      '.dshBridge_composerStack{box-sizing:border-box;display:flex;flex-direction:column;gap:4px;width:100%;max-width:var(--dsh-composer-card-max-width,744px);margin:0 auto}',
+      '.dshBridge_card{box-sizing:border-box;display:flex;flex-direction:column;gap:12px;width:100%;padding-top:8px;border:0;border-radius:var(--dsw-radius-panel,28px);background:var(--dsw-specific-input-major,var(--dsw-alias-bg-base,Canvas));--dsw-elevation-stroke-color:var(--dsw-alias-border-l2,rgba(0,0,0,.12));box-shadow:var(--dsw-elevation-soft,0 0 0 .5px rgba(0,0,0,.1),0 4px 16px rgba(0,0,0,.03));font-size:var(--dsh-content-font-size,14px);line-height:calc(24px + var(--dsh-content-font-delta,0px))}',
+      '.dshBridge_textarea{box-sizing:border-box;display:block;width:100%;min-height:36px;max-height:var(--dsh-composer-text-max-height,336px);padding:4px 8px 0 14px;border:0;outline:none;resize:none;background:transparent;color:var(--dsw-alias-label-primary,currentColor);font:inherit;font-size:inherit;line-height:inherit;caret-color:var(--dsw-alias-state-business-primary,#3b82f6)}',
+      '.dshBridge_textarea::placeholder{color:var(--dsw-alias-label-caption,var(--dsw-alias-label-tertiary,currentColor))}',
+      '.dshBridge_toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:2px 8px 6px;min-width:0;min-height:34px;container-type:inline-size}',
+      '.dshBridge_modelSeat{display:flex;align-items:center;min-width:0}',
+      '.dshBridge_modelTrigger{display:flex;align-items:center;gap:4px;min-width:0;max-width:min(360px,45cqw);height:28px;padding:0 4px 0 8px;border:0;border-radius:var(--dsw-radius-sm,8px);outline:none;background:transparent;color:var(--dsw-alias-label-secondary,currentColor);font:inherit;font-size:13px;line-height:20px;font-weight:400;cursor:pointer}',
+      '.dshBridge_modelTrigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
+      '.dshBridge_modelTrigger:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#3b82f6))}',
+      '.dshBridge_modelTrigger:disabled{color:var(--dsw-alias-label-dimmed,currentColor);cursor:default;opacity:.7}',
+      '.dshBridge_modelLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.dshBridge_modelChevron{flex:none;color:var(--dsw-alias-label-caption,currentColor)}',
+      '.dshBridge_modelMenu{min-width:240px}',
       '.dshBridge_toolbarSpacer{flex:1;min-width:4px}',
       '.dshBridge_hint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor);white-space:nowrap}',
       '.dshBridge_iconButton{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-secondary,currentColor);cursor:pointer;font:inherit}',
       '.dshBridge_iconButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
       '.dshBridge_iconButton:disabled{opacity:.4;cursor:default}',
-      '.dshBridge_send{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:999px;background:var(--dsw-alias-button-primary-fill,#0f1115);color:var(--dsw-alias-label-primary-foreground,#fff);cursor:pointer}',
-      '.dshBridge_send:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover,#333)}',
-      '.dshBridge_send:disabled{opacity:.35;cursor:default}',
+      '.dshBridge_send{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;flex:none;width:34px;height:34px;padding:0;border:0;border-radius:999px;background:var(--dsw-alias-button-info-fill,#3964fe);color:#fff;cursor:pointer;transition:background-color .1s ease;transform:translateY(-2px)}',
+      '.dshBridge_send:hover:not(:disabled){background:var(--dsw-alias-button-info-hover,#2f55d8)}',
+      '.dshBridge_send:disabled{opacity:.4;cursor:default}',
       '.dshBridge_send[data-stop="true"]{background:var(--dsw-alias-state-error-primary,#d33)}',
+      '.dshBridge_statusline{box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:12px;min-height:22px;padding-top:4px;font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px))}',
+      '.dshBridge_statusline:empty{display:none}',
+      '.dshBridge_statusPillWrap{position:relative;display:inline-flex;min-width:0}',
+      '.dshBridge_statusPill{box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:1px 8px;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-tertiary,currentColor);font:inherit;font-variant-numeric:tabular-nums;line-height:inherit;white-space:nowrap;cursor:pointer}',
+      '.dshBridge_statusPill svg{flex:none;width:14px;height:14px}',
+      '.dshBridge_statusPill:hover,.dshBridge_statusPill[aria-expanded="true"]{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05));color:var(--dsw-alias-label-secondary,currentColor)}',
+      '.dshBridge_statusLabel{min-width:0;overflow:hidden;text-overflow:ellipsis}',
+      '.dshBridge_statusPanel{position:absolute;right:0;bottom:calc(100% + 8px);z-index:1100;box-sizing:border-box;width:max-content;min-width:min(300px,calc(100vw - 24px));max-width:min(440px,calc(100vw - 24px));padding:16px;border:0;border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-specific-menu,var(--dsw-alias-bg-layer-2,Canvas));backdrop-filter:var(--dsw-menu-backdrop-filter);--dsw-elevation-stroke-color:var(--dsw-alias-border-l1,rgba(0,0,0,.1));box-shadow:var(--dsw-elevation-prominent,0 6px 24px rgba(0,0,0,.12));color:var(--dsw-alias-label-secondary,currentColor);font-size:12px;line-height:18px;cursor:default}',
+      '.dshBridge_statusTitle{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:8px;font-weight:500;color:var(--dsw-alias-label-primary,currentColor)}',
+      '.dshBridge_statusTitleLabel{display:inline-flex;align-items:center;gap:6px;min-width:0}',
+      '.dshBridge_statusTitleLabel svg{flex:none;width:14px;height:14px}',
+      '.dshBridge_statusTitleValue{font-variant-numeric:tabular-nums}',
+      '.dshBridge_statusRule{margin-bottom:10px;border-top:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))}',
+      '.dshBridge_statusDetails{display:grid;grid-template-columns:minmax(76px,auto) minmax(0,1fr);gap:6px 16px;margin:0;color:var(--dsw-alias-label-tertiary,currentColor)}',
+      '.dshBridge_statusDetails dt,.dshBridge_statusDetails dd{min-width:0;margin:0}',
+      '.dshBridge_statusDetails dd{text-align:right;color:var(--dsw-alias-label-secondary,currentColor);font-variant-numeric:tabular-nums}',
       '.dshBridge_form{display:flex;flex-direction:column;gap:16px;min-width:0}',
       '.dshBridge_field{display:flex;flex-direction:column;gap:6px;min-width:0}',
       '.dshBridge_label{font-size:13px;line-height:20px;font-weight:500;color:var(--dsw-alias-label-primary,currentColor)}',
@@ -1190,6 +1283,12 @@ window.__ModuleLoader__.load({
       '.dshBridge_menuLabel{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-width:0}',
       '.dshBridge_menuName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.dshBridge_menuMeta{flex:none;margin-left:auto;font-size:10px;line-height:14px;white-space:nowrap;color:var(--dsw-alias-label-tertiary,currentColor)}',
+      '.dshBridge_statusDot{flex:none;width:7px;height:7px;border-radius:999px;background:var(--dsw-alias-label-dimmed,rgba(0,0,0,.25))}',
+      '.dshBridge_statusDot[data-state="connected"]{background:var(--dsw-alias-state-success-primary,#16a34a);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-state-success-primary,#16a34a) 18%,transparent)}',
+      '.dshBridge_statusDot[data-state="connecting"]{background:var(--dsw-alias-state-warning-primary,#d97706);animation:dshBridgePulse 1.1s ease-in-out infinite}',
+      '.dshBridge_statusDot[data-state="failed"]{background:var(--dsw-alias-state-error-primary,#dc2626)}',
+      '@keyframes dshBridgePulse{0%,100%{opacity:1}50%{opacity:.35}}',
+      '.dshBridge_statusRow{display:inline-flex;align-items:center;gap:6px}',
       '.dshBridge_tag{flex:none;padding:1px 7px;border-radius:999px;background:var(--dsw-alias-interactive-bg-active,rgba(0,0,0,.07));font-size:10px;line-height:16px;color:var(--dsw-alias-label-secondary,currentColor)}',
       '.dshBridge_tag[data-active="true"]{background:var(--dsw-alias-state-business-primary,#3b82f6);color:var(--dsw-alias-label-primary-foreground,#fff)}',
       '.dshBridge_sideWorkspace{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 4px 8px;box-sizing:border-box;color:var(--dsw-alias-label-primary,currentColor)}',
@@ -1222,7 +1321,7 @@ window.__ModuleLoader__.load({
       '.dshBridge_railWorkspace{display:flex;justify-content:center;padding:6px 0}',
       '.dshBridge_railButton{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:var(--dsw-radius-md,10px);background:transparent;color:var(--dsw-alias-label-secondary,currentColor);cursor:pointer}',
       '.dshBridge_railButton:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
-      '.dshBridge_settingsShell{display:flex;width:760px;max-width:78vw;min-height:440px;max-height:68vh;border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));border-radius:var(--dsw-radius-md,12px);overflow:hidden;background:var(--dsw-alias-bg-layer-1,Canvas)}',
+      '.dshBridge_settingsShell{display:flex;width:840px;max-width:84vw;min-height:520px;max-height:76vh;border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));border-radius:var(--dsw-radius-md,12px);overflow:hidden;background:var(--dsw-alias-bg-layer-1,Canvas)}',
       '.dshBridge_settingsNav{flex:none;display:flex;flex-direction:column;gap:4px;width:190px;padding:12px 8px;box-sizing:border-box;border-right:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1));background:var(--dsw-alias-bg-layer-2,transparent)}',
       '.dshBridge_settingsNavTitle{padding:2px 8px 8px;font-size:11px;line-height:16px;font-weight:600;color:var(--dsw-alias-label-tertiary,currentColor)}',
       '.dshBridge_settingsNavItem{display:flex;align-items:center;gap:8px;width:100%;padding:8px 9px;border:0;border-radius:var(--dsw-radius-md,10px);background:transparent;color:var(--dsw-alias-label-secondary,currentColor);font:inherit;font-size:12px;text-align:left;cursor:pointer}',
@@ -1336,6 +1435,268 @@ window.__ModuleLoader__.load({
       } catch {
         return String(value)
       }
+    }
+
+    /** Compact token count with the same K/M rhythm as dsh's status pills. */
+    function compactTokens(value) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '0'
+      if (value < 1000) return String(Math.round(value))
+      if (value < 1_000_000) {
+        const scaled = value / 1000
+        return `${scaled >= 100 ? Math.round(scaled) : Math.round(scaled * 10) / 10}K`
+      }
+      const scaled = value / 1_000_000
+      return `${scaled >= 100 ? Math.round(scaled) : Math.round(scaled * 10) / 10}M`
+    }
+
+    function exactTokens(value) {
+      const digits = String(Math.round(typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0))
+      return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+    }
+
+    function countNumber(value) {
+      return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0
+    }
+
+    /** Normalize Pi's `get_session_stats` payload into the dock's display shape. */
+    function normalizeBridgeStats(raw) {
+      if (raw === null || typeof raw !== 'object') return null
+      const tokens = raw.tokens !== null && typeof raw.tokens === 'object' ? raw.tokens : {}
+      const uncachedInput = countNumber(tokens.input ?? raw.uncachedInputTokens)
+      const cacheRead = countNumber(tokens.cacheRead ?? raw.cacheReadTokens)
+      const cacheWrite = countNumber(tokens.cacheWrite ?? raw.cacheWriteTokens)
+      const output = countNumber(tokens.output ?? raw.outputTokens)
+      const total = countNumber(tokens.total) || uncachedInput + cacheRead + cacheWrite + output
+      return {
+        turns: countNumber(raw.userMessages ?? raw.turns),
+        steps: countNumber(raw.assistantMessages ?? raw.steps),
+        toolCalls: countNumber(raw.toolCalls),
+        totalMessages: countNumber(raw.totalMessages),
+        tokens: { uncachedInput, cacheRead, cacheWrite, output, total },
+      }
+    }
+
+    /** Fallback statistics folded from the durable transcript when the engine has no stats RPC. */
+    function deriveBridgeStats(messages) {
+      const list = Array.isArray(messages) ? messages : []
+      const tokens = { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0, total: 0 }
+      let turns = 0
+      let steps = 0
+      let toolCalls = 0
+      for (const message of list) {
+        if (message?.role === 'user') turns += 1
+        if (message?.role === 'assistant') {
+          steps += 1
+          const usage = message.usage !== null && typeof message.usage === 'object' ? message.usage : {}
+          tokens.uncachedInput += countNumber(usage.input)
+          tokens.cacheRead += countNumber(usage.cacheRead)
+          tokens.cacheWrite += countNumber(usage.cacheWrite)
+          tokens.output += countNumber(usage.output)
+        }
+        if (Array.isArray(message?.content)) {
+          toolCalls += message.content.filter((block) => block && block.type === 'toolCall').length
+        }
+      }
+      tokens.total = tokens.uncachedInput + tokens.cacheRead + tokens.cacheWrite + tokens.output
+      return { turns, steps, toolCalls, totalMessages: list.length, tokens }
+    }
+
+    function statsVisible(stats) {
+      return stats !== null && typeof stats === 'object'
+        && (stats.steps > 0 || stats.turns > 0 || stats.tokens.total > 0)
+    }
+
+    /** Cache-hit share over every prompt-side billing bucket, like dsh's usage pill. */
+    function bridgeCacheHitPercent(tokens) {
+      const denominator = tokens.uncachedInput + tokens.cacheRead + tokens.cacheWrite
+      if (denominator <= 0) return null
+      if (tokens.cacheRead === denominator) return '100'
+      const percent = (tokens.cacheRead / denominator) * 100
+      if (percent > 99.9 && percent < 100) return percent.toFixed(2)
+      return String(Math.round(percent))
+    }
+
+    function normalizeModelCatalog(value) {
+      const list = Array.isArray(value) ? value : Array.isArray(value?.models) ? value.models : []
+      return list
+        .filter((model) => model !== null && typeof model === 'object')
+        .map((model) => ({
+          id: typeof model.id === 'string' && model.id !== '' ? model.id : String(model.model ?? ''),
+          provider: typeof model.provider === 'string' ? model.provider : '',
+          name: typeof model.name === 'string' && model.name !== '' ? model.name : String(model.id ?? model.model ?? ''),
+          contextWindow: countNumber(model.contextWindow),
+          reasoning: model.reasoning === true,
+        }))
+        .filter((model) => model.id !== '')
+    }
+
+    function modelIdOf(model) {
+      if (model === null || typeof model !== 'object') return ''
+      return `${model.provider ?? ''}/${model.id ?? model.model ?? ''}`
+    }
+
+    function modelNameOf(model, fallback) {
+      if (model === null || typeof model !== 'object') return fallback
+      return model.name || model.id || model.model || fallback
+    }
+
+    /**
+     * The composer's model seat. It follows dsh's ToggleButton shape: the
+     * current model label plus a small chevron in a 28px transparent chip,
+     * with the catalogs rendered by the shared Menu primitive.
+     */
+    function BridgeModelSelect({ models, current, loading, error, disabled, onSelect, t }) {
+      const [open, setOpen] = useState(false)
+      const selectedId = modelIdOf(current)
+      const currentLabel = modelNameOf(current, t('chooseModel'))
+      const items = models.length === 0
+        ? [{ type: 'label', id: 'empty', text: loading ? t('modelLoading') : error ?? t('modelLoadFailed') }]
+        : models.flatMap((model, index) => {
+            const previous = models[index - 1]
+            const provider = model.provider || 'provider'
+            const group = previous === undefined || (previous.provider || 'provider') !== provider
+              ? [{ type: 'label', id: `provider-${provider}`, text: provider }]
+              : []
+            return [...group, { id: modelIdOf(model), label: modelNameOf(model, model.id) }]
+          })
+      return h(Menu, {
+        open,
+        onClose: () => setOpen(false),
+        items,
+        selectedId,
+        onSelect: (id) => {
+          setOpen(false)
+          const model = models.find((candidate) => modelIdOf(candidate) === id)
+          if (model !== undefined) onSelect?.(model)
+        },
+        align: 'end',
+        portal: true,
+        listClassName: 'dshBridge_modelMenu',
+        anchor: h(
+          Tooltip,
+          { label: error ?? t('chooseModel'), side: 'top', delayMs: 400 },
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dshBridge_modelTrigger',
+              'aria-label': t('chooseModel'),
+              'aria-haspopup': 'menu',
+              'aria-expanded': open,
+              disabled: disabled || loading,
+              onClick: () => setOpen((value) => !value),
+            },
+            h('span', { className: 'dshBridge_modelLabel' }, loading ? t('modelLoading') : currentLabel),
+            h(IconChevronDownOutlineRegular, { size: 12, className: 'dshBridge_modelChevron' }),
+          ),
+        ),
+      })
+    }
+
+    /**
+     * The dock below the composer. This is a projection-free mirror of dsh's
+     * shipped statusline: a gauge pill for turn/step counts and a database
+     * pill for token usage and cache hit. Bridge stats come from the attached
+     * engine, not dsh's session projection.
+     */
+    function BridgeStatusline({ stats, t }) {
+      const [open, setOpen] = useState(null)
+      useEffect(() => {
+        if (open === null) return undefined
+        const close = (event) => {
+          if (event?.target instanceof Element && event.target.closest('.dshBridge_statusPillWrap') !== null) return
+          setOpen(null)
+        }
+        document.addEventListener('mousedown', close)
+        return () => document.removeEventListener('mousedown', close)
+      }, [open])
+      if (!statsVisible(stats)) return null
+      const cacheHit = bridgeCacheHitPercent(stats.tokens)
+      const countRows = [
+        { key: 'turns', label: t('statsTurns'), value: String(stats.turns) },
+        { key: 'steps', label: t('statsSteps'), value: String(stats.steps) },
+        { key: 'tools', label: t('statsToolCalls'), value: String(stats.toolCalls) },
+        { key: 'messages', label: t('statsTotalMessages'), value: String(stats.totalMessages) },
+      ]
+      const usageRows = [
+        ...(cacheHit === null ? [] : [{ key: 'cache', label: t('statsCacheHit').replace('{percent}', '').trim(), value: `${cacheHit}%` }]),
+        { key: 'input', label: t('statsUncachedInput'), value: t('statsTokens', { count: exactTokens(stats.tokens.uncachedInput) }) },
+        { key: 'cacheRead', label: t('statsCacheRead'), value: t('statsTokens', { count: exactTokens(stats.tokens.cacheRead) }) },
+        ...(stats.tokens.cacheWrite === 0 ? [] : [{ key: 'cacheWrite', label: t('statsCacheWrite'), value: t('statsTokens', { count: exactTokens(stats.tokens.cacheWrite) }) }]),
+        { key: 'output', label: t('statsOutput'), value: t('statsTokens', { count: exactTokens(stats.tokens.output) }) },
+      ]
+      const pill = (id, icon, label, ariaLabel, rows, title, titleValue) => h(
+        'span',
+        { className: 'dshBridge_statusPillWrap' },
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dshBridge_statusPill',
+            'aria-haspopup': 'dialog',
+            'aria-expanded': open === id,
+            'aria-label': ariaLabel,
+            onClick: () => setOpen((value) => (value === id ? null : id)),
+          },
+          icon,
+          h('span', { className: 'dshBridge_statusLabel' }, label),
+        ),
+        open === id
+          ? h(
+              'div',
+              { className: 'dshBridge_statusPanel', role: 'dialog', 'aria-label': title },
+              h(
+                'div',
+                { className: 'dshBridge_statusTitle' },
+                h('span', { className: 'dshBridge_statusTitleLabel' }, icon, title),
+                titleValue === null ? null : h('span', { className: 'dshBridge_statusTitleValue' }, titleValue),
+              ),
+              h('div', { className: 'dshBridge_statusRule', 'aria-hidden': 'true' }),
+              h(
+                'dl',
+                { className: 'dshBridge_statusDetails' },
+                ...rows.flatMap((row) => [
+                  h('dt', { key: `${row.key}-label` }, row.label),
+                  h('dd', { key: `${row.key}-value` }, row.value),
+                ]),
+              ),
+            )
+          : null,
+      )
+      const counts = t('statsCounts', { turns: stats.turns, steps: stepsLabel(stats) })
+      const totalText = t('statsTokens', { count: compactTokens(stats.tokens.total) })
+      const cacheText = cacheHit === null ? null : t('statsCacheHit', { percent: cacheHit })
+      return h(
+        'div',
+        { className: 'dshBridge_statusline', 'data-composer-stats': 'true' },
+        stats.steps > 0
+          ? pill(
+              'counts',
+              h(IconGaugeOutlineRegular, { size: 14 }),
+              counts,
+              counts,
+              countRows,
+              t('statsDialogTitle'),
+              null,
+            )
+          : null,
+        stats.tokens.total > 0
+          ? pill(
+              'usage',
+              h(IconDatabaseOutlineRegular, { size: 14 }),
+              cacheText === null ? totalText : `${totalText} · ${cacheText}`,
+              cacheText === null ? totalText : `${totalText} · ${cacheText}`,
+              usageRows,
+              t('statsUsageTitle'),
+              t('statsTokens', { count: exactTokens(stats.tokens.total) }),
+            )
+          : null,
+      )
+    }
+
+    /** Pi has no turn counter separate from assistant messages; keep the two readings aligned. */
+    function stepsLabel(stats) {
+      return Math.max(0, stats.steps)
     }
 
     function useMarkdownLabels(t) {
@@ -1944,6 +2305,41 @@ window.__ModuleLoader__.load({
         return () => window.removeEventListener(CONFIG_CHANGED_EVENT, onChanged)
       }, [load])
 
+      // Poll the lightweight status route while the menu is open, so a
+      // background probe transitioning orange -> green/red is reflected
+      // without closing and reopening the menu.
+      useEffect(() => {
+        if (!open) return undefined
+        let cancelled = false
+        const tick = async () => {
+          try {
+            const body = await api('status')
+            if (cancelled) return
+            setData((current) => {
+              if (current === null || !Array.isArray(current.bridges)) return current
+              const states = new Map((body.bridges ?? []).map((entry) => [entry.id, entry]))
+              return {
+                ...current,
+                bridges: current.bridges.map((bridge) => {
+                  const next = states.get(bridge.id)
+                  return next === undefined
+                    ? bridge
+                    : { ...bridge, connection: { state: next.state, error: next.error, checkedAt: next.checkedAt, latencyMs: next.latencyMs } }
+                }),
+              }
+            })
+          } catch {
+            // Keep the last known state; the next tick retries.
+          }
+        }
+        void tick()
+        const timer = setInterval(tick, 2500)
+        return () => {
+          cancelled = true
+          clearInterval(timer)
+        }
+      }, [open])
+
       const toggleOpen = () => {
         const next = !open
         setOpen(next)
@@ -1966,8 +2362,12 @@ window.__ModuleLoader__.load({
             'span',
             { className: 'dshBridge_menuLabel' },
             h('span', { className: 'dshBridge_menuName' }, bridge.name),
-            h('span', { className: 'dshBridge_menuMeta' },
-              bridge.available === false ? t('bridgeUnavailable') : `${bridge.mode === 'cli' ? t('modeCli') : t('modeWeb')} · ${bridge.engineLabel}`),
+            h('span', { className: 'dshBridge_menuMeta dshBridge_statusRow' },
+              bridge.available === false
+                ? t('bridgeUnavailable')
+                : h(React.Fragment, null,
+                    h(StatusDot, { state: connectionState(bridge, t).state, label: connectionState(bridge, t).label }),
+                    `${bridge.mode === 'cli' ? t('modeCli') : t('modeWeb')} · ${bridge.engineLabel}`)),
           ),
         })),
       ]
@@ -2625,6 +3025,12 @@ window.__ModuleLoader__.load({
       const [noticeError, setNoticeError] = useState(false)
       const [dialog, setDialog] = useState(null)
       const [streamState, setStreamState] = useState('idle')
+      const [models, setModels] = useState([])
+      const [modelsLoading, setModelsLoading] = useState(false)
+      const [modelsError, setModelsError] = useState(null)
+      const [modelSwitching, setModelSwitching] = useState(false)
+      const [sessionStats, setSessionStats] = useState(null)
+      const [statsVersion, setStatsVersion] = useState(0)
       const sourceRef = useRef(null)
       const firstSnapshotRef = useRef(true)
       const lastSeqRef = useRef(0)
@@ -2676,6 +3082,46 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         loadSessions()
       }, [loadSessions])
+
+      // Model catalog and session statistics are attachment-scoped. Both are
+      // reloaded after the agent settles so the composer and statusline track
+      // the live session rather than the stale history snapshot.
+      useEffect(() => {
+        if (!attached || selectedKey === null) {
+          setModels([])
+          setModelsLoading(false)
+          setModelsError(null)
+          setSessionStats(null)
+          return undefined
+        }
+        let cancelled = false
+        setModelsLoading(true)
+        setModelsError(null)
+        api(`models?key=${encodeURIComponent(selectedKey)}`)
+          .then((body) => {
+            if (cancelled) return
+            setModels(normalizeModelCatalog(body.models))
+          })
+          .catch((error) => {
+            if (cancelled) return
+            setModels([])
+            setModelsError(error instanceof Error ? error.message : String(error))
+          })
+          .finally(() => {
+            if (!cancelled) setModelsLoading(false)
+          })
+        api(`stats?key=${encodeURIComponent(selectedKey)}`)
+          .then((body) => {
+            if (!cancelled) setSessionStats(normalizeBridgeStats(body.stats))
+          })
+          .catch(() => {
+            // Engines without a stats RPC still get the transcript fold below.
+            if (!cancelled) setSessionStats(null)
+          })
+        return () => {
+          cancelled = true
+        }
+      }, [attached, selectedKey, statsVersion])
 
       useEffect(() => {
         const onNotice = (event) => {
@@ -2791,6 +3237,7 @@ window.__ModuleLoader__.load({
           setState((current) => (current === null ? current : { ...current, isStreaming: true }))
         } else if (event === 'agent-end') {
           setState((current) => (current === null ? current : { ...current, isStreaming: false }))
+          setStatsVersion((value) => value + 1)
         } else if (event === 'message-start') {
           if (record.message?.role === 'assistant') setStreamingMessage({ ...record.message })
         } else if (event === 'message-update') {
@@ -2959,6 +3406,29 @@ window.__ModuleLoader__.load({
         }
       }, [draft, selectedKey, sending, showNotice, t])
 
+      const chooseModel = useCallback(async (model) => {
+        if (selectedKey === null || modelSwitching) return
+        setModelSwitching(true)
+        try {
+          const body = await api('models', {
+            method: 'POST',
+            body: JSON.stringify({
+              key: selectedKey,
+              provider: model.provider,
+              model: model.id,
+            }),
+          })
+          setState((current) => (current === null ? current : {
+            ...current,
+            model: { ...model, ...(body.model !== null && typeof body.model === 'object' ? body.model : {}) },
+          }))
+        } catch (error) {
+          showNotice(`${t('modelSelectFailed')}: ${error instanceof Error ? error.message : String(error)}`, true)
+        } finally {
+          setModelSwitching(false)
+        }
+      }, [modelSwitching, selectedKey, showNotice, t])
+
       const abort = useCallback(async () => {
         if (selectedKey === null) return
         try {
@@ -3008,6 +3478,11 @@ window.__ModuleLoader__.load({
 
 
       const isStreaming = state?.isStreaming === true || streamingMessage !== null
+      const fallbackStats = useMemo(
+        () => deriveBridgeStats(transcript.filter((item) => item.kind === 'message').map((item) => item.message)),
+        [transcript],
+      )
+      const statusStats = sessionStats ?? fallbackStats
       const selectedSession = detail ?? sessions.find((session) => session.key === selectedKey)
       const title = selectedSession?.name ?? selectedSession?.firstMessage ?? t('title')
 
@@ -3108,7 +3583,7 @@ window.__ModuleLoader__.load({
                           setDraft(event.target.value)
                           const node = event.target
                           node.style.height = 'auto'
-                          node.style.height = `${Math.min(node.scrollHeight, 220)}px`
+                          node.style.height = `${Math.min(node.scrollHeight, 336)}px`
                         },
                         onKeyDown: (event) => {
                           if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -3120,7 +3595,19 @@ window.__ModuleLoader__.load({
                       h(
                         'div',
                         { className: 'dshBridge_toolbar' },
-                        h('span', { className: 'dshBridge_hint' }, state?.model?.id ?? ''),
+                        h(
+                          'div',
+                          { className: 'dshBridge_modelSeat' },
+                          h(BridgeModelSelect, {
+                            models,
+                            current: state?.model ?? null,
+                            loading: modelsLoading,
+                            error: modelsError,
+                            disabled: modelSwitching,
+                            onSelect: chooseModel,
+                            t,
+                          }),
+                        ),
                         h('span', { className: 'dshBridge_toolbarSpacer' }),
                         isStreaming
                           ? h(
@@ -3149,6 +3636,7 @@ window.__ModuleLoader__.load({
                             ),
                       ),
                     ),
+                    h(BridgeStatusline, { stats: statusStats, t }),
                   ),
                 )
               : null,
@@ -3306,6 +3794,14 @@ window.__ModuleLoader__.load({
       reconcileSessionOrder,
       pathCrumbs,
       relativeTime,
+      compactTokens,
+      exactTokens,
+      normalizeBridgeStats,
+      deriveBridgeStats,
+      bridgeCacheHitPercent,
+      normalizeModelCatalog,
+      modelIdOf,
+      statsVisible,
     }
     return module.exports
   },

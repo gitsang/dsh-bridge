@@ -43,7 +43,7 @@ rl.on('line', (line) => {
     write({ type: 'turn_start' })
     write({ type: 'message_start', message: user })
     write({ type: 'message_end', message: user })
-    const assistant = { role: 'assistant', content: [], api: 'fake', provider: 'fake', model: 'fake-model', usage: {}, stopReason: 'pending', timestamp: Date.now() }
+    const assistant = { role: 'assistant', content: [], api: 'fake', provider: 'fake', model: 'fake-model', usage: { input: 12, output: 5, cacheRead: 30, cacheWrite: 0, total: 47 }, stopReason: 'pending', timestamp: Date.now() }
     write({ type: 'message_start', message: assistant })
     const text = `echo: ${command.message}`
     for (const char of text) {
@@ -78,7 +78,33 @@ rl.on('line', (line) => {
     return
   }
   if (command.type === 'get_available_models') {
-    respond(id, 'get_available_models', { models: [model] })
+    respond(id, 'get_available_models', {
+      models: [
+        model,
+        { id: 'fake-model-2', provider: 'fake', name: 'Fake Two', contextWindow: 200000, reasoning: true },
+      ],
+    })
+    return
+  }
+  if (command.type === 'get_session_stats') {
+    const usage = messages
+      .filter((entry) => entry.role === 'assistant')
+      .reduce((sum, entry) => ({
+        input: sum.input + (entry.usage?.input ?? 0),
+        output: sum.output + (entry.usage?.output ?? 0),
+        cacheRead: sum.cacheRead + (entry.usage?.cacheRead ?? 0),
+        cacheWrite: sum.cacheWrite + (entry.usage?.cacheWrite ?? 0),
+      }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 })
+    respond(id, 'get_session_stats', {
+      sessionId: 'fake-session',
+      userMessages: messages.filter((entry) => entry.role === 'user').length,
+      assistantMessages: messages.filter((entry) => entry.role === 'assistant').length,
+      toolCalls: 0,
+      toolResults: 0,
+      totalMessages: messages.length,
+      tokens: { ...usage, total: usage.input + usage.output + usage.cacheRead + usage.cacheWrite },
+      cost: 0,
+    })
     return
   }
   if (command.type === 'abort') {

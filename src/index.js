@@ -10,7 +10,6 @@ import {
   BRIDGE_MODES,
   ENGINES,
   bridgeView,
-  bridgeViews,
   engineView,
   getEngine,
 } from './backends/registry.js'
@@ -141,6 +140,7 @@ class AttachmentSession {
     this.subscriptions = []
     this.sequence = 0
     this.disposed = false
+    this.intentionalClose = false
   }
 
   publish(event, data) {
@@ -195,6 +195,7 @@ class AttachmentSession {
   async close() {
     if (this.disposed) return
     this.disposed = true
+    this.intentionalClose = true
     for (const unsubscribe of this.subscriptions) unsubscribe()
     this.subscriptions = []
     for (const client of this.clients) client.close()
@@ -285,10 +286,125 @@ async function createDirectory(parentValue, nameValue) {
 
 export function apply(ctx) {
   const attachments = new Map()
+  const pendingAttachments = new Map()
   const logger = ctx.logger
   let settings = readSettings(process.env, logger)
 
+  /**
+   * Per-bridge connection state for the startup auto-connect and the status
+   * dots in the switcher. This is a bridge-level readiness probe (launcher and
+   * session root), not one agent process per session; session attachments stay
+   * lazy and are keyed separately in `attachments`.
+   */
+  const connections = new Map()
+  const probeTokens = new Map()
+
   const engineAvailable = (engine) => engine.available !== false
+
+  const connectionView = (bridgeId) => {
+    const value = connections.get(bridgeId)
+    return value === undefined
+      ? { state: 'idle', error: null, checkedAt: null, latencyMs: null }
+      : { ...value }
+  }
+
+  const bridgeWithConnection = (bridge) => {
+    const view = bridgeView(bridge)
+    return view === null ? null : { ...view, connection: connectionView(bridge.id) }
+  }
+
+  const bridgesWithConnection = () => settings.bridges.map(bridgeWithConnection).filter(Boolean)
+
+  const setConnection = (bridgeId, patch) => {
+    connections.set(bridgeId, { ...(connections.get(bridgeId) ?? {}), ...patch })
+  }
+
+  const autoConnectEnabled = () => process.env.BRIDGE_AUTO_CONNECT !== '0'
+
+  /**
+   * Startup connection. In auto-connect mode this warms the newest session of
+   * the bridge through the real RPC attachment, then leaves the green status
+   * tied to that live process. Without a session, a successful engine probe
+   * still reports the bridge as ready. With auto-connect disabled, only the
+   * probe runs (used by tests and by operators who want lazy sessions).
+   */
+  const autoConnectBridge = async (bridge) => {
+    const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    probeTokens.set(bridge.id, token)
+    const startedAt = Date.now()
+    setConnection(bridge.id, { state: 'connecting', error: null, checkedAt: startedAt, latencyMs: null })
+    try {
+      const engine = engineFor(bridge)
+      if (!engineAvailable(engine)) throw new Error(engine.unavailableReason ?? `${engine.label} is not available`)
+      const config = configFor(bridge, engine)
+      const detail = typeof engine.probe === 'function' ? await engine.probe(config, process.env) : null
+      const existing = [...attachments.values()].find((entry) => entry.bridgeId === bridge.id && entry.attachment.running)
+      if (existing !== undefined) {
+        if (probeTokens.get(bridge.id) !== token) return
+        setConnection(bridge.id, {
+          state: 'connected',
+          error: null,
+          checkedAt: Date.now(),
+          latencyMs: Date.now() - startedAt,
+          detail: wireSafe({ ...detail, warmSession: existing.key, pid: existing.attachment.pid }),
+        })
+        return
+      }
+      if (!autoConnectEnabled()) {
+        if (probeTokens.get(bridge.id) !== token) return
+        setConnection(bridge.id, {
+          state: 'connected',
+          error: null,
+          checkedAt: Date.now(),
+          latencyMs: Date.now() - startedAt,
+          detail: wireSafe(detail),
+        })
+        return
+      }
+
+      const listed = await engine.listSessions(config, process.env)
+      const sessions = Array.isArray(listed.sessions) ? listed.sessions : []
+      if (sessions.length === 0) {
+        if (probeTokens.get(bridge.id) !== token) return
+        setConnection(bridge.id, {
+          state: 'connected',
+          error: null,
+          checkedAt: Date.now(),
+          latencyMs: Date.now() - startedAt,
+          detail: wireSafe({ ...detail, warmSession: null }),
+        })
+        return
+      }
+      const newest = [...sessions].sort((left, right) => String(right.modified ?? '').localeCompare(String(left.modified ?? '')))[0]
+      const nativeKey = newest.nativeKey ?? newest.key
+      const key = encodeSessionKey(bridge.id, nativeKey)
+      const live = await attach(key)
+      if (probeTokens.get(bridge.id) !== token) return
+      setConnection(bridge.id, {
+        state: 'connected',
+        error: null,
+        checkedAt: Date.now(),
+        latencyMs: Date.now() - startedAt,
+        detail: wireSafe({ ...detail, warmSession: key, pid: live.attachment.pid }),
+      })
+      logger?.info?.(`bridge: auto-connected ${bridge.name} (${bridge.id}) warm session ${key}`)
+    } catch (error) {
+      if (probeTokens.get(bridge.id) !== token) return
+      const message = error instanceof Error ? error.message : String(error)
+      setConnection(bridge.id, {
+        state: 'failed',
+        error: message,
+        checkedAt: Date.now(),
+        latencyMs: Date.now() - startedAt,
+        detail: null,
+      })
+      logger?.warn?.(`bridge: auto-connect failed for ${bridge.name} (${bridge.id}): ${message}`)
+    }
+  }
+
+  const autoConnectAllBridges = async () => {
+    await Promise.allSettled(settings.bridges.map((bridge) => autoConnectBridge(bridge)))
+  }
 
   const bridgeFor = (id) => {
     const bridge = findBridge(settings, requireString(id, 'bridge'))
@@ -329,9 +445,9 @@ export function apply(ctx) {
   const settingsView = () => ({
     settings: {
       version: settings.version,
-      bridges: bridgeViews(settings.bridges),
+      bridges: bridgesWithConnection(),
     },
-    bridges: bridgeViews(settings.bridges),
+    bridges: bridgesWithConnection(),
     engines: ENGINES.map(engineView),
     modes: BRIDGE_MODES,
   })
@@ -348,35 +464,63 @@ export function apply(ctx) {
   const attach = async (key) => {
     const existing = attachments.get(key)
     if (existing !== undefined) return existing
-    const { bridge, engine, nativeKey, session } = await sessionFor(key)
-    const config = configFor(bridge, engine)
-    const attachment = await engine.createAttachment({
-      session: { ...session, nativeKey },
-      config,
-      env: process.env,
-      logger,
-    })
-    await attachment.start()
+    // Startup auto-connect, the status route, and a user attach can race for
+    // the same session. Share one spawn promise so a session never gets two
+    // Pi children writing the same JSONL.
+    const pending = pendingAttachments.get(key)
+    if (pending !== undefined) return pending
+
+    const job = (async () => {
+      const { bridge, engine, nativeKey, session } = await sessionFor(key)
+      const config = configFor(bridge, engine)
+      const attachment = await engine.createAttachment({
+        session: { ...session, nativeKey },
+        config,
+        env: process.env,
+        logger,
+      })
+      await attachment.start()
+      try {
+        await attachment.getState()
+      } catch (error) {
+        const detail = attachment.stderr.trim()
+        await attachment.dispose()
+        const failure = new Error(
+          detail === ''
+            ? `${engine.label} exited during startup (${error instanceof Error ? error.message : String(error)})`
+            : `${engine.label} exited during startup: ${detail}`,
+        )
+        failure.status = 502
+        throw failure
+      }
+      const live = new AttachmentSession({ bridge, engine, attachment, session, key }).watch()
+      live.onExit = () => {
+        if (attachments.get(key) === live) attachments.delete(key)
+        const stillLive = [...attachments.values()].some((entry) => entry.bridgeId === bridge.id && entry.attachment.running)
+        if (stillLive) return
+        if (live.intentionalClose) {
+          setConnection(bridge.id, { state: 'idle', error: null, checkedAt: Date.now(), latencyMs: null, detail: null })
+        } else {
+          setConnection(bridge.id, {
+            state: 'failed',
+            error: 'agent process exited',
+            checkedAt: Date.now(),
+            latencyMs: null,
+          })
+        }
+      }
+      attachments.set(key, live)
+      setConnection(bridge.id, { state: 'connected', error: null, checkedAt: Date.now(), latencyMs: null })
+      logger?.info?.(`bridge: attached ${bridge.name} (${bridge.id}) session ${session.id ?? nativeKey} (pid ${attachment.pid})`)
+      return live
+    })()
+
+    pendingAttachments.set(key, job)
     try {
-      await attachment.getState()
-    } catch (error) {
-      const detail = attachment.stderr.trim()
-      await attachment.dispose()
-      const failure = new Error(
-        detail === ''
-          ? `${engine.label} exited during startup (${error instanceof Error ? error.message : String(error)})`
-          : `${engine.label} exited during startup: ${detail}`,
-      )
-      failure.status = 502
-      throw failure
+      return await job
+    } finally {
+      if (pendingAttachments.get(key) === job) pendingAttachments.delete(key)
     }
-    const live = new AttachmentSession({ bridge, engine, attachment, session, key }).watch()
-    live.onExit = () => {
-      if (attachments.get(key) === live) attachments.delete(key)
-    }
-    attachments.set(key, live)
-    logger?.info?.(`bridge: attached ${bridge.name} (${bridge.id}) session ${session.id ?? nativeKey} (pid ${attachment.pid})`)
-    return live
   }
 
   const routes = [
@@ -466,7 +610,7 @@ export function apply(ctx) {
         }))
         return json(200, {
           ok: true,
-          bridges: bridgeViews(settings.bridges),
+          bridges: bridgesWithConnection(),
           engines: ENGINES.map(engineView),
           modes: BRIDGE_MODES,
           attachments: live,
@@ -580,6 +724,35 @@ export function apply(ctx) {
       },
     },
     {
+      path: `${ROUTE}/status`,
+      methods: ['GET', 'POST'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        try {
+          if (request.method === 'POST') {
+            const body = await readJson(request)
+            const bridgeId = typeof body.bridge === 'string' && body.bridge !== '' ? body.bridge : null
+            if (bridgeId === null) await autoConnectAllBridges()
+            else {
+              const bridge = findBridge(settings, bridgeId)
+              if (bridge !== undefined) await autoConnectBridge(bridge)
+            }
+          }
+          return json(200, {
+            ok: true,
+            bridges: settings.bridges.map((bridge) => ({
+              id: bridge.id,
+              name: bridge.name,
+              engine: bridge.engine,
+              ...connectionView(bridge.id),
+            })),
+          })
+        } catch (error) {
+          return failure(error, error.status ?? 500)
+        }
+      },
+    },
+    {
       path: `${ROUTE}/settings`,
       methods: ['GET'],
       requestBody: 'buffered',
@@ -597,7 +770,8 @@ export function apply(ctx) {
             const result = createBridge(settings, body)
             settings = writeSettings(result.settings, process.env)
             logger?.info?.(`bridge: created ${result.bridge.id}`)
-            return json(201, { ok: true, bridge: bridgeView(result.bridge), ...settingsView() })
+            void autoConnectBridge(result.bridge)
+            return json(201, { ok: true, bridge: bridgeWithConnection(result.bridge), ...settingsView() })
           }
           const id = requireString(body.id, 'id')
           if (liveAttachmentForBridge(id)) {
@@ -607,10 +781,14 @@ export function apply(ctx) {
             const result = updateBridge(settings, id, body)
             settings = writeSettings(result.settings, process.env)
             logger?.info?.(`bridge: updated ${id}`)
-            return json(200, { ok: true, bridge: bridgeView(result.bridge), ...settingsView() })
+            connections.delete(id)
+            void autoConnectBridge(result.bridge)
+            return json(200, { ok: true, bridge: bridgeWithConnection(result.bridge), ...settingsView() })
           }
           const result = deleteBridge(settings, id)
           settings = writeSettings(result.settings, process.env)
+          connections.delete(id)
+          probeTokens.delete(id)
           logger?.info?.(`bridge: deleted ${id}`)
           return json(200, { ok: true, ...settingsView() })
         } catch (error) {
@@ -620,12 +798,45 @@ export function apply(ctx) {
     },
     {
       path: `${ROUTE}/models`,
+      methods: ['GET', 'POST'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        try {
+          if (request.method === 'GET') {
+            const key = requireString(new URL(request.url).searchParams.get('key'), 'key')
+            const attachment = attachmentFor(key).attachment
+            if (typeof attachment.getAvailableModels !== 'function') {
+              throw Object.assign(new Error('this bridge engine does not expose a model catalog'), { status: 409 })
+            }
+            return json(200, { ok: true, models: await attachment.getAvailableModels() })
+          }
+          const body = await readJson(request)
+          const key = requireString(body.key, 'key')
+          const provider = requireString(body.provider, 'provider')
+          const model = requireString(body.model, 'model')
+          const attachment = attachmentFor(key).attachment
+          if (typeof attachment.setModel !== 'function') {
+            throw Object.assign(new Error('this bridge engine does not support model selection'), { status: 409 })
+          }
+          const selected = await attachment.setModel(provider, model)
+          return json(200, { ok: true, model: selected })
+        } catch (error) {
+          return failure(error, error.status ?? 409)
+        }
+      },
+    },
+    {
+      path: `${ROUTE}/stats`,
       methods: ['GET'],
       requestBody: 'buffered',
       fetch: async (request) => {
         try {
           const key = requireString(new URL(request.url).searchParams.get('key'), 'key')
-          return json(200, { ok: true, models: await attachmentFor(key).attachment.getAvailableModels() })
+          const attachment = attachmentFor(key).attachment
+          if (typeof attachment.getSessionStats !== 'function') {
+            throw Object.assign(new Error('this bridge engine does not expose session statistics'), { status: 409 })
+          }
+          return json(200, { ok: true, stats: await attachment.getSessionStats() })
         } catch (error) {
           return failure(error, error.status ?? 409)
         }
@@ -692,10 +903,25 @@ export function apply(ctx) {
     ctx.effect(() => ctx.connection.fetch.register(route), `bridge: ${route.path}`)
   }
 
+  // Auto-connect every configured bridge when the dsh host starts. The probe
+  // is lightweight (no session process); the dropdown shows its state.
+  ctx.effect(() => {
+    if (process.env.BRIDGE_AUTO_CONNECT === '0') return () => {}
+    let cancelled = false
+    const timer = setTimeout(() => {
+      if (!cancelled) void autoConnectAllBridges()
+    }, 0)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, 'bridge: auto-connect')
+
   ctx.effect(
     () => async () => {
       const live = [...attachments.values()]
       attachments.clear()
+      pendingAttachments.clear()
       await Promise.allSettled(live.map((entry) => entry.close()))
     },
     'bridge: attachments',

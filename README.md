@@ -19,12 +19,14 @@ the add-bridge form but are marked as pending until their adapters are connected
 - [x] Create/edit/delete bridges from the settings overlay
 - [x] CLI / Web mode selection and mode-specific engine list
 - [x] Confirmed Pi engine: JSONL sessions, RPC attach, normalized events, prompts
-- [x] Top-left “Local + configured bridges” dropdown
+- [x] Top-left “Local + configured bridges” dropdown with live connection dots
+- [x] Startup auto-connect: each bridge warms its newest session
 - [x] Bridge-owned sidebar while a bridge is selected
 - [x] dsh-identical workspace browser: workspace / workspace-tree / flat grouping, manual / last-updated ordering, session filter
 - [x] dsh-style search button and result list
 - [x] dsh-style Select Workspace Directory dialog with New folder
 - [x] dsh-styled transcript and composer
+- [x] Composer model picker and a dsh-style statusline (turns/steps, tokens, cache hit)
 - [ ] Codex engine adapter
 - [ ] OpenCode engine adapter
 - [ ] Remote DSH Web engine adapter
@@ -48,9 +50,25 @@ Bridge settings
   sidebar.
 - Each configured bridge is a separate row. Bridges are not engines, so two Pi
   rows are normal and expected.
+- A status dot sits beside each bridge: green = connected, orange = connecting,
+  red = failed. Hovering it shows the reason.
 - Unavailable engines are shown but disabled.
 - **Bridge settings** opens the settings overlay in place; it does not navigate
   away from the current page.
+
+### Connection lifecycle
+
+When the dsh host starts, every configured bridge is auto-connected by
+`bridge: auto-connect`. For Pi this means:
+
+1. probe the launcher and sessions root;
+2. list the bridge's sessions;
+3. attach the newest session over Pi RPC and keep that process alive.
+
+The status endpoint `GET /api/bridge/status` reports the per-bridge state, and
+the switcher polls it while open. A disconnect marks the dot red; re-running a
+check or attaching again turns it green. Set `BRIDGE_AUTO_CONNECT=0` to keep
+session attachments lazy.
 
 ### Settings overlay
 
@@ -83,6 +101,22 @@ Selecting a saved bridge:
    button, and the directory-picker dialog;
 3. loads session history into the main transcript;
 4. keeps the composer and live streaming attached to that bridge.
+
+The composer follows dsh's docked card geometry (`--dsh-composer-*` sizing,
+panel radius, input surface, and elevation). Its trailing control row is
+right-aligned and contains:
+
+- a **model picker** backed by the attached engine's model catalog, grouped by
+  provider and switched through the engine's native `set_model` RPC;
+- a circular **send** button, which becomes **stop** while the agent runs.
+
+Below the card, the statusline mirrors dsh's shipped statistics pills: a gauge
+pill for turns/steps and a database pill for total tokens plus cache-hit rate.
+Both open the same kind of compact detail panel. Bridge statistics come from
+the engine's `get_session_stats` RPC, with a transcript-fold fallback for
+engines that do not expose statistics. This is a visual and interaction match,
+not a reuse of dsh's session projections: external agents have their own
+session model.
 
 Returning to **Local** disposes the Bridge sidebar occupant and restores dsh's
 native workspace browser.
@@ -139,6 +173,7 @@ All routes sit below dsh's authenticated `/api` channel.
 | --- | --- |
 | `GET /api/bridge/settings` | Modes, engines, and redacted bridge list |
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | Manage saved bridges |
+| `GET/POST /api/bridge/status` | Read or refresh per-bridge connection state |
 | `GET /api/bridge/sessions?bridge=<id>` | List one bridge's sessions/workspaces |
 | `GET/POST /api/bridge/directories` | Browse / create local workspace directories |
 | `GET /api/bridge/session?key=…` | One normalized session history |
@@ -151,6 +186,8 @@ All routes sit below dsh's authenticated `/api` channel.
 | `POST /api/bridge/abort` | Abort the running turn |
 | `POST /api/bridge/ui-response` | Answer an extension dialog |
 | `GET /api/bridge/models?key=…` | Provider/model catalog |
+| `POST /api/bridge/models` | Select a provider/model on the live attachment |
+| `GET /api/bridge/stats?key=…` | Engine session statistics |
 | `GET /api/bridge/history-message?key=…` | Concatenated plain-text history |
 
 A session key is `<bridgeId>.<base64url(nativeKey)>`. It resolves only against

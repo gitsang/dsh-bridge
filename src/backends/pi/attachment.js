@@ -253,6 +253,10 @@ export class PiAttachment extends EventEmitter {
     return this.request('get_available_models')
   }
 
+  getSessionStats() {
+    return this.request('get_session_stats')
+  }
+
   prompt(message, options = {}) {
     const payload = { message }
     if (Array.isArray(options.images) && options.images.length > 0) payload.images = options.images

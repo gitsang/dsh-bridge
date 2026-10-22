@@ -199,3 +199,71 @@ test('relative time uses dsh-style compact labels', () => {
   assert.equal(exports.__test.relativeTime('2026-10-20T12:00:00.000Z', now, t), '1d ago')
   assert.equal(exports.__test.relativeTime('invalid', now, t), '')
 })
+
+test('statusline helpers normalize Pi statistics and stay projection-free', () => {
+  const exports = moduleExports()
+  const {
+    compactTokens,
+    exactTokens,
+    normalizeBridgeStats,
+    deriveBridgeStats,
+    bridgeCacheHitPercent,
+    statsVisible,
+  } = exports.__test
+
+  assert.equal(compactTokens(517), '517')
+  assert.equal(compactTokens(12_250), '12.3K')
+  assert.equal(compactTokens(1_250_000), '1.3M')
+  assert.equal(exactTokens(1234567), '1,234,567')
+
+  const stats = normalizeBridgeStats({
+    userMessages: 3,
+    assistantMessages: 5,
+    toolCalls: 2,
+    totalMessages: 10,
+    tokens: { input: 100, output: 40, cacheRead: 300, cacheWrite: 0, total: 440 },
+  })
+  assert.deepEqual(stats, {
+    turns: 3,
+    steps: 5,
+    toolCalls: 2,
+    totalMessages: 10,
+    tokens: { uncachedInput: 100, cacheRead: 300, cacheWrite: 0, output: 40, total: 440 },
+  })
+  assert.equal(bridgeCacheHitPercent(stats.tokens), '75')
+  assert.equal(statsVisible(stats), true)
+  assert.equal(statsVisible(normalizeBridgeStats(null)), false)
+
+  const derived = deriveBridgeStats([
+    { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+    { role: 'assistant', content: [{ type: 'toolCall', id: 't1' }], usage: { input: 10, output: 3, cacheRead: 20, cacheWrite: 0 } },
+  ])
+  assert.equal(derived.turns, 1)
+  assert.equal(derived.steps, 1)
+  assert.equal(derived.toolCalls, 1)
+  assert.equal(derived.tokens.total, 33)
+})
+
+test('model catalog helpers keep provider and id pairs stable', () => {
+  const exports = moduleExports()
+  const { normalizeModelCatalog, modelIdOf } = exports.__test
+  const models = normalizeModelCatalog({
+    models: [
+      { id: 'alpha', provider: 'p', name: 'Alpha', reasoning: true },
+      { model: 'beta', provider: 'q' },
+      { id: '', provider: 'p' },
+    ],
+  })
+  assert.equal(models.length, 2)
+  assert.deepEqual(models[0], { id: 'alpha', provider: 'p', name: 'Alpha', contextWindow: 0, reasoning: true })
+  assert.equal(modelIdOf(models[1]), 'q/beta')
+})
+
+test('browser bundle wires the model seat and statusline into the composer', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  assert.match(source, /BridgeModelSelect/)
+  assert.match(source, /BridgeStatusline/)
+  assert.match(source, /data-composer-stats/)
+  assert.match(source, /models\?key=/)
+  assert.match(source, /stats\?key=/)
+})
