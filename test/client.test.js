@@ -222,6 +222,7 @@ test('statusline helpers normalize Pi statistics and stay projection-free', () =
     toolCalls: 2,
     totalMessages: 10,
     tokens: { input: 100, output: 40, cacheRead: 300, cacheWrite: 0, total: 440 },
+    contextUsage: { tokens: 23_000, contextWindow: 1_000_000, percent: 2.3 },
   })
   assert.deepEqual(stats, {
     turns: 3,
@@ -229,6 +230,7 @@ test('statusline helpers normalize Pi statistics and stay projection-free', () =
     toolCalls: 2,
     totalMessages: 10,
     tokens: { uncachedInput: 100, cacheRead: 300, cacheWrite: 0, output: 40, total: 440 },
+    context: { used: 23_000, window: 1_000_000, percent: 2.3 },
   })
   assert.equal(bridgeCacheHitPercent(stats.tokens), '75')
   assert.equal(statsVisible(stats), true)
@@ -242,6 +244,7 @@ test('statusline helpers normalize Pi statistics and stay projection-free', () =
   assert.equal(derived.steps, 1)
   assert.equal(derived.toolCalls, 1)
   assert.equal(derived.tokens.total, 33)
+  assert.equal(derived.context, null)
 })
 
 test('model catalog helpers keep provider and id pairs stable', () => {
@@ -266,4 +269,5 @@ test('browser bundle wires the model seat and statusline into the composer', asy
   assert.match(source, /data-composer-stats/)
   assert.match(source, /models\?key=/)
   assert.match(source, /stats\?key=/)
+  assert.match(source, /dshBridge_contextRing/)
 })

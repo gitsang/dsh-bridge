@@ -988,6 +988,10 @@ window.__ModuleLoader__.load({
       statsCacheWrite: '缓存写入',
       statsOutput: '输出',
       statsTokens: '{count} tok',
+      statsContextUsed: '上下文已用 {percent}%',
+      statsContextWindow: '上下文窗口',
+      statsContextTokens: '{used} / {window}',
+      statsContextPanel: '上下文占用',
       stop: '停止',
       stopped: '已停止',
       copy: '复制',
@@ -1165,6 +1169,10 @@ window.__ModuleLoader__.load({
       statsCacheWrite: 'Cache write',
       statsOutput: 'Output',
       statsTokens: '{count} tok',
+      statsContextUsed: '{percent}% of context used',
+      statsContextWindow: 'Context window',
+      statsContextTokens: '{used} / {window}',
+      statsContextPanel: 'Context occupancy',
       stop: 'Stop',
       stopped: 'Stopped',
       copy: 'Copy',
@@ -1224,11 +1232,12 @@ window.__ModuleLoader__.load({
       '.dshBridge_notice{margin:0 auto;max-width:712px;padding:0 24px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,currentColor)}',
       '.dshBridge_notice[data-error="true"]{color:var(--dsw-alias-state-error-primary,#d33)}',
       '.dshBridge_composerSeat{flex:none;padding:0 var(--dsh-composer-side-clearance,16px) 4px}',
-      '.dshBridge_composerStack{box-sizing:border-box;display:flex;flex-direction:column;gap:4px;width:100%;max-width:var(--dsh-composer-card-max-width,744px);margin:0 auto}',
+      '.dshBridge_composerStack{box-sizing:border-box;display:flex;flex-direction:column;gap:4px;width:100%;max-width:var(--dsh-composer-card-max-width,calc(clamp(680px,calc(64% + 20.48px),920px) + 32px));margin:0 auto}',
       '.dshBridge_card{box-sizing:border-box;display:flex;flex-direction:column;gap:12px;width:100%;padding-top:8px;border:0;border-radius:var(--dsw-radius-panel,28px);background:var(--dsw-specific-input-major,var(--dsw-alias-bg-base,Canvas));--dsw-elevation-stroke-color:var(--dsw-alias-border-l2,rgba(0,0,0,.12));box-shadow:var(--dsw-elevation-soft,0 0 0 .5px rgba(0,0,0,.1),0 4px 16px rgba(0,0,0,.03));font-size:var(--dsh-content-font-size,14px);line-height:calc(24px + var(--dsh-content-font-delta,0px))}',
       '.dshBridge_textarea{box-sizing:border-box;display:block;width:100%;min-height:36px;max-height:var(--dsh-composer-text-max-height,336px);padding:4px 8px 0 14px;border:0;outline:none;resize:none;background:transparent;color:var(--dsw-alias-label-primary,currentColor);font:inherit;font-size:inherit;line-height:inherit;caret-color:var(--dsw-alias-state-business-primary,#3b82f6)}',
       '.dshBridge_textarea::placeholder{color:var(--dsw-alias-label-caption,var(--dsw-alias-label-tertiary,currentColor))}',
-      '.dshBridge_toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:2px 8px 6px;min-width:0;min-height:34px;container-type:inline-size}',
+      '.dshBridge_toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:12px;padding:2px 8px 6px;min-width:0;min-height:34px;container-type:inline-size}',
+      '.dshBridge_trailing{display:flex;align-items:center;flex:none;gap:12px;margin-left:auto;min-width:0}',
       '.dshBridge_modelSeat{display:flex;align-items:center;min-width:0}',
       '.dshBridge_modelTrigger{display:flex;align-items:center;gap:4px;min-width:0;max-width:min(360px,45cqw);height:28px;padding:0 4px 0 8px;border:0;border-radius:var(--dsw-radius-sm,8px);outline:none;background:transparent;color:var(--dsw-alias-label-secondary,currentColor);font:inherit;font-size:13px;line-height:20px;font-weight:400;cursor:pointer}',
       '.dshBridge_modelTrigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
@@ -1249,6 +1258,11 @@ window.__ModuleLoader__.load({
       '.dshBridge_statusline{box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:12px;min-height:22px;padding-top:4px;font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px))}',
       '.dshBridge_statusline:empty{display:none}',
       '.dshBridge_statusPillWrap{position:relative;display:inline-flex;min-width:0}',
+      '.dshBridge_context{display:inline-flex;align-items:center;gap:6px;height:22px;padding:1px 8px;border:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-tertiary,currentColor);font:inherit;font-size:inherit;font-variant-numeric:tabular-nums;line-height:inherit;white-space:nowrap;cursor:pointer}',
+      '.dshBridge_context:hover,.dshBridge_context[aria-expanded="true"]{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05));color:var(--dsw-alias-label-secondary,currentColor)}',
+      '.dshBridge_contextRing{flex:none;width:14px;height:14px;transform:rotate(-90deg)}',
+      '.dshBridge_contextTrack{fill:none;stroke:var(--dsw-alias-border-l3,rgba(0,0,0,.15));stroke-width:2}',
+      '.dshBridge_contextFill{fill:none;stroke:var(--dsw-alias-label-tertiary,currentColor);stroke-width:2;stroke-linecap:round}',
       '.dshBridge_statusPill{box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:1px 8px;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-tertiary,currentColor);font:inherit;font-variant-numeric:tabular-nums;line-height:inherit;white-space:nowrap;cursor:pointer}',
       '.dshBridge_statusPill svg{flex:none;width:14px;height:14px}',
       '.dshBridge_statusPill:hover,.dshBridge_statusPill[aria-expanded="true"]{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05));color:var(--dsw-alias-label-secondary,currentColor)}',
@@ -1467,12 +1481,19 @@ window.__ModuleLoader__.load({
       const cacheWrite = countNumber(tokens.cacheWrite ?? raw.cacheWriteTokens)
       const output = countNumber(tokens.output ?? raw.outputTokens)
       const total = countNumber(tokens.total) || uncachedInput + cacheRead + cacheWrite + output
+      const rawContext = raw.contextUsage !== null && typeof raw.contextUsage === 'object' ? raw.contextUsage : null
+      const contextUsed = rawContext === null ? 0 : countNumber(rawContext.tokens)
+      const contextWindow = rawContext === null ? 0 : countNumber(rawContext.contextWindow)
+      const contextPercent = rawContext === null
+        ? 0
+        : countNumber(rawContext.percent) || (contextWindow > 0 ? (contextUsed / contextWindow) * 100 : 0)
       return {
         turns: countNumber(raw.userMessages ?? raw.turns),
         steps: countNumber(raw.assistantMessages ?? raw.steps),
         toolCalls: countNumber(raw.toolCalls),
         totalMessages: countNumber(raw.totalMessages),
         tokens: { uncachedInput, cacheRead, cacheWrite, output, total },
+        context: contextWindow > 0 ? { used: contextUsed, window: contextWindow, percent: contextPercent } : null,
       }
     }
 
@@ -1498,7 +1519,7 @@ window.__ModuleLoader__.load({
         }
       }
       tokens.total = tokens.uncachedInput + tokens.cacheRead + tokens.cacheWrite + tokens.output
-      return { turns, steps, toolCalls, totalMessages: list.length, tokens }
+      return { turns, steps, toolCalls, totalMessages: list.length, tokens, context: null }
     }
 
     function statsVisible(stats) {
@@ -1666,6 +1687,10 @@ window.__ModuleLoader__.load({
       const counts = t('statsCounts', { turns: stats.turns, steps: stepsLabel(stats) })
       const totalText = t('statsTokens', { count: compactTokens(stats.tokens.total) })
       const cacheText = cacheHit === null ? null : t('statsCacheHit', { percent: cacheHit })
+      const context = stats.context ?? null
+      const contextPercent = context === null ? 0 : Math.max(0, Math.min(100, Math.round(context.percent)))
+      const contextRadius = 5.5
+      const contextCircumference = 2 * Math.PI * contextRadius
       return h(
         'div',
         { className: 'dshBridge_statusline', 'data-composer-stats': 'true' },
@@ -1691,6 +1716,58 @@ window.__ModuleLoader__.load({
               t('statsTokens', { count: exactTokens(stats.tokens.total) }),
             )
           : null,
+        context === null
+          ? null
+          : h(
+              'span',
+              { className: 'dshBridge_statusPillWrap' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dshBridge_context',
+                  'aria-haspopup': 'dialog',
+                  'aria-expanded': open === 'context',
+                  'aria-label': t('statsContextUsed', { percent: contextPercent }),
+                  onClick: () => setOpen((value) => (value === 'context' ? null : 'context')),
+                },
+                h(
+                  'svg',
+                  { viewBox: '0 0 14 14', width: 14, height: 14, className: 'dshBridge_contextRing', 'aria-hidden': 'true' },
+                  h('circle', { cx: 7, cy: 7, r: contextRadius, className: 'dshBridge_contextTrack' }),
+                  h('circle', {
+                    cx: 7,
+                    cy: 7,
+                    r: contextRadius,
+                    className: 'dshBridge_contextFill',
+                    strokeDasharray: `${contextCircumference * contextPercent / 100} ${contextCircumference}`,
+                  }),
+                ),
+                h('span', { className: 'dshBridge_statusLabel' }, `${contextPercent}%`),
+              ),
+              open === 'context'
+                ? h(
+                    'div',
+                    { className: 'dshBridge_statusPanel', role: 'dialog', 'aria-label': t('statsContextPanel') },
+                    h(
+                      'div',
+                      { className: 'dshBridge_statusTitle' },
+                      h('span', { className: 'dshBridge_statusTitleLabel' }, t('statsContextPanel')),
+                      h('span', { className: 'dshBridge_statusTitleValue' }, t('statsContextUsed', { percent: contextPercent })),
+                    ),
+                    h('div', { className: 'dshBridge_statusRule', 'aria-hidden': 'true' }),
+                    h(
+                      'dl',
+                      { className: 'dshBridge_statusDetails' },
+                      h('dt', null, t('statsContextWindow')),
+                      h('dd', null, t('statsContextTokens', {
+                        used: compactTokens(context.used),
+                        window: compactTokens(context.window),
+                      })),
+                    ),
+                  )
+                : null,
+            ),
       )
     }
 
@@ -3597,43 +3674,46 @@ window.__ModuleLoader__.load({
                         { className: 'dshBridge_toolbar' },
                         h(
                           'div',
-                          { className: 'dshBridge_modelSeat' },
-                          h(BridgeModelSelect, {
-                            models,
-                            current: state?.model ?? null,
-                            loading: modelsLoading,
-                            error: modelsError,
-                            disabled: modelSwitching,
-                            onSelect: chooseModel,
-                            t,
-                          }),
+                          { className: 'dshBridge_trailing' },
+                          h(
+                            'div',
+                            { className: 'dshBridge_modelSeat' },
+                            h(BridgeModelSelect, {
+                              models,
+                              current: state?.model ?? null,
+                              loading: modelsLoading,
+                              error: modelsError,
+                              disabled: modelSwitching,
+                              onSelect: chooseModel,
+                              t,
+                            }),
+                          ),
+                          isStreaming
+                            ? h(
+                                Tooltip,
+                                { label: t('stop') },
+                                h(
+                                  'button',
+                                  { type: 'button', className: 'dshBridge_send', 'data-stop': 'true', 'aria-label': t('stop'), onClick: abort },
+                                  h(IconPauseOutlineRegular, { size: 16 }),
+                                ),
+                              )
+                            : h(
+                                Tooltip,
+                                { label: t('send') },
+                                h(
+                                  'button',
+                                  {
+                                    type: 'button',
+                                    className: 'dshBridge_send',
+                                    'aria-label': t('send'),
+                                    disabled: sending || draft.trim() === '',
+                                    onClick: send,
+                                  },
+                                  h(IconSendOutlineRegular, { size: 16 }),
+                                ),
+                              ),
                         ),
-                        h('span', { className: 'dshBridge_toolbarSpacer' }),
-                        isStreaming
-                          ? h(
-                              Tooltip,
-                              { label: t('stop') },
-                              h(
-                                'button',
-                                { type: 'button', className: 'dshBridge_send', 'data-stop': 'true', 'aria-label': t('stop'), onClick: abort },
-                                h(IconPauseOutlineRegular, { size: 16 }),
-                              ),
-                            )
-                          : h(
-                              Tooltip,
-                              { label: t('send') },
-                              h(
-                                'button',
-                                {
-                                  type: 'button',
-                                  className: 'dshBridge_send',
-                                  'aria-label': t('send'),
-                                  disabled: sending || draft.trim() === '',
-                                  onClick: send,
-                                },
-                                h(IconSendOutlineRegular, { size: 16 }),
-                              ),
-                            ),
                       ),
                     ),
                     h(BridgeStatusline, { stats: statusStats, t }),

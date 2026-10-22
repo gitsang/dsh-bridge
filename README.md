@@ -110,13 +110,13 @@ right-aligned and contains:
   provider and switched through the engine's native `set_model` RPC;
 - a circular **send** button, which becomes **stop** while the agent runs.
 
-Below the card, the statusline mirrors dsh's shipped statistics pills: a gauge
-pill for turns/steps and a database pill for total tokens plus cache-hit rate.
-Both open the same kind of compact detail panel. Bridge statistics come from
-the engine's `get_session_stats` RPC, with a transcript-fold fallback for
-engines that do not expose statistics. This is a visual and interaction match,
-not a reuse of dsh's session projections: external agents have their own
-session model.
+Below the card, the statusline mirrors dsh's shipped composer dock: a gauge
+pill for turns/steps, a database pill for total tokens plus cache-hit rate, and
+the context-occupancy ring when the engine reports context usage. Each opens
+the same kind of compact detail panel. Bridge statistics come from the engine's
+`get_session_stats` RPC, with a transcript-fold fallback for engines that do not
+expose statistics. This is a visual and interaction match, not a reuse of dsh's
+session projections: external agents have their own session model.
 
 Returning to **Local** disposes the Bridge sidebar occupant and restores dsh's
 native workspace browser.

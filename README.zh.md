@@ -96,10 +96,11 @@ surface 和阴影）。右下角控制行包含：
   调用引擎原生的 `set_model` RPC；
 - 圆形**发送**按钮，agent 运行时切换为**停止**。
 
-卡片下方是仿 dsh 的 statusline：仪表盘 pill 展示轮次/步数，数据库 pill 展示
-总 Token 与缓存命中率；点击可展开同款详情面板。Bridge 的统计来自引擎的
-`get_session_stats` RPC，不支持统计的引擎则回退到对话记录汇总。这里是视觉
-与交互对齐，而不是复用 dsh 的 session projection：外部 agent 有自己的会话模型。
+卡片下方是仿 dsh 的 composer statusline：仪表盘 pill 展示轮次/步数，数据库
+pill 展示总 Token 与缓存命中率，引擎返回上下文占用时还会显示环形百分比；
+点击可展开同款详情面板。Bridge 的统计来自引擎的 `get_session_stats` RPC，
+不支持统计的引擎则回退到对话记录汇总。这里是视觉与交互对齐，而不是复用
+dsh 的 session projection：外部 agent 有自己的会话模型。
 
 选择 **本机** 后释放 Bridge 侧边栏 occupant，恢复 dsh 原生侧边栏。
 
