@@ -91,6 +91,7 @@ test('registers the bridge-instance route table', () => {
     '/api/bridge/bridges',
     '/api/bridge/capabilities',
     '/api/bridge/detach',
+    '/api/bridge/directories',
     '/api/bridge/events',
     '/api/bridge/history-message',
     '/api/bridge/models',
@@ -101,6 +102,41 @@ test('registers the bridge-instance route table', () => {
     '/api/bridge/state',
     '/api/bridge/ui-response',
   ])
+})
+
+
+test('lists and creates local directories for the workspace picker', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'bridge-directories-home-'))
+  const root = await mkdtemp(join(tmpdir(), 'bridge-directories-'))
+  await mkdir(join(root, 'alpha'))
+  await mkdir(join(root, '.hidden'))
+  await writeFile(join(root, 'plain.txt'), 'x', 'utf8')
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  try {
+    const { ctx, routes } = host()
+    apply(ctx)
+
+    const listed = await (await call(routes, `directories?path=${encodeURIComponent(root)}`)).json()
+    assert.equal(listed.ok, true)
+    assert.equal(listed.path, root)
+    assert.deepEqual(listed.entries.map((entry) => entry.name), ['.hidden', 'alpha'])
+    assert.equal(listed.entries.find((entry) => entry.name === '.hidden').hidden, true)
+
+    const created = await (await call(routes, 'directories', post({ path: root, name: 'beta' }))).json()
+    assert.equal(created.ok, true)
+    assert.equal(created.path, join(root, 'beta'))
+    const refreshed = await (await call(routes, `directories?path=${encodeURIComponent(root)}`)).json()
+    assert.ok(refreshed.entries.some((entry) => entry.name === 'beta'))
+
+    const conflict = await call(routes, 'directories', post({ path: root, name: 'beta' }))
+    assert.equal(conflict.status, 409)
+    const traversal = await call(routes, 'directories', post({ path: root, name: '../escape' }))
+    assert.equal(traversal.status, 400)
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+  }
 })
 
 test('settings expose modes, engines and one default bridge', async () => {

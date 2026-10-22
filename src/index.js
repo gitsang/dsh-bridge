@@ -15,6 +15,9 @@ import {
   getEngine,
 } from './backends/registry.js'
 import { decodeSessionKey, encodeSessionKey } from './backends/keys.js'
+import { mkdir, readdir, realpath, stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { messageText } from './message.js'
 import {
   createBridge,
@@ -200,6 +203,86 @@ class AttachmentSession {
   }
 }
 
+const DIRECTORY_LIMIT = 1000
+
+/**
+ * Resolve one browsable directory. The directory browser is deliberately local
+ * to the authenticated dsh host and accepts absolute paths, matching dsh's own
+ * workspace picker. Relative paths are resolved against the host home so an
+ * empty/missing path opens Home instead of the process working directory.
+ */
+async function resolveDirectoryPath(value) {
+  if (value === undefined || value === null || value === '') return realpath(homedir())
+  if (typeof value !== 'string') throw Object.assign(new Error('path must be a string'), { status: 400 })
+  const path = isAbsolute(value) ? resolve(value) : resolve(homedir(), value)
+  let resolved
+  try {
+    resolved = await realpath(path)
+  } catch {
+    throw Object.assign(new Error(`directory does not exist: ${path}`), { status: 404 })
+  }
+  const info = await stat(resolved)
+  if (!info.isDirectory()) throw Object.assign(new Error(`not a directory: ${path}`), { status: 400 })
+  return resolved
+}
+
+/** List immediate child folders for the Bridge workspace directory picker. */
+async function listDirectories(requestPath) {
+  const path = await resolveDirectoryPath(requestPath)
+  let entries
+  try {
+    entries = await readdir(path, { withFileTypes: true })
+  } catch (error) {
+    throw Object.assign(new Error(`could not read directory: ${error instanceof Error ? error.message : String(error)}`), { status: 403 })
+  }
+  const folders = []
+  for (const entry of entries) {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
+    let directory = entry.isDirectory()
+    if (!directory) {
+      try {
+        directory = (await stat(join(path, entry.name))).isDirectory()
+      } catch {
+        directory = false
+      }
+    }
+    if (!directory) continue
+    folders.push({
+      name: entry.name,
+      path: join(path, entry.name),
+      hidden: entry.name.startsWith('.'),
+    })
+  }
+  folders.sort((left, right) => left.name.localeCompare(right.name))
+  return {
+    home: homedir(),
+    path,
+    parent: resolve(path, '..') === path ? null : resolve(path, '..'),
+    entries: folders.slice(0, DIRECTORY_LIMIT),
+    truncated: folders.length > DIRECTORY_LIMIT,
+  }
+}
+
+/** Create one child directory for the workspace picker and return its path. */
+async function createDirectory(parentValue, nameValue) {
+  const parent = await resolveDirectoryPath(parentValue)
+  if (typeof nameValue !== 'string') throw Object.assign(new Error('name is required'), { status: 400 })
+  const name = nameValue.trim()
+  if (name === '' || name === '.' || name === '..' || /[\\/\0]/.test(name)) {
+    throw Object.assign(new Error('folder name must be a single path segment'), { status: 400 })
+  }
+  const path = join(parent, name)
+  try {
+    await mkdir(path)
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'EEXIST') {
+      throw Object.assign(new Error(`folder already exists: ${name}`), { status: 409 })
+    }
+    throw Object.assign(new Error(`could not create folder: ${error instanceof Error ? error.message : String(error)}`), { status: 500 })
+  }
+  return { path, name: basename(path), parent }
+}
+
 export function apply(ctx) {
   const attachments = new Map()
   const logger = ctx.logger
@@ -332,6 +415,23 @@ export function apply(ctx) {
             workspaces,
             sessions,
           })
+        } catch (error) {
+          return failure(error, error.status ?? 500)
+        }
+      },
+    },
+    {
+      path: `${ROUTE}/directories`,
+      methods: ['GET', 'POST'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        try {
+          if (request.method === 'GET') {
+            const url = new URL(request.url)
+            return json(200, { ok: true, ...(await listDirectories(url.searchParams.get('path') ?? undefined)) })
+          }
+          const body = await readJson(request)
+          return json(201, { ok: true, ...(await createDirectory(body.path, body.name)) })
         } catch (error) {
           return failure(error, error.status ?? 500)
         }

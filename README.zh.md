@@ -20,6 +20,9 @@ Pi 是第一个完整支持的引擎。Codex、OpenCode、远程 DSH 会出现�
 - [x] Pi 引擎完整可用：JSONL 会话、RPC attach、事件归一化、prompt
 - [x] 左上角「本机 + 已配置桥接」下拉框
 - [x] 选中桥接后由侧边栏直接展示该桥接的工作区 / 会话
+- [x] 与 dsh Web 一致的侧边栏浏览器：按工作区 / 工作区树 / 单列表分组、手动 / 最近更新排序、会话筛选
+- [x] dsh 风格搜索按钮与结果列表
+- [x] dsh 风格“选择工作区目录”弹窗，可新建文件夹并加入工作区
 - [x] dsh 风格对话界面与 composer
 - [ ] Codex 引擎适配器
 - [ ] OpenCode 引擎适配器
@@ -65,7 +68,9 @@ Bridge 设置
 
 1. 打开 Bridge 主面板；
 2. 用一个 `sidebar.workspaces` occupant 替换原生工作区浏览器，展示该桥接的
-   工作区 / 会话树；
+   工作区 / 会话树。该浏览器复用 dsh 的 `dsh-client-ui-primitives`、视觉令牌与
+   行高 / 图标 / 菜单规格，支持按工作区、工作区树、单列表分组，手动排序与最近
+   更新排序，归档筛选，搜索按钮和目录选择弹窗；
 3. 右侧加载会话历史；
 4. composer 和实时流继续绑定该桥接。
 
@@ -120,6 +125,7 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 | `GET /api/bridge/settings` | 模式、引擎和脱敏后的桥接列表 |
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | 管理桥接 |
 | `GET /api/bridge/sessions?bridge=<id>` | 某个桥接的会话/工作区 |
+| `GET/POST /api/bridge/directories` | 浏览 / 新建本地工作区目录 |
 | `GET /api/bridge/session?key=…` | 单个会话历史 |
 | `GET /api/bridge/capabilities` | 协议版本与 attachment 表 |
 | `POST /api/bridge/attach` | 启动实时 attachment |

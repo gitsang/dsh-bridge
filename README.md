@@ -21,6 +21,9 @@ the add-bridge form but are marked as pending until their adapters are connected
 - [x] Confirmed Pi engine: JSONL sessions, RPC attach, normalized events, prompts
 - [x] Top-left “Local + configured bridges” dropdown
 - [x] Bridge-owned sidebar while a bridge is selected
+- [x] dsh-identical workspace browser: workspace / workspace-tree / flat grouping, manual / last-updated ordering, session filter
+- [x] dsh-style search button and result list
+- [x] dsh-style Select Workspace Directory dialog with New folder
 - [x] dsh-styled transcript and composer
 - [ ] Codex engine adapter
 - [ ] OpenCode engine adapter
@@ -74,7 +77,10 @@ Selecting a saved bridge:
 
 1. opens the Bridge main panel;
 2. replaces the stock `sidebar.workspaces` browser with the bridge's workspace/
-   session tree;
+   session tree. The browser reuses dsh's `dsh-client-ui-primitives`, visual tokens,
+   row metrics, icons, and menus, and supports workspace / workspace-tree / flat
+   grouping, manual / last-updated ordering, archived-session filtering, a search
+   button, and the directory-picker dialog;
 3. loads session history into the main transcript;
 4. keeps the composer and live streaming attached to that bridge.
 
@@ -134,6 +140,7 @@ All routes sit below dsh's authenticated `/api` channel.
 | `GET /api/bridge/settings` | Modes, engines, and redacted bridge list |
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | Manage saved bridges |
 | `GET /api/bridge/sessions?bridge=<id>` | List one bridge's sessions/workspaces |
+| `GET/POST /api/bridge/directories` | Browse / create local workspace directories |
 | `GET /api/bridge/session?key=…` | One normalized session history |
 | `GET /api/bridge/capabilities` | Protocol and live attachment table |
 | `POST /api/bridge/attach` | Start a live attachment |

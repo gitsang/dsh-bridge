@@ -24,16 +24,35 @@ window.__ModuleLoader__.load({
     const {
       Button,
       DisclosureRow,
+      HoverCard,
       IconApiOutlineRegular,
+      IconArchiveOutlineRegular,
+      IconArchiveOffOutlineRegular,
+      IconArchiveCheckOutlineRegular,
+      IconCheckOutlineRegular,
       IconChevronDownOutlineRegular,
+      IconChevronRightOutlineRegular,
+      IconChevronsUpDownOutlineRegular,
+      IconClockOutlineRegular,
+      IconCloseFillRegular,
       IconCodeOutlineRegular,
       IconEditOutlineRegular,
-      IconPlusOutlineRegular,
-      IconTrashOutlineRegular,
+      IconEllipsisOutlineRegular,
+      IconFlatListOutlineRegular,
+      IconFolderCloseRegular,
+      IconFolderOpenRegular,
       IconPauseOutlineRegular,
+      IconPlusOutlineRegular,
+      IconProjectAddOutlineRegular,
+      IconQueueOutlineRegular,
       IconRefreshOutlineRegular,
+      IconSearchOutlineRegular,
       IconSendOutlineRegular,
       IconSettingsOutlineRegular,
+      IconSlidersTwoOutlineRegular,
+      IconTrashOutlineRegular,
+      IconTriangleRightFillRegular,
+      IconWorkspaceTreeOutlineRegular,
       FishLogo,
       MarkdownText,
       Menu,
@@ -62,6 +81,14 @@ window.__ModuleLoader__.load({
         loadError: null,
         selectedKey: null,
         search: '',
+        searchExpanded: false,
+        groupBy: 'workspace',
+        orderBy: 'updated',
+        archivedFilter: 'default',
+        groupExpansion: {},
+        sessionOrderByAccount: {},
+        archivedKeys: [],
+        extraWorkspaces: [],
       },
       listeners: new Set(),
       selectHandler: null,
@@ -81,6 +108,33 @@ window.__ModuleLoader__.load({
       refresh() {
         this.refreshHandler?.()
       },
+      hydrateView(bridgeId) {
+        const view = readStoredView(bridgeId)
+        this.set({
+          groupBy: view.groupBy,
+          orderBy: view.orderBy,
+          archivedFilter: view.archivedFilter,
+          groupExpansion: view.groupExpansion,
+          sessionOrderByAccount: view.sessionOrderByAccount,
+          archivedKeys: view.archivedKeys,
+          extraWorkspaces: view.extraWorkspaces,
+          search: '',
+          searchExpanded: false,
+        })
+      },
+      setView(patch) {
+        this.set(patch)
+        const state = this.state
+        writeStoredView(state.bridge?.id ?? null, {
+          groupBy: state.groupBy,
+          orderBy: state.orderBy,
+          archivedFilter: state.archivedFilter,
+          groupExpansion: state.groupExpansion,
+          sessionOrderByAccount: state.sessionOrderByAccount,
+          archivedKeys: state.archivedKeys,
+          extraWorkspaces: state.extraWorkspaces,
+        })
+      },
     }
 
     function openBridgeSettings() {
@@ -95,6 +149,670 @@ window.__ModuleLoader__.load({
       const [state, setState] = useState(bridgeUi.state)
       useEffect(() => bridgeUi.subscribe(() => setState(bridgeUi.state)), [])
       return state
+    }
+
+    const WORKSPACE_VIEW_STORAGE = 'dsh.bridge.workspace.view.v1'
+    const FLAT_ORDER_KEY = '__flat_session_order__'
+    const SEARCH_SLIDE_MS = 300
+
+    function readStoredView(bridgeId) {
+      const fallback = {
+        groupBy: 'workspace',
+        orderBy: 'updated',
+        archivedFilter: 'default',
+        groupExpansion: {},
+        sessionOrderByAccount: {},
+        archivedKeys: [],
+        extraWorkspaces: [],
+      }
+      try {
+        const raw = window?.localStorage?.getItem(`${WORKSPACE_VIEW_STORAGE}:${bridgeId ?? 'none'}`)
+        if (typeof raw !== 'string' || raw === '') return fallback
+        const stored = JSON.parse(raw)
+        if (stored === null || typeof stored !== 'object') return fallback
+        return {
+          ...fallback,
+          ...stored,
+          groupBy: ['workspace', 'workspace-tree', 'flat'].includes(stored.groupBy) ? stored.groupBy : fallback.groupBy,
+          orderBy: ['manual', 'updated'].includes(stored.orderBy) ? stored.orderBy : fallback.orderBy,
+          archivedFilter: ['default', 'show', 'only'].includes(stored.archivedFilter) ? stored.archivedFilter : fallback.archivedFilter,
+          groupExpansion: stored.groupExpansion && typeof stored.groupExpansion === 'object' ? stored.groupExpansion : {},
+          sessionOrderByAccount: stored.sessionOrderByAccount && typeof stored.sessionOrderByAccount === 'object' ? stored.sessionOrderByAccount : {},
+          archivedKeys: Array.isArray(stored.archivedKeys) ? stored.archivedKeys.filter((key) => typeof key === 'string') : [],
+          extraWorkspaces: Array.isArray(stored.extraWorkspaces)
+            ? stored.extraWorkspaces.filter((workspace) => workspace && typeof workspace.path === 'string' && workspace.path !== '')
+            : [],
+        }
+      } catch {
+        return fallback
+      }
+    }
+
+    function writeStoredView(bridgeId, view) {
+      try {
+        window?.localStorage?.setItem(`${WORKSPACE_VIEW_STORAGE}:${bridgeId ?? 'none'}`, JSON.stringify(view))
+      } catch {
+        // Private browsing/storage pressure must not break the sidebar.
+      }
+    }
+
+    function workspaceTitleOf(path) {
+      if (typeof path !== 'string') return ''
+      const trimmed = path.replace(/[/\\]+$/, '')
+      const separator = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+      return trimmed.slice(separator + 1)
+    }
+
+    function workspaceLabel(path) {
+      return workspaceTitleOf(path) || path || ''
+    }
+
+    function folderPath(path) {
+      if (typeof path !== 'string') return ''
+      return (/^[A-Za-z]:[/\\]/.test(path) || path.startsWith('\\\\') ? path.replaceAll('\\', '/') : path).replace(/\/+$/, '')
+    }
+
+    function owningParentFolder(path, parents) {
+      const child = folderPath(path)
+      let owner
+      let length = -1
+      for (const parent of parents) {
+        const root = folderPath(parent)
+        if (root.length > length && child !== root && child.startsWith(`${root}/`)) {
+          owner = parent
+          length = root.length
+        }
+      }
+      return owner
+    }
+
+    function compareSessionsByUpdated(left, right) {
+      const leftTime = Date.parse(left.modified ?? left.created ?? '') || 0
+      const rightTime = Date.parse(right.modified ?? right.created ?? '') || 0
+      if (leftTime !== rightTime) return rightTime - leftTime
+      return String(left.key).localeCompare(String(right.key))
+    }
+
+    function reconcileSessionOrder(members, savedOrder, byKey) {
+      const memberSet = new Set(members.map((session) => session.key))
+      const included = new Set()
+      const ordered = []
+      for (const key of Array.isArray(savedOrder) ? savedOrder : []) {
+        if (!memberSet.has(key) || included.has(key)) continue
+        ordered.push(key)
+        included.add(key)
+      }
+      const missing = members.filter((session) => !included.has(session.key)).sort(compareSessionsByUpdated)
+      return [...ordered, ...missing.map((session) => session.key)]
+    }
+
+    function relativeTime(value, now, t) {
+      const time = Date.parse(value ?? '')
+      if (!Number.isFinite(time)) return ''
+      const seconds = Math.max(0, Math.floor((now - time) / 1000))
+      if (seconds < 60) return t('timeNow')
+      const minutes = Math.floor(seconds / 60)
+      if (minutes < 60) return t('timeAgo').replace('{t}', t('timeMinutes').replace('{n}', String(minutes)))
+      const hours = Math.floor(minutes / 60)
+      if (hours < 24) return t('timeAgo').replace('{t}', t('timeHours').replace('{n}', String(hours)))
+      const days = Math.floor(hours / 24)
+      if (days < 30) return t('timeAgo').replace('{t}', t('timeDays').replace('{n}', String(days)))
+      const months = Math.floor(days / 30)
+      if (months < 12) return t('timeAgo').replace('{t}', t('timeMonths').replace('{n}', String(months)))
+      return t('timeAgo').replace('{t}', t('timeYears').replace('{n}', String(Math.floor(months / 12))))
+    }
+
+    function pathCrumbs(path, home, homeLabel) {
+      if (typeof path !== 'string' || path === '') return []
+      const windows = /^[A-Za-z]:[/\\]/.test(path) || path.startsWith('\\\\')
+      const separator = windows ? '\\' : '/'
+      const normalized = path.replace(/[/\\]+$/, '')
+      const cleanHome = typeof home === 'string' ? home.replace(/[/\\]+$/, '') : ''
+      const underHome = cleanHome !== '' && (normalized === cleanHome || normalized.startsWith(`${cleanHome}${separator}`))
+      const remainder = underHome ? normalized.slice(cleanHome.length).replace(/^[/\\]+/, '') : normalized
+      const pieces = remainder.split(/[/\\]+/).filter(Boolean)
+      const crumbs = []
+      if (underHome) {
+        crumbs.push({ name: homeLabel, path: cleanHome })
+      } else if (windows) {
+        const drive = pieces.shift()
+        if (drive !== undefined) crumbs.push({ name: drive, path: `${drive}\\` })
+      } else {
+        crumbs.push({ name: '/', path: '/' })
+      }
+      let current = crumbs.length > 0 ? crumbs[0].path : ''
+      for (const piece of pieces) {
+        current = current === '' || current === '/' || current.endsWith('\\')
+          ? `${current}${piece}`
+          : `${current}${separator}${piece}`
+        crumbs.push({ name: piece, path: current })
+      }
+      return crumbs
+    }
+
+    function BridgeViewOptionsMenu({ groupBy, orderBy, archivedFilter, onGroupPick, onOrderPick, onArchivedFilterPick, t }) {
+      const [open, setOpen] = useState(false)
+      const items = [
+        { type: 'label', id: 'group-by', text: t('groupBy') },
+        { id: 'workspace', label: t('groupByWorkspace'), icon: h(IconFolderCloseRegular, {}) },
+        { id: 'workspace-tree', label: t('groupByWorkspaceTree'), icon: h(IconWorkspaceTreeOutlineRegular, {}) },
+        { id: 'flat', label: t('groupByFlat'), icon: h(IconFlatListOutlineRegular, {}) },
+        { type: 'separator', id: 'order-by-separator' },
+        { type: 'label', id: 'order-by', text: t('orderBy') },
+        { id: 'manual', label: t('orderByManual'), icon: h(IconChevronsUpDownOutlineRegular, {}) },
+        { id: 'updated', label: t('orderByUpdated'), icon: h(IconClockOutlineRegular, {}) },
+        { type: 'separator', id: 'archived-filter-separator' },
+        { type: 'label', id: 'filter-by', text: t('filterBy') },
+        { id: 'hide-archived', label: t('hideArchived'), icon: h(IconArchiveOffOutlineRegular, {}) },
+        { id: 'show-archived', label: t('showArchived'), icon: h(IconQueueOutlineRegular, {}) },
+        { id: 'only-archived', label: t('onlyArchived'), icon: h(IconArchiveCheckOutlineRegular, {}) },
+      ]
+      return h(Menu, {
+        open,
+        onClose: () => setOpen(false),
+        items,
+        selectedIds: [
+          groupBy,
+          orderBy,
+          { default: 'hide-archived', show: 'show-archived', only: 'only-archived' }[archivedFilter],
+        ],
+        onSelect: (id) => {
+          if (id === 'workspace' || id === 'workspace-tree' || id === 'flat') onGroupPick(id)
+          else if (id === 'manual' || id === 'updated') onOrderPick(id)
+          else if (id === 'hide-archived') onArchivedFilterPick('default')
+          else if (id === 'show-archived') onArchivedFilterPick('show')
+          else if (id === 'only-archived') onArchivedFilterPick('only')
+          setOpen(false)
+        },
+        align: 'end',
+        dense: true,
+        listClassName: 'dshBridge_browser_viewOptionsMenu',
+        portal: true,
+        anchor: h(
+          Tooltip,
+          { label: t('viewOptions'), side: 'bottom', delayMs: 500 },
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dshBridge_browser_iconButton',
+              'aria-label': t('viewOptions'),
+              onClick: () => setOpen((value) => !value),
+            },
+            h(IconSlidersTwoOutlineRegular, {}),
+          ),
+        ),
+      })
+    }
+
+    function BridgeDirectoryDialog({ open, onClose, onPick, t }) {
+      const [listing, setListing] = useState(null)
+      const [childListing, setChildListing] = useState(null)
+      const [selected, setSelected] = useState(null)
+      const [loading, setLoading] = useState(false)
+      const [error, setError] = useState(null)
+      const [showHidden, setShowHidden] = useState(false)
+      const [folderDraft, setFolderDraft] = useState(null)
+      const [creating, setCreating] = useState(false)
+      const [createError, setCreateError] = useState(null)
+      const [pathDraft, setPathDraft] = useState(null)
+
+      const loadRoot = useCallback(async (path) => {
+        setLoading(true)
+        setError(null)
+        try {
+          const suffix = path === undefined || path === null || path === '' ? '' : `?path=${encodeURIComponent(path)}`
+          const body = await api(`directories${suffix}`)
+          setListing(body)
+          setChildListing(null)
+          setSelected(null)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setLoading(false)
+        }
+      }, [])
+
+      const loadChild = useCallback(async (entry) => {
+        setSelected(entry)
+        setLoading(true)
+        setError(null)
+        try {
+          const body = await api(`directories?path=${encodeURIComponent(entry.path)}`)
+          setChildListing(body)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setLoading(false)
+        }
+      }, [])
+
+      useEffect(() => {
+        if (!open) {
+          setListing(null)
+          setChildListing(null)
+          setSelected(null)
+          setFolderDraft(null)
+          setCreateError(null)
+          setPathDraft(null)
+          setShowHidden(false)
+          return
+        }
+        loadRoot()
+      }, [open, loadRoot])
+
+      const target = selected ?? (listing === null ? null : { name: workspaceLabel(listing.path), path: listing.path })
+      const targetName = target?.name ?? ''
+      const beginCreate = () => {
+        setFolderDraft('')
+        setCreateError(null)
+      }
+      const confirmCreate = async () => {
+        if (target === null || folderDraft === null || creating || folderDraft.trim() === '') return
+        setCreating(true)
+        setCreateError(null)
+        try {
+          const body = await api('directories', {
+            method: 'POST',
+            body: JSON.stringify({ path: target.path, name: folderDraft.trim() }),
+          })
+          setFolderDraft(null)
+          await loadRoot(target.path)
+          await loadChild({ name: body.name, path: body.path, hidden: false })
+        } catch (failure) {
+          setCreateError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setCreating(false)
+        }
+      }
+
+      const crumbs = pathCrumbs(listing?.path ?? '', listing?.home, t('folderHome'))
+      const visibleEntries = (value) => (Array.isArray(value?.entries) ? value.entries : [])
+        .filter((entry) => showHidden || !entry.hidden)
+        .slice(0, 1000)
+      const parentEntries = visibleEntries(listing)
+      const childEntries = visibleEntries(childListing)
+      const renderColumn = (entries, { selectedPath = null, onActivate }) =>
+        h(
+          'div',
+          { className: 'dshBridge_dir_column', role: 'list' },
+          ...entries.map((entry) =>
+            h(
+              'span',
+              { key: entry.path, role: 'listitem', className: 'dshBridge_dir_rowSeat' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: `dshBridge_dir_row${entry.path === selectedPath ? ' dshBridge_dir_rowSelected' : ''}`,
+                  'aria-current': entry.path === selectedPath || undefined,
+                  disabled: loading,
+                  onClick: () => onActivate(entry),
+                },
+                entry.path === selectedPath
+                  ? h(IconFolderOpenRegular, { size: 16, className: 'dshBridge_dir_rowIconSelected' })
+                  : h(IconFolderCloseRegular, { size: 16, className: 'dshBridge_dir_rowIcon' }),
+                h('span', { className: 'dshBridge_dir_rowName' }, entry.name),
+                h(IconChevronRightOutlineRegular, { size: 12, className: 'dshBridge_dir_rowChevron' }),
+              ),
+            ),
+          ),
+        )
+
+      const editor = h(
+        'div',
+        { className: 'dshBridge_dir_editorScope' },
+        h(
+          'div',
+          { className: 'dshBridge_dir_header' },
+          h('h2', { className: 'dshBridge_dir_title' }, t('folderPickerTitle')),
+          h(
+            'div',
+            { className: 'dshBridge_dir_crumbBar' },
+            pathDraft === null
+              ? h(
+                  React.Fragment,
+                  null,
+                  h(
+                    'span',
+                    { className: 'dshBridge_dir_crumbTrail', role: 'navigation' },
+                    ...crumbs.map((crumb, index) =>
+                      h(
+                        'span',
+                        { className: 'dshBridge_dir_crumbSeat', key: crumb.path },
+                        index > 0 ? h(IconChevronRightOutlineRegular, { size: 12, className: 'dshBridge_dir_crumbChevron' }) : null,
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            className: 'dshBridge_dir_crumb',
+                            disabled: loading,
+                            onClick: () => loadRoot(crumb.path),
+                          },
+                          crumb.name,
+                        ),
+                      ),
+                    ),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dshBridge_dir_crumbEditZone',
+                      title: t('folderPickerTitle'),
+                      'aria-label': t('folderPickerTitle'),
+                      onClick: () => setPathDraft(listing?.path ?? ''),
+                    },
+                    h(IconEditOutlineRegular, { size: 14, className: 'dshBridge_dir_crumbEditGlyph' }),
+                  ),
+                )
+              : h('input', {
+                  className: 'dshBridge_dir_pathInput',
+                  value: pathDraft,
+                  'aria-label': t('folderPickerTitle'),
+                  autoFocus: true,
+                  onChange: (event) => setPathDraft(event.target.value),
+                  onKeyDown: (event) => {
+                    if (event.key === 'Escape') {
+                      setPathDraft(null)
+                      return
+                    }
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      loadRoot(pathDraft)
+                      setPathDraft(null)
+                    }
+                  },
+                }),
+          ),
+        ),
+        h(
+          'div',
+          { className: 'dshBridge_dir_content' },
+          h(
+            'div',
+            { className: 'dshBridge_dir_millerRow' },
+            renderColumn(parentEntries, { selectedPath: selected?.path ?? null, onActivate: loadChild }),
+            selected !== null && childListing !== null
+              ? h(React.Fragment, null, h('span', { className: 'dshBridge_dir_divider' }), renderColumn(childEntries, { onActivate: (entry) => loadRoot(entry.path) }))
+              : null,
+          ),
+          loading ? h('div', { className: 'dshBridge_dir_status dshBridge_dir_loadingFloat', role: 'status' }, t('folderLoading')) : null,
+          listing?.truncated === true || childListing?.truncated === true
+            ? h('div', { className: 'dshBridge_dir_status', role: 'status' }, t('folderTruncated'))
+            : null,
+          error !== null ? h('div', { className: 'dshBridge_dir_error', role: 'alert' }, error) : null,
+        ),
+        h(
+          'div',
+          { className: 'dshBridge_dir_footerBar' },
+          h(
+            Button,
+            {
+              variant: 'outline',
+              icon: h(IconPlusOutlineRegular, { size: 14 }),
+              disabled: listing === null || loading,
+              onClick: beginCreate,
+            },
+            t('folderNew'),
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: `dshBridge_dir_showHiddenToggle${showHidden ? ' dshBridge_dir_showHiddenToggleActive' : ''}`,
+              'aria-pressed': showHidden,
+              onClick: () => setShowHidden((value) => !value),
+            },
+            t('folderShowHidden'),
+            showHidden ? h(IconCheckOutlineRegular, { size: 14 }) : null,
+          ),
+          h('span', { className: 'dshBridge_dir_footerGap' }),
+          h(Button, { variant: 'outline', className: 'dshBridge_dir_footerAction', onClick: onClose }, t('folderCancel')),
+          h(
+            Button,
+            {
+              variant: 'primary',
+              className: 'dshBridge_dir_footerAction',
+              disabled: target === null || loading,
+              onClick: () => {
+                if (target !== null) onPick(target.path)
+              },
+            },
+            t('folderOpen'),
+          ),
+        ),
+      )
+
+      return h(
+        React.Fragment,
+        null,
+        h(
+          Modal,
+          {
+            open,
+            onClose,
+            title: t('folderPickerTitle'),
+            className: 'dshBridge_dir_dialog',
+            headless: true,
+          },
+          editor,
+        ),
+        h(
+          Modal,
+          {
+            open: folderDraft !== null,
+            onClose: () => {
+              if (!creating) setFolderDraft(null)
+            },
+            title: t('folderNew'),
+            className: 'dshBridge_dir_createDialog',
+            headless: true,
+          },
+          h(
+            'div',
+            { className: 'dshBridge_dir_createBody' },
+            h('h3', { className: 'dshBridge_dir_createTitle' }, t('folderNew')),
+            h('p', { className: 'dshBridge_dir_createIn' }, t('folderCreateIn').replace('{name}', targetName)),
+            h('input', {
+              className: 'dshBridge_dir_createInput',
+              value: folderDraft ?? '',
+              'aria-label': t('folderName'),
+              placeholder: t('folderUntitled'),
+              'data-modal-autofocus': true,
+              disabled: creating,
+              onChange: (event) => setFolderDraft(event.target.value),
+              onKeyDown: (event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  confirmCreate()
+                }
+                if (event.key === 'Escape') {
+                  event.stopPropagation()
+                  if (!creating) setFolderDraft(null)
+                }
+              },
+            }),
+            createError !== null ? h('div', { className: 'dshBridge_dir_error', role: 'alert' }, createError) : null,
+            h(
+              'div',
+              { className: 'dshBridge_dir_createActions' },
+              h(Button, { variant: 'outline', disabled: creating, onClick: () => setFolderDraft(null) }, t('folderCancel')),
+              h(
+                Button,
+                {
+                  variant: 'primary',
+                  disabled: creating || folderDraft === null || folderDraft.trim() === '',
+                  onClick: confirmCreate,
+                },
+                t('folderCreate'),
+              ),
+            ),
+          ),
+        ),
+      )
+    }
+
+    function BridgeWorkspaceRow({ group, expanded, active, onToggle, t }) {
+      const label = group.workspaceId === undefined ? t('groupUngrouped') : group.label
+      return h(
+        HoverCard,
+        {
+          openDelayMs: 800,
+          copyText: group.cwd ?? undefined,
+          copyLabel: t('copy'),
+          copiedLabel: t('hoverCopied'),
+          content: h(
+            'div',
+            { className: 'dshBridge_row_hoverContent' },
+            h('div', { className: 'dshBridge_row_hoverTitle' }, label),
+            group.cwd ? h('div', { className: 'dshBridge_row_hoverPath' }, group.cwd) : null,
+            group.createdAt ? h('div', { className: 'dshBridge_row_hoverTime' }, t('hoverCreated').replace('{time}', formatTime(group.createdAt))) : null,
+          ),
+          anchor: h(
+            'div',
+            {
+              className: 'dshBridge_row_projectRow',
+              'data-row-key': `workspace:${group.key}`,
+              role: 'treeitem',
+              'aria-expanded': expanded,
+              onClick: onToggle,
+            },
+            h(
+              'span',
+              { className: `dshBridge_row_slot dshBridge_row_folder${active ? ' dshBridge_row_folderActive' : ''}` },
+              expanded ? h(IconFolderOpenRegular, {}) : h(IconFolderCloseRegular, {}),
+            ),
+            h(
+              'span',
+              { className: 'dshBridge_row_slot dshBridge_row_chevron' },
+              h(IconTriangleRightFillRegular, { className: `dshBridge_row_arrow${expanded ? ' dshBridge_row_arrowOpen' : ''}` }),
+            ),
+            h(
+              'span',
+              { className: 'dshBridge_row_projectText' },
+              h('span', { className: 'dshBridge_row_title', title: group.cwd ?? label }, label),
+            ),
+          ),
+        },
+      )
+    }
+
+    function BridgeSessionRow({ session, selected, archived, now, drag, onOpen, onArchive, onDragStart, onDragEnd, onDragOver, onDrop, t }) {
+      const [menuOpen, setMenuOpen] = useState(false)
+      const title = session.name || session.firstMessage || t('untitled')
+      const menuItems = archived
+        ? [{ id: 'unarchive', label: t('unarchiveSession'), icon: h(IconArchiveOffOutlineRegular, {}) }]
+        : [{ id: 'archive', label: t('archiveSession'), icon: h(IconArchiveOutlineRegular, {}) }]
+      const row = h(
+        'div',
+        {
+          className: [
+            'dshBridge_row_sessionRow',
+            selected ? 'dshBridge_row_selected' : '',
+            menuOpen ? 'dshBridge_row_menuOpen' : '',
+            archived ? 'dshBridge_row_archived' : '',
+            drag?.marker === 'before' ? 'dshBridge_row_dropBefore' : '',
+            drag?.marker === 'after' ? 'dshBridge_row_dropAfter' : '',
+          ].filter(Boolean).join(' '),
+          role: 'treeitem',
+          'aria-selected': selected,
+          draggable: drag !== undefined,
+          onClick: () => onOpen(session.key),
+          onDragStart: drag === undefined ? undefined : (event) => {
+            event.dataTransfer.effectAllowed = 'move'
+            event.dataTransfer.setData('text/plain', session.key)
+            onDragStart()
+          },
+          onDragEnd: drag === undefined ? undefined : onDragEnd,
+          onDragOver: drag === undefined ? undefined : (event) => {
+            if (!drag.active) return
+            event.preventDefault()
+            const rect = event.currentTarget.getBoundingClientRect()
+            onDragOver(event.clientY < rect.top + rect.height / 2 ? 'before' : 'after')
+          },
+          onDrop: drag === undefined ? undefined : (event) => {
+            if (!drag.active) return
+            event.preventDefault()
+            const rect = event.currentTarget.getBoundingClientRect()
+            onDrop(event.clientY < rect.top + rect.height / 2 ? 'before' : 'after')
+          },
+        },
+        h('span', { className: 'dshBridge_row_slot' }),
+        h('span', { className: 'dshBridge_row_title', ref: undefined }, title),
+        h('span', { className: 'dshBridge_row_time' }, relativeTime(session.modified ?? session.created, now, t)),
+        h(
+          'span',
+          {
+            className: 'dshBridge_row_rowActions',
+            onClick: (event) => event.stopPropagation(),
+          },
+          h(Menu, {
+            open: menuOpen,
+            onClose: () => setMenuOpen(false),
+            items: menuItems,
+            portal: true,
+            closeOnPointerLeave: true,
+            onSelect: (id) => {
+              setMenuOpen(false)
+              if (id === 'archive' || id === 'unarchive') onArchive(session.key, id === 'archive')
+            },
+            anchor: h(
+              'button',
+              {
+                type: 'button',
+                className: 'dshBridge_row_iconButton',
+                'aria-label': t('sessionActions').replace('{name}', title),
+                onClick: () => setMenuOpen((value) => !value),
+              },
+              h(IconEllipsisOutlineRegular, {}),
+            ),
+          }),
+        ),
+      )
+      return h(HoverCard, {
+        anchor: row,
+        openDelayMs: 800,
+        disabled: menuOpen,
+        copyText: title,
+        copyLabel: t('copy'),
+        copiedLabel: t('hoverCopied'),
+        content: h(
+          'div',
+          { className: 'dshBridge_row_hoverContent' },
+          h('div', { className: 'dshBridge_row_hoverTitle' }, title),
+          h('div', { className: 'dshBridge_row_hoverTime' }, relativeTime(session.modified ?? session.created, now, t)),
+          session.cwd ? h('div', { className: 'dshBridge_row_hoverPath' }, session.cwd) : null,
+          session.firstMessage && session.firstMessage !== title ? h('div', { className: 'dshBridge_row_hoverStatus' }, session.firstMessage) : null,
+        ),
+      })
+    }
+
+    function BridgeSearchResult({ session, selected, now, onOpen, t }) {
+      const title = session.name || session.firstMessage || t('untitled')
+      return h(
+        'div',
+        {
+          className: `dshBridge_row_searchResultRow${selected ? ' dshBridge_row_selected' : ''}`,
+          role: 'treeitem',
+          'aria-selected': selected,
+          onClick: () => onOpen(session.key),
+        },
+        h(
+          'span',
+          { className: 'dshBridge_row_searchResultHeading' },
+          h('span', { className: 'dshBridge_row_slot' }),
+          h('span', { className: 'dshBridge_row_searchResultTitle' }, title),
+        ),
+        h(
+          'span',
+          { className: 'dshBridge_row_searchResultMeta' },
+          h('span', { className: 'dshBridge_row_searchResultWorkspace' }, session.cwd ? workspaceLabel(session.cwd) : t('groupUngrouped')),
+          session.firstMessage && session.firstMessage !== title
+            ? h('span', { className: 'dshBridge_row_searchResultSnippet' }, session.firstMessage)
+            : h('span', { className: 'dshBridge_row_searchResultSnippet' }, relativeTime(session.modified ?? session.created, now, t)),
+        ),
+      )
     }
 
     const zh = {
@@ -157,8 +875,62 @@ window.__ModuleLoader__.load({
       empty: '还没有会话',
       emptyHint: '先在终端运行一次对应 agent，或在 Bridge 设置里指定正确的会话目录。',
       search: '搜索会话',
-      searchPlaceholder: '搜索名称、路径或首条消息',
-      noMatches: '没有匹配的会话',
+      searchPlaceholder: '搜索会话名称',
+      noMatches: '无匹配会话',
+      sectionWorkspaces: '工作区',
+      sectionSessions: '会话',
+      groupUngrouped: '未分组',
+      untitled: '未命名',
+      viewOptions: '视图选项',
+      groupBy: '分组方式',
+      groupByWorkspace: '按工作区',
+      groupByWorkspaceTree: '按工作区树',
+      groupByFlat: '单列表',
+      orderBy: '排序方式',
+      orderByManual: '手动排序',
+      orderByUpdated: '最近更新',
+      filterBy: '筛选会话',
+      hideArchived: '隐藏已归档',
+      showArchived: '全部对话（显示已归档）',
+      onlyArchived: '仅显示已归档',
+      sessionsExpand: '展开其余 {n} 个会话',
+      sessionsCollapse: '收起',
+      emptyArchived: '暂无已归档会话',
+      emptyViewOthers: '查看其他会话',
+      addWorkspace: '添加工作区',
+      searchClear: '清除搜索',
+      searchResults: '搜索结果',
+      archiveSession: '归档会话',
+      unarchiveSession: '取消归档',
+      sessionActions: '会话“{name}”的操作',
+      workspaceActions: '工作区“{name}”的操作',
+      renameWorkspace: '重命名工作区',
+      deleteWorkspace: '删除工作区',
+      deleteWorkspaceDesc: '将把“{name}”从工作区列表中移除。文件夹与会话记录会保留，其会话将显示在“未分组”下。',
+      folderPickerTitle: '选择工作区目录',
+      folderHome: '主目录',
+      folderNew: '新建文件夹',
+      folderName: '文件夹名称',
+      folderCreateIn: '在“{name}”中新建文件夹',
+      folderUntitled: '未命名文件夹',
+      folderCreate: '创建',
+      folderCancel: '取消',
+      folderOpen: '打开',
+      folderLoading: '加载中…',
+      folderTruncated: '文件夹过多，仅显示开头部分。',
+      folderShowHidden: '显示隐藏文件',
+      folderCreateFailed: '无法创建文件夹',
+      folderCreated: '工作区目录已添加',
+      workspaceAdded: '工作区已添加',
+      timeNow: '刚刚',
+      timeMinutes: '{n}分钟',
+      timeHours: '{n}小时',
+      timeDays: '{n}天',
+      timeMonths: '{n}个月',
+      timeYears: '{n}年',
+      timeAgo: '{t}前',
+      hoverCreated: '创建于 {time}',
+      hoverCopied: '已复制',
       selectHint: '从左侧选择一个会话',
       attach: '连接会话',
       attaching: '正在连接…',
@@ -258,8 +1030,62 @@ window.__ModuleLoader__.load({
       empty: 'No sessions yet',
       emptyHint: 'Run the selected agent once in a terminal, or point its sessions directory at the right place in Bridge settings.',
       search: 'Search sessions',
-      searchPlaceholder: 'Search name, path, or first message',
+      searchPlaceholder: 'Search session names',
       noMatches: 'No matching sessions',
+      sectionWorkspaces: 'Workspaces',
+      sectionSessions: 'Sessions',
+      groupUngrouped: 'Ungrouped',
+      untitled: 'Untitled',
+      viewOptions: 'View options',
+      groupBy: 'Group by',
+      groupByWorkspace: 'WorkSpace',
+      groupByWorkspaceTree: 'Workspace Tree',
+      groupByFlat: 'In one list',
+      orderBy: 'Order by',
+      orderByManual: 'Manual',
+      orderByUpdated: 'Last updated',
+      filterBy: 'Filter sessions',
+      hideArchived: 'Hide archived',
+      showArchived: 'All conversations (show archived)',
+      onlyArchived: 'Archived only',
+      sessionsExpand: 'Show {n} more sessions',
+      sessionsCollapse: 'Show less',
+      emptyArchived: 'No archived sessions yet',
+      emptyViewOthers: 'View other sessions',
+      addWorkspace: 'Add workspace',
+      searchClear: 'Clear search',
+      searchResults: 'Search results',
+      archiveSession: 'Archive session',
+      unarchiveSession: 'Unarchive session',
+      sessionActions: 'Session actions for {name}',
+      workspaceActions: 'Workspace actions for {name}',
+      renameWorkspace: 'Rename workspace',
+      deleteWorkspace: 'Delete workspace',
+      deleteWorkspaceDesc: 'This removes “{name}” from the workspace list. The folder and session logs will be kept. Its sessions will appear under Ungrouped.',
+      folderPickerTitle: 'Select Workspace Directory',
+      folderHome: 'Home',
+      folderNew: 'New folder',
+      folderName: 'Folder name',
+      folderCreateIn: 'New folder in “{name}”',
+      folderUntitled: 'Untitled folder',
+      folderCreate: 'Create',
+      folderCancel: 'Cancel',
+      folderOpen: 'Open',
+      folderLoading: 'Loading…',
+      folderTruncated: 'Too many folders to list; only the beginning is shown.',
+      folderShowHidden: 'Show hidden files',
+      folderCreateFailed: 'Could not create folder',
+      folderCreated: 'Workspace folder added',
+      workspaceAdded: 'Workspace added',
+      timeNow: 'now',
+      timeMinutes: '{n}min',
+      timeHours: '{n}h',
+      timeDays: '{n}d',
+      timeMonths: '{n}mo',
+      timeYears: '{n}y',
+      timeAgo: '{t} ago',
+      hoverCreated: 'Created {time}',
+      hoverCopied: 'Copied',
       selectHint: 'Select a session on the left',
       attach: 'Connect session',
       attaching: 'Connecting…',
@@ -430,6 +1256,9 @@ window.__ModuleLoader__.load({
       '.dshBridge_bridgeCardActions{flex:none;display:flex;align-items:center;gap:2px}',
       '.dshBridge_dangerButton:hover:not(:disabled){color:var(--dsw-alias-state-error-primary,#d33)!important}',
       '.dshBridge_settingsNotice{margin-top:8px;padding:6px 9px;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));font-size:11px;line-height:17px;color:var(--dsw-alias-label-secondary,currentColor)}',
+      `.dshBridge_browser_root{--dsh-session-list-edge-inset:var(--dsh-sidebar-inline-padding);--dsh-session-list-scrollbar-width:5px;--dsh-session-list-scrollbar-offset:2px;box-sizing:border-box;min-height:0;padding-right:var(--dsh-session-list-edge-inset);flex-direction:column;flex:1;display:flex}.dshBridge_browser_root.dshBridge_browser_rail{padding-right:0}.dshBridge_browser_iconButton{border-radius:var(--dsw-radius-sm);cursor:pointer;width:28px;height:28px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.dshBridge_browser_iconButton:focus-visible,.dshBridge_browser_searchButton:focus-visible,.dshBridge_browser_clearButton:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}.dshBridge_browser_iconButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_browser_viewOptionsMenu{min-width:200px}.dshBridge_browser_sectionHeader{box-sizing:border-box;border-radius:var(--dsw-radius-md);height:36px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px;padding-left:4px;display:flex;overflow:hidden}.dshBridge_browser_root:not(.dshBridge_browser_rail) .dshBridge_browser_sectionHeader{margin-top:2px;margin-right:-4px}.dshBridge_browser_sectionLabel{white-space:nowrap;opacity:1;visibility:visible;min-width:0;max-width:45%;transition:max-width .18s var(--ds-ease-in-out),margin-right .18s var(--ds-ease-in-out),opacity .12s var(--ds-ease-in-out),transform .18s var(--ds-ease-in-out),visibility 0s linear;flex:none;line-height:20px;overflow:hidden}.dshBridge_browser_sectionLabelHidden{opacity:0;visibility:hidden;max-width:0;margin-right:-4px;transition-delay:0s,0s,0s,0s,.18s;transform:translate(-4px)}.dshBridge_browser_searchSlot{box-sizing:border-box;min-width:0;max-width:28px;transition:max-width .18s var(--ds-ease-in-out),padding-left .18s var(--ds-ease-in-out);flex:1;align-items:center;margin-left:auto;padding-left:0;display:flex}.dshBridge_browser_searchSlotExpanded{max-width:100%;padding-left:0}.dshBridge_browser_headerActions{opacity:1;visibility:visible;max-width:60px;transition:max-width .18s var(--ds-ease-in-out),opacity .12s var(--ds-ease-in-out),transform .18s var(--ds-ease-in-out),visibility 0s linear;flex:none;align-items:center;gap:4px;display:flex;overflow:hidden}.dshBridge_browser_headerActionsHidden{opacity:0;visibility:hidden;pointer-events:none;max-width:0;transition-delay:0s,0s,0s,.18s;transform:translate(4px)}.dshBridge_browser_search{box-sizing:border-box;border-radius:var(--dsw-radius-sm);cursor:text;width:100%;height:28px;color:var(--dsw-alias-label-secondary);transition:width .18s var(--ds-ease-in-out),padding .18s var(--ds-ease-in-out),border-color .18s var(--ds-ease-in-out),background-color .18s var(--ds-ease-in-out);background:0 0;border:none;flex:none;align-items:center;gap:0;margin:0;padding:0;display:flex;overflow:hidden}.dshBridge_browser_searchExpanded{border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md);width:calc(100% + 4px);height:30px;color:var(--dsw-alias-label-caption);background:0 0;margin-inline:-2px;padding:0 4px 0 0}.dshBridge_browser_searchButton{border-radius:var(--dsw-radius-sm);cursor:pointer;width:28px;height:28px;color:inherit;background:0 0;border:none;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.dshBridge_browser_searchExpanded .dshBridge_browser_searchButton{width:28px;height:30px}.dshBridge_browser_searchButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_browser_searchExpanded .dshBridge_browser_searchButton:hover{background:0 0}.dshBridge_browser_searchInput{opacity:0;pointer-events:none;width:0;min-width:0;color:var(--dsw-alias-label-primary);transition:opacity .12s var(--ds-ease-in-out);background:0 0;border:none;outline:none;flex:1;font-size:13px;line-height:18px}.dshBridge_browser_searchExpanded .dshBridge_browser_searchInput{opacity:1;pointer-events:auto;margin-left:-2px}.dshBridge_browser_searchInput::placeholder{color:var(--dsw-alias-label-tertiary)}.dshBridge_browser_clearButton{border-radius:var(--dsw-radius-sm);cursor:pointer;width:24px;height:24px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.dshBridge_browser_clearButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_browser_rail .dshBridge_browser_sectionHeader{justify-content:flex-start;gap:0;margin-bottom:12px;padding-left:0}.dshBridge_browser_rail .dshBridge_browser_headerActions{max-width:none}.dshBridge_browser_rail .dshBridge_browser_iconButton{border-radius:var(--dsw-radius-md);width:36px;height:36px;color:var(--dsw-alias-label-primary)}.dshBridge_browser_rail .dshBridge_browser_search{border-radius:var(--dsw-radius-md);background:0 0;border-color:#0000;gap:0;width:36px;height:36px;margin:0 0 12px;padding:0}.dshBridge_browser_rail .dshBridge_browser_searchButton{border-radius:var(--dsw-radius-md);width:36px;height:36px;color:var(--dsw-alias-label-primary)}.dshBridge_browser_rail .dshBridge_browser_searchButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_browser_listArea{min-height:0;margin-left:-4px;margin-right:calc(-1 * var(--dsh-session-list-edge-inset));flex-direction:column;flex:1;padding-left:4px;display:flex;overflow:visible}.dshBridge_browser_rail .dshBridge_browser_listArea{margin-left:0;margin-right:0;padding-left:0}.dshBridge_browser_treeBody{flex-direction:column;flex:1;min-height:0;display:flex;position:relative}.dshBridge_browser_fade{left:0;right:var(--dsh-session-list-edge-inset);background:linear-gradient(to bottom,transparent,var(--dsw-specific-sidebar-fill));pointer-events:none;height:24px;position:absolute;bottom:0}[data-platform=darwin] .dshBridge_browser_fade{display:none}.dshBridge_browser_wide{animation:dshBridge_browser_wide-in .2s var(--ds-ease-in-out)}@keyframes dshBridge_browser_wide-in{0%{opacity:0}}.dshBridge_browser_list{min-height:0;margin-left:-4px;margin-right:var(--dsh-session-list-scrollbar-offset);padding-left:4px;padding-right:calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-width) - var(--dsh-session-list-scrollbar-offset));scrollbar-gutter:stable;flex:1;padding-bottom:16px;overflow-y:auto}.dshBridge_browser_flatList>*+*,.dshBridge_browser_searchTree>[role=treeitem]+[role=treeitem],.dshBridge_browser_groupSection>*+*{margin-top:2px}.dshBridge_browser_searchStatus{color:var(--dsw-alias-label-tertiary);padding:10px 12px;font-size:12px;line-height:18px}.dshBridge_browser_groupSection{position:relative}.dshBridge_browser_groupSection+.dshBridge_browser_groupSection{margin-top:4px}.dshBridge_browser_listTopDropIndicator,.dshBridge_browser_workspaceDropBefore:before,.dshBridge_browser_workspaceDropAfter:after{content:"";z-index:1;background:linear-gradient(55deg,transparent calc(50% - 1px),var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px),transparent calc(50% + 1px)) 0 0 / 5px 7px no-repeat,linear-gradient(125deg,transparent calc(50% - 1px),var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px),transparent calc(50% + 1px)) 0 5px / 5px 7px no-repeat,linear-gradient(var(--dsw-alias-state-business-primary) 0 0) 4px 5px / calc(100% - 4px) 2px no-repeat;pointer-events:none;height:12px;position:absolute;left:0;right:0}.dshBridge_browser_listTopDropIndicator{top:-8px;left:0;right:var(--dsh-session-list-edge-inset)}.dshBridge_browser_listTopDropActive>.dshBridge_browser_workspaceDropBefore:first-child:before{display:none}.dshBridge_browser_workspaceDropBefore:before{top:-8px}.dshBridge_browser_workspaceDropAfter:after{bottom:-8px}.dshBridge_browser_sessionOverflowButton{border-radius:var(--dsw-radius-sm);width:100%;height:28px;padding:0 12px 0 calc(28px + var(--dsh-workspace-indent,0px));cursor:pointer;text-align:left;color:var(--dsw-alias-label-tertiary);background:0 0;border:none;font-size:12px}.dshBridge_browser_groupSection>.dshBridge_browser_sessionOverflowButton{margin-top:0}.dshBridge_browser_sessionOverflowButton:hover{color:var(--dsw-alias-label-secondary);background:0 0}.dshBridge_browser_empty{color:var(--dsw-alias-label-tertiary);padding:16px 12px;font-size:13px}.dshBridge_browser_emptyState{color:var(--dsw-alias-label-tertiary);flex-direction:column;align-items:center;gap:8px;margin-top:80px;padding:0 12px;font-size:13px;line-height:20px;display:flex}.dshBridge_browser_emptyState>svg{color:var(--dsw-alias-label-caption);margin-bottom:4px}.dshBridge_browser_emptyAction{cursor:pointer;color:var(--dsw-alias-link);background:0 0;border:none;padding:0;font-size:13px;line-height:20px}.dshBridge_browser_renameInput{box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-lg);width:100%;height:44px;color:var(--dsw-alias-label-primary);background:0 0;outline:none;padding:7px 14px;font-size:14px;font-weight:400;line-height:22px}.dshBridge_browser_renameInput:disabled{color:var(--dsw-alias-label-dimmed)}.dshBridge_browser_renameError{color:var(--dsw-alias-state-error-primary);margin-top:8px;font-size:12px;line-height:18px}.dshBridge_browser_deleteAction:not(:disabled){color:var(--dsw-alias-state-error-primary)}.dshBridge_browser_deleteStatus{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}@media (prefers-reduced-motion:reduce){.dshBridge_browser_wide{animation:none}.dshBridge_browser_search,.dshBridge_browser_sectionLabel,.dshBridge_browser_searchSlot,.dshBridge_browser_searchInput,.dshBridge_browser_headerActions{transition:none}}`,
+      `.dshBridge_row_projectRow,.dshBridge_row_sessionRow{border-radius:var(--dsw-radius-md);padding:0 8px;cursor:pointer;user-select:none;color:var(--dsw-alias-label-primary);align-items:center;gap:6px;padding-inline-start:calc(8px + var(--dsh-workspace-indent,0px));display:flex}.dshBridge_row_projectRow:hover,.dshBridge_row_sessionRow:hover,.dshBridge_row_sessionRow.dshBridge_row_selected{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_row_searchResultRow{box-sizing:border-box;border-radius:var(--dsw-radius-lg);cursor:pointer;text-align:left;width:100%;min-height:48px;color:var(--dsw-alias-label-primary);background:0 0;border:none;flex-direction:column;align-items:stretch;padding:4px 8px;display:flex}.dshBridge_row_searchResultRow:hover,.dshBridge_row_searchResultRow.dshBridge_row_selected{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_row_searchResultHeading{align-items:center;min-width:0;display:flex}.dshBridge_row_searchResultTitle{text-overflow:ellipsis;white-space:nowrap;flex:0 auto;min-width:0;margin-left:4px;font-size:14px;line-height:20px;overflow:hidden}.dshBridge_row_searchResultMeta{align-items:center;gap:6px;min-width:0;margin-left:20px;display:flex}.dshBridge_row_searchResultWorkspace,.dshBridge_row_searchResultSnippet{text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:17px;overflow:hidden}.dshBridge_row_searchResultWorkspace{max-width:40%;color:var(--dsw-alias-label-tertiary);flex:none}.dshBridge_row_searchResultWorkspace:only-child{max-width:100%}.dshBridge_row_searchResultSnippet{min-width:0;color:var(--dsw-alias-label-secondary);flex:1}.dshBridge_row_projectRow{box-sizing:border-box;align-items:center;height:34px}.dshBridge_row_projectRow .dshBridge_row_rowActions{height:20px}.dshBridge_row_sessionRow{gap:0;height:32px}.dshBridge_row_sessionRow .dshBridge_row_title{margin:0 6px 0 4px}.dshBridge_row_slot{width:16px;height:20px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;display:inline-flex}.dshBridge_row_visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}.dshBridge_row_folderActive{color:var(--dsw-alias-state-business-primary)}.dshBridge_row_projectRow .dshBridge_row_chevron{display:none}.dshBridge_row_projectRow:hover .dshBridge_row_chevron{display:inline-flex}.dshBridge_row_projectRow:hover .dshBridge_row_folder{display:none}.dshBridge_row_arrow{transition:transform .15s var(--ds-ease-in-out)}.dshBridge_row_arrowOpen{transform:rotate(90deg)}.dshBridge_row_projectText{flex-direction:column;flex:1;gap:2px;min-width:0;display:flex}.dshBridge_row_title{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;line-height:20px;overflow:hidden}.dshBridge_row_renameInput{border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-button-elevated-fill);min-width:0;color:inherit;outline:none;padding:0 2px;font-size:14px;line-height:20px}.dshBridge_row_sessionRow .dshBridge_row_title{flex:1}.dshBridge_row_meta{text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px;overflow:hidden}.dshBridge_row_time{color:var(--dsw-alias-label-tertiary);flex:none;font-size:10px;line-height:16px}.dshBridge_row_pinIndicator{width:16px;height:20px;color:var(--dsw-alias-label-caption);flex:none;justify-content:center;align-items:center;margin-left:6px;display:inline-flex}.dshBridge_row_sessionRow.dshBridge_row_archived .dshBridge_row_title,.dshBridge_row_searchResultRow.dshBridge_row_archived .dshBridge_row_searchResultTitle,.dshBridge_row_searchResultRow.dshBridge_row_archived .dshBridge_row_searchResultWorkspace,.dshBridge_row_searchResultRow.dshBridge_row_archived .dshBridge_row_searchResultSnippet{color:var(--dsw-alias-label-caption)}.dshBridge_row_dot{flex:none}.dshBridge_row_rowActions{flex:none;align-items:center;gap:10px;display:none}.dshBridge_row_projectRow:hover .dshBridge_row_rowActions,.dshBridge_row_sessionRow:hover .dshBridge_row_rowActions,.dshBridge_row_searchResultRow:hover .dshBridge_row_rowActions,.dshBridge_row_projectRow.dshBridge_row_menuOpen .dshBridge_row_rowActions,.dshBridge_row_sessionRow.dshBridge_row_menuOpen .dshBridge_row_rowActions{display:inline-flex}.dshBridge_row_searchResultHeading .dshBridge_row_rowActions{margin-left:auto}.dshBridge_row_sessionRow:hover .dshBridge_row_time,.dshBridge_row_sessionRow.dshBridge_row_menuOpen .dshBridge_row_time,.dshBridge_row_sessionRow:hover .dshBridge_row_pinIndicator,.dshBridge_row_sessionRow.dshBridge_row_menuOpen .dshBridge_row_pinIndicator{display:none}@media (hover:hover){.dshBridge_row_sessionRow:hover .dshBridge_row_title,.dshBridge_row_sessionRow.dshBridge_row_menuOpen .dshBridge_row_title{text-overflow:clip}}.dshBridge_row_projectRow.dshBridge_row_menuOpen,.dshBridge_row_sessionRow.dshBridge_row_menuOpen{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_row_sessionRow.dshBridge_row_dropBefore,.dshBridge_row_sessionRow.dshBridge_row_dropAfter{position:relative}.dshBridge_row_sessionRow.dshBridge_row_dropBefore:before,.dshBridge_row_sessionRow.dshBridge_row_dropAfter:after{content:"";z-index:1;background:linear-gradient(55deg,transparent calc(50% - 1px),var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px),transparent calc(50% + 1px)) 0 0 / 5px 7px no-repeat,linear-gradient(125deg,transparent calc(50% - 1px),var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px),transparent calc(50% + 1px)) 0 5px / 5px 7px no-repeat,linear-gradient(var(--dsw-alias-state-business-primary) 0 0) 4px 5px / calc(100% - 4px) 2px no-repeat;pointer-events:none;height:12px;position:absolute;left:0;right:4px}.dshBridge_row_sessionRow.dshBridge_row_dropBefore:before{top:-7px}.dshBridge_row_sessionRow.dshBridge_row_dropAfter:after{bottom:-7px}.dshBridge_row_hoverContent{flex-direction:column;gap:8px;display:flex}.dshBridge_row_hoverTitle{color:#fff;overflow-wrap:break-word;font-size:14px;line-height:20px}.dshBridge_row_hoverPath{color:#cfd3d6;word-break:break-all;font-size:12px;line-height:16px}.dshBridge_row_hoverTime{color:#cfd3d6;font-size:12px;line-height:16px}.dshBridge_row_hoverStatus{color:#adb2b8;align-items:center;gap:8px;font-size:12px;line-height:20px;display:flex}.dshBridge_row_iconButton{border-radius:var(--dsw-radius-xs);cursor:pointer;width:16px;height:16px;color:var(--dsw-alias-label-tertiary);background:0 0;border:none;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.dshBridge_row_iconButton:hover{color:var(--dsw-alias-label-primary)}.dshBridge_row_chevron{color:var(--dsw-alias-label-caption)}@media (prefers-reduced-motion:reduce){.dshBridge_row_arrow{transition:none;animation:none}}`,
+      `.dshBridge_dir_dialog.dshBridge_dir_dialog{--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);gap:0;width:min(680px,100%);height:min(500px,100dvh - 32px);padding:0}.dshBridge_dir_editorScope{display:contents}.dshBridge_dir_header{border-bottom:.5px solid var(--dsw-alias-border-l3);flex-direction:column;flex:none;gap:8px;padding:16px 14px 8px 24px;display:flex}.dshBridge_dir_title{min-height:28px;color:var(--dsw-alias-label-primary);align-items:flex-end;margin:0;font-size:16px;font-weight:510;line-height:24px;display:flex}.dshBridge_dir_crumbBar{box-sizing:border-box;border-radius:var(--dsw-radius-sm);border:1px solid #0000;align-items:center;gap:4px;min-height:24px;margin-left:-9px;padding:0 8px;display:flex}.dshBridge_dir_crumbBar:has(.dshBridge_dir_crumbEditZone:enabled:hover),.dshBridge_dir_crumbBar:has(.dshBridge_dir_crumbEditZone:focus-visible),.dshBridge_dir_crumbBar:has(.dshBridge_dir_pathInput){border-color:var(--dsw-alias-border-l2)}.dshBridge_dir_millerRow{scrollbar-width:none;flex:1 1 0;align-items:stretch;gap:12px;min-height:0;display:flex;overflow-x:auto}.dshBridge_dir_crumbTrail{scrollbar-width:none;flex:0 auto;align-items:center;gap:4px;min-width:0;display:flex;overflow-x:auto}.dshBridge_dir_crumbSeat{flex:none;align-items:center;gap:4px;min-width:0;display:inline-flex}.dshBridge_dir_crumb{text-overflow:ellipsis;white-space:nowrap;max-width:160px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:none;padding:0;font-size:13px;font-weight:500;line-height:20px;overflow:hidden}.dshBridge_dir_crumb:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}.dshBridge_dir_crumb:hover{color:var(--dsw-alias-label-primary)}.dshBridge_dir_crumbChevron{color:var(--dsw-alias-label-tertiary);flex:none}.dshBridge_dir_crumbEditZone{cursor:text;background:0 0;border:none;outline:none;flex:1 0 34px;justify-content:flex-end;align-items:center;min-width:34px;height:22px;padding:0;display:flex}.dshBridge_dir_crumbEditGlyph{color:var(--dsw-alias-label-tertiary);flex:none}.dshBridge_dir_crumbEditZone:enabled:hover .dshBridge_dir_crumbEditGlyph,.dshBridge_dir_crumbEditZone:focus-visible .dshBridge_dir_crumbEditGlyph{color:var(--dsw-alias-label-primary)}.dshBridge_dir_crumbEditZone:disabled{cursor:default}.dshBridge_dir_crumbEditZone:disabled .dshBridge_dir_crumbEditGlyph{color:var(--dsw-alias-label-caption)}.dshBridge_dir_pathInput{box-sizing:border-box;min-width:0;height:22px;color:var(--dsw-alias-label-primary);background:0 0;border:none;outline:none;flex:1 1 0;padding:0;font-size:13px;line-height:20px}.dshBridge_dir_content{flex-direction:column;flex:1 1 0;min-height:0;padding:16px 16px 16px 24px;display:flex;position:relative}.dshBridge_dir_column{flex-direction:column;flex:1 1 0;gap:2px;min-width:256px;padding-right:8px;display:flex;overflow-y:auto}.dshBridge_dir_divider{background:var(--dsw-alias-border-l3);flex:none;width:.5px}.dshBridge_dir_rowSeat{flex:none;display:flex}.dshBridge_dir_row{border-radius:var(--dsw-radius-sm);text-align:left;cursor:pointer;background:0 0;border:none;flex:none;align-items:center;gap:4px;width:100%;height:28px;padding:4px;display:flex}.dshBridge_dir_row:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}.dshBridge_dir_row:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_dir_rowSelected,.dshBridge_dir_rowSelected:hover{background:var(--dsw-alias-interactive-bg-active,var(--dsw-alias-interactive-bg-hover))}.dshBridge_dir_rowIcon{color:var(--dsw-alias-label-secondary);flex:none}.dshBridge_dir_rowIconSelected{color:var(--dsw-alias-button-info-fill);flex:none}.dshBridge_dir_rowName{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-primary);flex:1 1 0;font-size:13px;font-weight:500;line-height:20px;overflow:hidden}.dshBridge_dir_rowChevron{color:var(--dsw-alias-label-tertiary);flex:none}.dshBridge_dir_status,.dshBridge_dir_error{padding:4px 120px 4px 4px;font-size:12px;line-height:18px}.dshBridge_dir_status{color:var(--dsw-alias-label-secondary)}.dshBridge_dir_error{color:var(--dsw-alias-state-error-primary)}.dshBridge_dir_loadingFloat{background:var(--dsw-alias-bg-layer-2);padding:2px 8px;position:absolute;bottom:8px;right:16px}.dshBridge_dir_footerBar{border-top:.5px solid var(--dsw-alias-border-l3);flex-wrap:wrap;flex:none;align-items:center;gap:8px;padding:16px 24px;display:flex}.dshBridge_dir_showHiddenToggle{color:var(--dsw-alias-label-secondary);cursor:pointer;white-space:nowrap;background:0 0;border:none;align-items:center;gap:4px;padding:0;font-size:13px;font-weight:500;line-height:20px;display:inline-flex}.dshBridge_dir_showHiddenToggle:hover{color:var(--dsw-alias-label-primary)}.dshBridge_dir_showHiddenToggle:disabled{color:var(--dsw-alias-label-caption);cursor:default}.dshBridge_dir_showHiddenToggleActive{color:var(--dsw-alias-label-primary)}.dshBridge_dir_footerGap{flex:1 1 0}.dshBridge_dir_footerAction{min-width:72px}.dshBridge_dir_createDialog.dshBridge_dir_createDialog{gap:0;width:min(380px,100%);padding:0}.dshBridge_dir_createBody{flex-direction:column;gap:12px;padding:22px 24px 20px;display:flex}.dshBridge_dir_createTitle{color:var(--dsw-alias-label-primary);margin:0;font-size:16px;font-weight:510;line-height:24px}.dshBridge_dir_createIn{color:var(--dsw-alias-label-primary);margin:0;font-size:14px;line-height:22px}.dshBridge_dir_createInput{box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-lg);width:100%;height:44px;color:var(--dsw-alias-label-primary);background:0 0;outline:none;padding:7px 14px;font-size:14px;line-height:22px}.dshBridge_dir_createInput::placeholder{color:var(--dsw-alias-label-caption)}.dshBridge_dir_createActions{justify-content:flex-end;align-items:center;gap:8px;margin-top:8px;display:flex}`,
     ].join('')
 
     function installStyles() {
@@ -1218,49 +2047,325 @@ window.__ModuleLoader__.load({
      */
     function BridgeWorkspaceList({ wide, expandSidebar, t }) {
       const ui = useBridgeUi()
-      const groups = useMemo(() => {
-        const known = new Map(ui.workspaces.map((workspace) => [workspace.id, workspace]))
-        const query = ui.search.trim().toLowerCase()
-        const matches = ui.sessions.filter((session) => {
-          if (query === '') return true
-          const haystack = [session.name, session.cwd, session.firstMessage, session.id].filter(Boolean).join('\n').toLowerCase()
-          return haystack.includes(query)
+      const searchRoot = useRef(null)
+      const searchInput = useRef(null)
+      const [directoryOpen, setDirectoryOpen] = useState(false)
+      const [searchOnExpand, setSearchOnExpand] = useState(false)
+      const [drag, setDrag] = useState(null)
+      const [sessionLimits, setSessionLimits] = useState({})
+      const now = Date.now()
+      const query = ui.search.trim().toLowerCase()
+
+      const expandSidebarForSearch = () => {
+        if (!wide) {
+          setSearchOnExpand(true)
+          expandSidebar()
+        }
+      }
+
+      useEffect(() => {
+        if (!wide || !searchOnExpand) return undefined
+        const timer = window.setTimeout(() => {
+          searchInput.current?.focus({ preventScroll: true })
+          setSearchOnExpand(false)
+        }, SEARCH_SLIDE_MS)
+        return () => window.clearTimeout(timer)
+      }, [wide, searchOnExpand])
+
+      useEffect(() => {
+        if (!wide || !ui.searchExpanded || searchOnExpand) return undefined
+        searchInput.current?.focus({ preventScroll: true })
+        return undefined
+      }, [wide, ui.searchExpanded, searchOnExpand])
+
+      useEffect(() => {
+        if (!wide || !ui.searchExpanded || searchOnExpand) return undefined
+        const onClick = (event) => {
+          if (!(event.target instanceof Node) || searchRoot.current?.contains(event.target) === true) return
+          if (ui.search !== '') return
+          bridgeUi.set({ searchExpanded: false })
+        }
+        document.addEventListener('click', onClick)
+        return () => document.removeEventListener('click', onClick)
+      }, [ui.search, ui.searchExpanded, wide, searchOnExpand])
+
+      const workspaceEntities = useMemo(() => {
+        const byPath = new Map()
+        const add = (workspace) => {
+          const path = workspace.path ?? workspace.id ?? ''
+          if (path === '' || byPath.has(path)) return
+          byPath.set(path, {
+            key: path,
+            workspaceId: path,
+            path,
+            name: workspaceLabel(path),
+            label: workspaceLabel(path),
+            createdAt: workspace.createdAt,
+          })
+        }
+        for (const workspace of ui.workspaces) add(workspace)
+        for (const workspace of ui.extraWorkspaces) add(workspace)
+        for (const session of ui.sessions) {
+          if (typeof session.cwd === 'string' && session.cwd !== '') add({ path: session.cwd, name: workspaceLabel(session.cwd) })
+        }
+        return [...byPath.values()]
+      }, [ui.sessions, ui.workspaces, ui.extraWorkspaces])
+
+      const workspaceBySession = useMemo(() => {
+        const map = new Map()
+        for (const workspace of workspaceEntities) {
+          for (const session of ui.sessions) {
+            if (session.cwd === workspace.path) map.set(session.key, workspace.key)
+          }
+        }
+        return map
+      }, [ui.sessions, workspaceEntities])
+
+      const archived = useMemo(() => new Set(ui.archivedKeys), [ui.archivedKeys])
+      const visibleSessions = useMemo(() => {
+        return ui.sessions.filter((session) => {
+          if (ui.archivedFilter === 'default' && archived.has(session.key)) return false
+          if (ui.archivedFilter === 'only' && !archived.has(session.key)) return false
+          return true
         })
-        const byKey = new Map()
-        for (const session of matches) {
-          const key = session.workspaceId ?? session.workspaceName ?? session.cwd ?? ''
-          if (!byKey.has(key)) {
-            byKey.set(key, {
-              id: key,
-              name: known.get(key)?.name ?? key,
-              sessions: [],
+      }, [archived, ui.archivedFilter, ui.sessions])
+
+      const matches = useMemo(() => {
+        if (query === '') return []
+        return visibleSessions
+          .filter((session) => {
+            const haystack = [session.name, session.cwd, session.firstMessage, session.id].filter(Boolean).join('\n').toLowerCase()
+            return haystack.includes(query)
+          })
+          .sort(compareSessionsByUpdated)
+      }, [query, visibleSessions])
+
+      const groupMembers = useCallback((key) => {
+        return visibleSessions.filter((session) => (workspaceBySession.get(session.key) ?? '') === key)
+      }, [visibleSessions, workspaceBySession])
+
+      const orderMembers = useCallback((key, members) => {
+        if (ui.orderBy === 'updated') return [...members].sort(compareSessionsByUpdated)
+        const byKey = new Map(members.map((session) => [session.key, session]))
+        const orderedKeys = reconcileSessionOrder(members, ui.sessionOrderByAccount[key], byKey)
+        return orderedKeys.flatMap((sessionKey) => {
+          const session = byKey.get(sessionKey)
+          return session === undefined ? [] : [session]
+        })
+      }, [ui.orderBy, ui.sessionOrderByAccount])
+
+      const groups = useMemo(() => {
+        const result = []
+        for (const workspace of workspaceEntities) {
+          const members = groupMembers(workspace.key)
+          if (ui.archivedFilter === 'only' && members.length === 0) continue
+          result.push({
+            key: workspace.key,
+            workspaceId: workspace.key,
+            cwd: workspace.path,
+            label: workspace.label,
+            createdAt: workspace.createdAt,
+            sessions: orderMembers(workspace.key, members),
+          })
+        }
+        const ungrouped = visibleSessions.filter((session) => !workspaceBySession.get(session.key))
+        if (ungrouped.length > 0 || workspaceEntities.length === 0) {
+          if (ui.archivedFilter !== 'only' || ungrouped.length > 0) {
+            result.push({
+              key: '',
+              workspaceId: undefined,
+              cwd: undefined,
+              label: '',
+              sessions: orderMembers('', ungrouped),
             })
           }
-          byKey.get(key).sessions.push(session)
         }
-        return [...byKey.values()].sort((left, right) => left.name.localeCompare(right.name))
-      }, [ui.search, ui.sessions, ui.workspaces])
+        return result
+      }, [groupMembers, orderMembers, ui.archivedFilter, visibleSessions, workspaceBySession, workspaceEntities])
 
-      if (!wide) {
+      const flatSessions = useMemo(() => {
+        if (ui.orderBy === 'updated') return [...visibleSessions].sort(compareSessionsByUpdated)
+        const byKey = new Map(visibleSessions.map((session) => [session.key, session]))
+        return reconcileSessionOrder(visibleSessions, ui.sessionOrderByAccount[FLAT_ORDER_KEY], byKey).flatMap((key) => {
+          const session = byKey.get(key)
+          return session === undefined ? [] : [session]
+        })
+      }, [ui.orderBy, ui.sessionOrderByAccount, visibleSessions])
+
+      const parents = useMemo(() => {
+        if (ui.groupBy !== 'workspace-tree') return new Map()
+        const byPath = new Map(workspaceEntities.map((workspace) => [workspace.path, workspace.key]))
+        const paths = [...byPath.keys()]
+        return new Map(workspaceEntities.map((workspace) => {
+          const parent = owningParentFolder(workspace.path, paths)
+          return [workspace.key, parent === undefined ? undefined : byPath.get(parent)]
+        }))
+      }, [ui.groupBy, workspaceEntities])
+
+      const childrenByParent = useMemo(() => {
+        const rendered = new Set(groups.map((group) => group.key))
+        const children = new Map()
+        for (const group of groups) {
+          let parent = parents.get(group.key)
+          while (parent !== undefined && !rendered.has(parent)) parent = parents.get(parent)
+          const siblings = children.get(parent)
+          if (siblings === undefined) children.set(parent, [group])
+          else siblings.push(group)
+        }
+        return children
+      }, [groups, parents])
+
+      const setGroupExpanded = (key, expanded) => {
+        bridgeUi.setView({ groupExpansion: { ...ui.groupExpansion, [key]: expanded } })
+      }
+
+      const setOrderBy = (mode) => {
+        if (mode === ui.orderBy) return
+        if (mode === 'manual') {
+          const orders = {}
+          for (const group of groups) orders[group.key] = group.sessions.map((session) => session.key)
+          orders[FLAT_ORDER_KEY] = flatSessions.map((session) => session.key)
+          bridgeUi.setView({ orderBy: mode, sessionOrderByAccount: orders })
+        } else {
+          bridgeUi.setView({ orderBy: mode, sessionOrderByAccount: {} })
+        }
+      }
+
+      const commitSessionDrag = (active, over) => {
+        if (active === null || over === undefined) return
+        if (active.sessionKey === over.sessionKey) return
+        const accountKey = active.accountKey
+        const members = accountKey === FLAT_ORDER_KEY ? flatSessions : groupMembers(accountKey)
+        const accountOrder = (accountKey === FLAT_ORDER_KEY ? flatSessions : orderMembers(accountKey, members)).map((session) => session.key)
+        const next = accountOrder.filter((key) => key !== active.sessionKey)
+        const targetIndex = next.indexOf(over.sessionKey)
+        if (targetIndex === -1) return
+        next.splice(targetIndex + (over.half === 'after' ? 1 : 0), 0, active.sessionKey)
+        const allMembers = ui.sessions
+          .filter((session) => accountKey === FLAT_ORDER_KEY || (workspaceBySession.get(session.key) ?? '') === accountKey)
+          .map((session) => session.key)
+        const complete = [...next, ...allMembers.filter((key) => !next.includes(key))]
+        bridgeUi.setView({
+          orderBy: 'manual',
+          sessionOrderByAccount: {
+            ...ui.sessionOrderByAccount,
+            [accountKey]: complete,
+            ...(accountKey === FLAT_ORDER_KEY ? {} : { [FLAT_ORDER_KEY]: [...flatSessions.map((session) => session.key)] }),
+          },
+        })
+      }
+
+      const updateArchived = (sessionKey, shouldArchive) => {
+        const next = shouldArchive
+          ? [...ui.archivedKeys.filter((key) => key !== sessionKey), sessionKey]
+          : ui.archivedKeys.filter((key) => key !== sessionKey)
+        bridgeUi.setView({ archivedKeys: next })
+      }
+
+      const addWorkspace = (path) => {
+        const exists = ui.extraWorkspaces.some((workspace) => workspace.path === path)
+        const next = exists ? ui.extraWorkspaces : [...ui.extraWorkspaces, { path, name: workspaceLabel(path) }]
+        bridgeUi.setView({ extraWorkspaces: next })
+        setDirectoryOpen(false)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('bridge:notice', { detail: { text: t('workspaceAdded') } }))
+        }
+      }
+
+      const renderSession = (session, accountKey) => {
+        const compatible = drag !== null && drag.accountKey === accountKey
+        return h(BridgeSessionRow, {
+          key: session.key,
+          session,
+          selected: session.key === ui.selectedKey,
+          archived: archived.has(session.key),
+          now,
+          t,
+          onOpen: (key) => bridgeUi.selectSession(key),
+          onArchive: updateArchived,
+          drag: {
+            active: compatible,
+            marker: compatible && drag.over?.sessionKey === session.key ? drag.over.half : null,
+          },
+          onDragStart: () => setDrag({ accountKey, sessionKey: session.key, over: null }),
+          onDragEnd: () => {
+            if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over)
+            setDrag(null)
+          },
+          onDragOver: (half) => setDrag((current) => current === null ? current : { ...current, over: { sessionKey: session.key, half } }),
+          onDrop: (half) => {
+            if (drag !== null) commitSessionDrag(drag, { sessionKey: session.key, half })
+            setDrag(null)
+          },
+        })
+      }
+
+      const renderGroup = (group, depth) => {
+        const children = childrenByParent.get(group.key) ?? []
+        const expanded = ui.groupExpansion[group.key] ?? (children.length > 0 || group.sessions.some((session) => session.key === ui.selectedKey))
+        const limit = sessionLimits[group.key]
+        let idle = 0
+        const visible = group.sessions.filter((session) => {
+          if (session.key === ui.selectedKey) return true
+          if (limit === Infinity) return true
+          if (idle < (limit ?? 5)) {
+            idle += 1
+            return true
+          }
+          return false
+        })
+        const hiddenCount = group.sessions.length - visible.length
         return h(
           'div',
-          { className: 'dshBridge_railWorkspace' },
-          h(
-            Tooltip,
-            { label: t('search') },
-            h(
+          {
+            key: group.key || '__ungrouped__',
+            className: 'dshBridge_browser_groupSection',
+            style: { '--dsh-workspace-indent': `${depth * 12}px` },
+          },
+          h(BridgeWorkspaceRow, {
+            group,
+            expanded,
+            active: group.sessions.some((session) => session.key === ui.selectedKey),
+            t,
+            onToggle: () => setGroupExpanded(group.key, !expanded),
+          }),
+          expanded && children.length > 0 ? h('div', { role: 'group' }, ...children.map((child) => renderGroup(child, depth + 1))) : null,
+          expanded ? visible.map((session) => renderSession(session, group.key)) : null,
+          expanded && hiddenCount > 0
+            ? h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dshBridge_browser_sessionOverflowButton',
+                  'aria-expanded': limit === Infinity,
+                  onClick: () => setSessionLimits((limits) => ({
+                    ...limits,
+                    [group.key]: limit === Infinity ? 5 : (limits[group.key] ?? 5) + 5,
+                  })),
+                },
+                limit === Infinity ? t('sessionsCollapse') : t('sessionsExpand').replace('{n}', String(hiddenCount)),
+              )
+            : null,
+        )
+      }
+
+      const emptyState = h(
+        'div',
+        { className: 'dshBridge_browser_emptyState', 'data-row-key': 'empty' },
+        ui.archivedFilter === 'only' ? h(IconArchiveOutlineRegular, { size: 24 }) : h(IconQueueOutlineRegular, { size: 24 }),
+        h('div', null, ui.archivedFilter === 'only' ? t('emptyArchived') : t('empty')),
+        ui.archivedFilter === 'only'
+          ? h(
               'button',
               {
                 type: 'button',
-                className: 'dshBridge_railButton',
-                'aria-label': t('openSettings'),
-                onClick: expandSidebar,
+                className: 'dshBridge_browser_emptyAction',
+                onClick: () => bridgeUi.setView({ archivedFilter: 'default' }),
               },
-              h(IconSearchSmall),
-            ),
-          ),
-        )
-      }
+              t('emptyViewOthers'),
+            )
+          : null,
+      )
 
       let body
       if (ui.bridge === null) {
@@ -1281,96 +2386,224 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dshBridge_sideNoteTitle' }, `${ui.bridge.name} · ${t('bridgeUnavailable')}`),
           h('div', null, ui.bridge.unavailableReason ?? t('bridgeUnavailableHint')),
         )
-      } else if (groups.length === 0) {
+      } else if (query !== '') {
         body = h(
           'div',
-          { className: 'dshBridge_sideNote' },
-          h('div', { className: 'dshBridge_sideNoteTitle' }, ui.sessions.length === 0 ? t('empty') : t('noMatches')),
-          h('div', null, ui.sessions.length === 0 ? t('emptyHint') : t('searchPlaceholder')),
+          { className: 'dshBridge_browser_treeBody dshBridge_browser_wide' },
+          h(
+            'div',
+            { className: 'dshBridge_browser_list' },
+            h(
+              'div',
+              { className: 'dshBridge_browser_searchTree', role: 'tree', 'aria-label': t('searchResults') },
+              ...matches.map((session) =>
+                h(BridgeSearchResult, {
+                  key: session.key,
+                  session,
+                  selected: session.key === ui.selectedKey,
+                  now,
+                  t,
+                  onOpen: (key) => {
+                    bridgeUi.selectSession(key)
+                    bridgeUi.set({ search: '', searchExpanded: false })
+                  },
+                }),
+              ),
+            ),
+            matches.length === 0 ? h('div', { className: 'dshBridge_browser_empty' }, t('noMatches')) : null,
+          ),
+          h('span', { className: 'dshBridge_browser_fade' }),
+        )
+      } else if (ui.groupBy === 'flat') {
+        body = h(
+          'div',
+          { className: 'dshBridge_browser_treeBody dshBridge_browser_wide' },
+          h(
+            'div',
+            { className: 'dshBridge_browser_list dshBridge_browser_flatList' },
+            ...(flatSessions.length === 0 ? [emptyState] : flatSessions.map((session) => renderSession(session, FLAT_ORDER_KEY))),
+          ),
+          h('span', { className: 'dshBridge_browser_fade' }),
         )
       } else {
+        const rootGroups = childrenByParent.get(undefined) ?? []
         body = h(
-          React.Fragment,
-          null,
-          ...groups.map((group) =>
+          'div',
+          { className: 'dshBridge_browser_treeBody dshBridge_browser_wide' },
+          h(
+            'div',
+            { className: 'dshBridge_browser_list' },
+            ...(rootGroups.length === 0 ? [emptyState] : rootGroups.map((group) => renderGroup(group, 0))),
+          ),
+          h('span', { className: 'dshBridge_browser_fade' }),
+        )
+      }
+
+      if (!wide) {
+        return h(
+          'div',
+          { className: 'dshBridge_browser_root dshBridge_browser_rail' },
+          h(
+            'div',
+            { className: 'dshBridge_browser_sectionHeader' },
             h(
-              'section',
-              { key: group.id || '__ungrouped__', className: 'dshBridge_sideGroup' },
+              'div',
+              { className: 'dshBridge_browser_search' },
               h(
-                'div',
-                { className: 'dshBridge_sideGroupHead' },
-                h('span', { className: 'dshBridge_sideGroupName', title: group.name }, group.name === '' ? t('noWorkspace') : group.name),
-                h('span', { className: 'dshBridge_sideGroupCount' }, String(group.sessions.length)),
-              ),
-              ...group.sessions.map((session) =>
+                Tooltip,
+                { label: t('search'), side: 'bottom', delayMs: 500 },
                 h(
                   'button',
                   {
-                    key: session.key,
                     type: 'button',
-                    className: 'dshBridge_sideRow',
-                    'aria-current': session.key === ui.selectedKey ? 'true' : undefined,
-                    onClick: () => bridgeUi.selectSession(session.key),
+                    className: 'dshBridge_browser_searchButton',
+                    'aria-label': t('search'),
+                    onClick: () => {
+                      bridgeUi.set({ searchExpanded: true })
+                      expandSidebarForSearch()
+                    },
                   },
-                  h(
-                    'span',
-                    { className: 'dshBridge_sideRowTop' },
-                    h('span', { className: 'dshBridge_sideRowTitle' }, session.name ?? session.firstMessage ?? session.id ?? t('panel')),
-                    session.modified ? h('span', { className: 'dshBridge_sideRowTime' }, formatTime(session.modified)) : null,
-                  ),
-                  session.firstMessage && session.firstMessage !== session.name
-                    ? h('span', { className: 'dshBridge_sideRowPreview' }, session.firstMessage)
-                    : null,
+                  h(IconSearchOutlineRegular, { size: 18 }),
                 ),
               ),
             ),
+            h(
+              Tooltip,
+              { label: t('addWorkspace'), side: 'bottom', delayMs: 500 },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dshBridge_browser_iconButton',
+                  'aria-label': t('addWorkspace'),
+                  onClick: () => {
+                    setDirectoryOpen(true)
+                    expandSidebar()
+                  },
+                },
+                h(IconProjectAddOutlineRegular, { size: 18 }),
+              ),
+            ),
           ),
+          h(BridgeDirectoryDialog, {
+            open: directoryOpen,
+            t,
+            onClose: () => setDirectoryOpen(false),
+            onPick: addWorkspace,
+          }),
         )
       }
 
       return h(
         'div',
-        { className: 'dshBridge_sideWorkspace', 'aria-label': t('workspaces') },
+        { className: 'dshBridge_browser_root' },
         h(
           'div',
-          { className: 'dshBridge_sideHead' },
-          h('span', { className: 'dshBridge_sideHeadTitle' }, t('workspaces')),
-          h('span', { className: 'dshBridge_sideHeadBackend' }, ui.bridge?.name ?? ''),
+          { className: 'dshBridge_browser_sectionHeader' },
           h(
-            'button',
+            'span',
             {
-              type: 'button',
-              className: 'dshBridge_sideIconButton',
-              'aria-label': t('refresh'),
-              disabled: ui.loading,
-              onClick: () => bridgeUi.refresh(),
+              className: `dshBridge_browser_sectionLabel dshBridge_browser_wide${ui.searchExpanded ? ' dshBridge_browser_sectionLabelHidden' : ''}`,
             },
-            h(IconRefreshOutlineRegular, { size: 14 }),
+            ui.groupBy === 'flat' ? t('sectionSessions') : t('sectionWorkspaces'),
+          ),
+          h(
+            'div',
+            { className: `dshBridge_browser_searchSlot${ui.searchExpanded ? ' dshBridge_browser_searchSlotExpanded' : ''}` },
+            h(
+              'div',
+              {
+                ref: searchRoot,
+                className: `dshBridge_browser_search${ui.searchExpanded ? ' dshBridge_browser_searchExpanded' : ''}`,
+                onClick: () => {
+                  bridgeUi.set({ searchExpanded: true })
+                  searchInput.current?.focus()
+                },
+              },
+              h(
+                Tooltip,
+                { label: t('search'), side: 'bottom', delayMs: 500, disabled: ui.searchExpanded },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dshBridge_browser_searchButton',
+                    'aria-label': t('search'),
+                    'aria-expanded': ui.searchExpanded,
+                    onClick: () => {
+                      bridgeUi.set({ searchExpanded: true })
+                      searchInput.current?.focus()
+                    },
+                  },
+                  h(IconSearchOutlineRegular, { size: ui.searchExpanded ? 11 : 14 }),
+                ),
+              ),
+              h('input', {
+                ref: searchInput,
+                className: 'dshBridge_browser_searchInput',
+                type: 'text',
+                placeholder: t('searchPlaceholder'),
+                maxLength: 500,
+                value: ui.search,
+                tabIndex: ui.searchExpanded ? 0 : -1,
+                onChange: (event) => bridgeUi.set({ search: event.target.value.replaceAll('\0', '') }),
+                onKeyDown: (event) => {
+                  if (event.key !== 'Escape') return
+                  bridgeUi.set({ search: '', searchExpanded: false })
+                },
+              }),
+              ui.searchExpanded
+                ? h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dshBridge_browser_clearButton',
+                      'aria-label': t('searchClear'),
+                      onClick: (event) => {
+                        event.stopPropagation()
+                        bridgeUi.set({ search: '', searchExpanded: false })
+                      },
+                    },
+                    h(IconCloseFillRegular, {}),
+                  )
+                : null,
+            ),
+          ),
+          h(
+            'div',
+            { className: `dshBridge_browser_headerActions${ui.searchExpanded ? ' dshBridge_browser_headerActionsHidden' : ''}` },
+            h(BridgeViewOptionsMenu, {
+              groupBy: ui.groupBy,
+              orderBy: ui.orderBy,
+              archivedFilter: ui.archivedFilter,
+              onGroupPick: (mode) => bridgeUi.setView({ groupBy: mode }),
+              onOrderPick: setOrderBy,
+              onArchivedFilterPick: (mode) => bridgeUi.setView({ archivedFilter: mode }),
+              t,
+            }),
+            h(
+              Tooltip,
+              { label: t('addWorkspace'), side: 'bottom', delayMs: 500 },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dshBridge_browser_iconButton',
+                  'aria-label': t('addWorkspace'),
+                  onClick: () => setDirectoryOpen(true),
+                },
+                h(IconProjectAddOutlineRegular, { size: 16 }),
+              ),
+            ),
           ),
         ),
-        h(
-          'div',
-          { className: 'dshBridge_sideSearchWrap' },
-          h('input', {
-            className: 'dshBridge_sideSearch',
-            type: 'search',
-            value: ui.search,
-            placeholder: t('searchPlaceholder'),
-            'aria-label': t('search'),
-            onChange: (event) => bridgeUi.set({ search: event.target.value }),
-          }),
-        ),
-        h('div', { className: 'dshBridge_sideList' }, body),
-        h(
-          'button',
-          {
-            type: 'button',
-            className: 'dshBridge_sideSettings',
-            onClick: openBridgeSettings,
-          },
-          h(IconSettingsOutlineRegular, { size: 15 }),
-          h('span', null, t('manageBridges')),
-        ),
+        h('div', { className: 'dshBridge_browser_listArea' }, body),
+        h(BridgeDirectoryDialog, {
+          open: directoryOpen,
+          t,
+          onClose: () => setDirectoryOpen(false),
+          onPick: addWorkspace,
+        }),
       )
     }
 
@@ -1434,6 +2667,10 @@ window.__ModuleLoader__.load({
         } finally {
           bridgeUi.set({ loading: false })
         }
+      }, [bridgeId])
+
+      useEffect(() => {
+        bridgeUi.hydrateView(bridgeId)
       }, [bridgeId])
 
       useEffect(() => {
@@ -2058,7 +3295,18 @@ window.__ModuleLoader__.load({
 
     exports.apply = apply
     exports.inject = ['slots', 'locale', 'layout']
-    exports.__test = { textOf, formatTime, formatBytes, safeJson }
+    exports.__test = {
+      textOf,
+      formatTime,
+      formatBytes,
+      safeJson,
+      workspaceLabel,
+      owningParentFolder,
+      compareSessionsByUpdated,
+      reconcileSessionOrder,
+      pathCrumbs,
+      relativeTime,
+    }
     return module.exports
   },
 })

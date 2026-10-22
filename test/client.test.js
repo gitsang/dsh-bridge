@@ -120,6 +120,12 @@ test('bridge dictionaries describe bridges as saved instances, not engines', () 
   assert.equal(dictionaries[0].zh.manageBridges, '管理桥接')
   assert.equal(dictionaries[0].zh.local, '本机')
   assert.equal(dictionaries[0].zh.addBridge, '新增桥接')
+  assert.equal(dictionaries[0].zh.groupByWorkspaceTree, '按工作区树')
+  assert.equal(dictionaries[0].zh.groupByFlat, '单列表')
+  assert.equal(dictionaries[0].zh.orderByManual, '手动排序')
+  assert.equal(dictionaries[0].zh.orderByUpdated, '最近更新')
+  assert.equal(dictionaries[0].zh.filterBy, '筛选会话')
+  assert.equal(dictionaries[0].zh.folderNew, '新建文件夹')
   assert.equal(dictionaries[0].zh.bridgeMode, '桥接模式')
   assert.equal(dictionaries[0].en.bridgeEngine, 'Engine')
   assert.equal(dictionaries[0].zh.backendPi, undefined)
@@ -146,4 +152,50 @@ test('helper text extraction and formatting are safe', () => {
   cyclic.self = cyclic
   assert.match(safeJson(cyclic), /circular/i)
   assert.equal(safeJson({ a: 1 }), '{\n  "a": 1\n}')
+})
+
+test('workspace helpers mirror dsh labels, tree parents, and ordering', () => {
+  const exports = moduleExports()
+  const {
+    workspaceLabel,
+    owningParentFolder,
+    compareSessionsByUpdated,
+    reconcileSessionOrder,
+    pathCrumbs,
+  } = exports.__test
+
+  assert.equal(workspaceLabel('/home/sang/src/dsh-bridge/'), 'dsh-bridge')
+  assert.equal(workspaceLabel('C:\\work\\dsh-bridge'), 'dsh-bridge')
+  assert.equal(owningParentFolder('/work/app/packages/ui', ['/work', '/work/app']), '/work/app')
+  assert.equal(owningParentFolder('/work', ['/work']), undefined)
+
+  const sessions = [
+    { key: 'old', modified: '2026-10-20T00:00:00.000Z' },
+    { key: 'new', modified: '2026-10-21T00:00:00.000Z' },
+    { key: 'middle', modified: '2026-10-20T12:00:00.000Z' },
+  ]
+  assert.deepEqual(sessions.slice().sort(compareSessionsByUpdated).map((session) => session.key), ['new', 'middle', 'old'])
+  assert.deepEqual(reconcileSessionOrder(sessions, ['old', 'missing'], new Map()), ['old', 'new', 'middle'])
+
+  assert.deepEqual(pathCrumbs('/home/sang/src/dsh-bridge', '/home/sang', 'Home').map((crumb) => crumb.name), ['Home', 'src', 'dsh-bridge'])
+  assert.deepEqual(pathCrumbs('/tmp/work', '/home/sang', 'Home').map((crumb) => crumb.name), ['/', 'tmp', 'work'])
+})
+
+test('relative time uses dsh-style compact labels', () => {
+  const exports = moduleExports()
+  const labels = {
+    timeNow: 'now',
+    timeAgo: '{t} ago',
+    timeMinutes: '{n}min',
+    timeHours: '{n}h',
+    timeDays: '{n}d',
+    timeMonths: '{n}mo',
+    timeYears: '{n}y',
+  }
+  const t = (key) => labels[key]
+  const now = Date.parse('2026-10-21T12:00:00.000Z')
+  assert.equal(exports.__test.relativeTime('2026-10-21T11:59:30.000Z', now, t), 'now')
+  assert.equal(exports.__test.relativeTime('2026-10-21T11:30:00.000Z', now, t), '30min ago')
+  assert.equal(exports.__test.relativeTime('2026-10-20T12:00:00.000Z', now, t), '1d ago')
+  assert.equal(exports.__test.relativeTime('invalid', now, t), '')
 })
