@@ -278,3 +278,12 @@ test('Bridge settings modal overrides the primitive dialog width', async () => {
   assert.match(source, /\.dshBridge_settingsModal\.dshBridge_settingsModal\{width:min\(880px,100%\)\}/)
   assert.match(source, /\.dshBridge_settingsShell\{[^}]*width:100%;max-width:100%/)
 })
+
+test('Bridge menu puts the status dot where the menu check sits', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  const menu = source.slice(source.indexOf('const toggleOpen = () => {'), source.indexOf('if (bridges.length === 0'))
+  assert.doesNotMatch(menu, /engineLabel|modeCli|modeWeb/)
+  assert.match(source, /\.dshBridge_statusDotSlot\{[^}]*width:14px;height:14px/)
+  assert.match(source, /\.dshBridge_statusDot\{[^}]*width:7px;height:7px/)
+  assert.match(source, /\[role="menuitem"\]:has\(\.dshBridge_statusDotSlot\) > svg\{display:none\}/)
+})
