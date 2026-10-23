@@ -160,14 +160,18 @@ window.__ModuleLoader__.load({
       return { state, label, error: connection.error ?? null }
     }
 
-    function StatusDot({ state, label }) {
-      return h('span', {
-        className: 'dshBridge_statusDot',
-        'data-state': state,
-        role: 'img',
-        'aria-label': label,
-        title: label,
-      })
+    function StatusDot({ state, label, selected = false }) {
+      return h(
+        'span',
+        {
+          className: 'dshBridge_statusDotSlot',
+          'data-selected': selected ? 'true' : 'false',
+          role: 'img',
+          'aria-label': label,
+          title: label,
+        },
+        h('span', { className: 'dshBridge_statusDot', 'data-state': state }),
+      )
     }
 
     function useBridgeUi() {
@@ -1295,8 +1299,11 @@ window.__ModuleLoader__.load({
       '.dshBridge_brandSwitcher:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#3b82f6))}',
       '.dshBridge_brandChevron{position:absolute;right:-2px;bottom:-1px;display:inline-flex;align-items:center;justify-content:center;width:11px;height:11px;border-radius:999px;background:var(--dsw-alias-bg-layer-1,Canvas);color:var(--dsw-alias-label-tertiary,currentColor)}',
       '.dshBridge_menuLabel{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-width:0}',
+      '[role="menuitem"]:has(.dshBridge_statusDotSlot) > svg{display:none}',
+      '[role="menuitem"]:has(.dshBridge_statusDotSlot[data-selected="true"]){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
       '.dshBridge_menuName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.dshBridge_menuMeta{flex:none;margin-left:auto;font-size:10px;line-height:14px;white-space:nowrap;color:var(--dsw-alias-label-tertiary,currentColor)}',
+      '.dshBridge_statusDotSlot{display:inline-flex;flex:none;align-items:center;justify-content:center;width:14px;height:14px}',
       '.dshBridge_statusDot{flex:none;width:7px;height:7px;border-radius:999px;background:var(--dsw-alias-label-dimmed,rgba(0,0,0,.25))}',
       '.dshBridge_statusDot[data-state="connected"]{background:var(--dsw-alias-state-success-primary,#16a34a);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-state-success-primary,#16a34a) 18%,transparent)}',
       '.dshBridge_statusDot[data-state="connecting"]{background:var(--dsw-alias-state-warning-primary,#d97706);animation:dshBridgePulse 1.1s ease-in-out infinite}',
@@ -1335,7 +1342,8 @@ window.__ModuleLoader__.load({
       '.dshBridge_railWorkspace{display:flex;justify-content:center;padding:6px 0}',
       '.dshBridge_railButton{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:var(--dsw-radius-md,10px);background:transparent;color:var(--dsw-alias-label-secondary,currentColor);cursor:pointer}',
       '.dshBridge_railButton:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
-      '.dshBridge_settingsShell{display:flex;width:840px;max-width:84vw;min-height:520px;max-height:76vh;border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));border-radius:var(--dsw-radius-md,12px);overflow:hidden;background:var(--dsw-alias-bg-layer-1,Canvas)}',
+      '.dshBridge_settingsModal.dshBridge_settingsModal{width:min(880px,100%)}',
+      '.dshBridge_settingsShell{display:flex;width:100%;max-width:100%;min-height:520px;max-height:76vh;border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));border-radius:var(--dsw-radius-md,12px);overflow:hidden;background:var(--dsw-alias-bg-layer-1,Canvas)}',
       '.dshBridge_settingsNav{flex:none;display:flex;flex-direction:column;gap:4px;width:190px;padding:12px 8px;box-sizing:border-box;border-right:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1));background:var(--dsw-alias-bg-layer-2,transparent)}',
       '.dshBridge_settingsNavTitle{padding:2px 8px 8px;font-size:11px;line-height:16px;font-weight:600;color:var(--dsw-alias-label-tertiary,currentColor)}',
       '.dshBridge_settingsNavItem{display:flex;align-items:center;gap:8px;width:100%;padding:8px 9px;border:0;border-radius:var(--dsw-radius-md,10px);background:transparent;color:var(--dsw-alias-label-secondary,currentColor);font:inherit;font-size:12px;text-align:left;cursor:pointer}',
@@ -2332,6 +2340,7 @@ window.__ModuleLoader__.load({
           onClose: () => setOpen(false),
           title: t('bridgeSettingsTitle'),
           closeLabel: t('settingsClose'),
+          className: 'dshBridge_settingsModal',
         },
         h(
           'div',
@@ -2442,9 +2451,11 @@ window.__ModuleLoader__.load({
             h('span', { className: 'dshBridge_menuMeta dshBridge_statusRow' },
               bridge.available === false
                 ? t('bridgeUnavailable')
-                : h(React.Fragment, null,
-                    h(StatusDot, { state: connectionState(bridge, t).state, label: connectionState(bridge, t).label }),
-                    `${bridge.mode === 'cli' ? t('modeCli') : t('modeWeb')} · ${bridge.engineLabel}`)),
+                : h(StatusDot, {
+                    state: connectionState(bridge, t).state,
+                    label: connectionState(bridge, t).label,
+                    selected: ui.bridge?.id === bridge.id,
+                  })),
           ),
         })),
       ]

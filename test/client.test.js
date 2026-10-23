@@ -271,3 +271,10 @@ test('browser bundle wires the model seat and statusline into the composer', asy
   assert.match(source, /stats\?key=/)
   assert.match(source, /dshBridge_contextRing/)
 })
+
+test('Bridge settings modal overrides the primitive dialog width', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  assert.match(source, /className: 'dshBridge_settingsModal'/)
+  assert.match(source, /\.dshBridge_settingsModal\.dshBridge_settingsModal\{width:min\(880px,100%\)\}/)
+  assert.match(source, /\.dshBridge_settingsShell\{[^}]*width:100%;max-width:100%/)
+})
