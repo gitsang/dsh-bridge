@@ -16,7 +16,7 @@ the add-bridge form but are marked as pending until their adapters are connected
 
 - [x] Bridge-instance host model (`bridges[]`, no global “active backend”)
 - [x] Multiple bridges per engine with independent config
-- [x] Create/edit/delete bridges from the settings overlay
+- [x] Create/edit/delete bridges in a standalone settings page styled like native dsh Settings
 - [x] CLI / Web mode selection and mode-specific engine list
 - [x] Confirmed Pi engine: JSONL sessions, RPC attach, normalized events, prompts
 - [x] Top-left “Local + configured bridges” dropdown with live connection dots
@@ -24,11 +24,14 @@ the add-bridge form but are marked as pending until their adapters are connected
 - [x] Per-turn lazy attach: send starts Pi, settle closes it
 - [x] Sidebar session status: spinner while running, green dot when done
 - [x] Bridge-owned sidebar while a bridge is selected
+- [x] Import-first sessions: external sessions stay out of the sidebar until explicitly imported
+- [x] Import dialog with workspace tree / flat-list views, search, and multi-select
 - [x] dsh-identical workspace browser: workspace / workspace-tree / flat grouping, manual / last-updated ordering, session filter
 - [x] dsh-style search button and result list
 - [x] dsh-style Select Workspace Directory dialog with New folder
 - [x] Per-workspace New Session action plus workspace rename / soft delete
 - [x] Durable workspace mapping in `bridge-workspaces.json`; delete marks only, never touches Pi JSONL
+- [x] Durable per-bridge import membership in `bridge-imports.json`
 - [x] Host-owned, per-bridge session archive in `bridge-archives.json` with attach/prompt admission checks
 - [x] dsh-styled transcript and composer
 - [x] Draggable left/right content-width handles, sharing dsh Web's width preference
@@ -59,8 +62,30 @@ Bridge settings
 - A status dot sits beside each bridge: green = connected, orange = connecting,
   red = failed. Hovering it shows the reason.
 - Unavailable engines are shown but disabled.
-- **Bridge settings** opens the settings overlay in place; it does not navigate
-  away from the current page.
+- **Bridge settings** opens the standalone Bridge settings page; it stays out of
+  the native dsh Settings dialog and does not navigate away from the current page.
+
+### Import sessions
+
+Bridge is **import-first**. Sessions that merely exist below an engine's session
+root are candidates, not sidebar rows. Until the user imports one, the sidebar
+stays unchanged; this prevents terminal-created sessions from silently
+appearing in every browser profile.
+
+The import button (database icon) in the Bridge sidebar header opens a dialog
+that reads the complete engine session list:
+
+- **Tree** groups sessions by workspace folder and supports workspace-level
+  select-all across descendant folders.
+- **List** shows a flat, newest-first view for quick scanning.
+- Search filters by session title, first message, id, or workspace path.
+- Imported rows are marked and disabled; the dialog can be reopened at any time.
+- **Import** calls `POST /api/bridge/imports`; only then are the selected
+  sessions admitted to the left sidebar and their workspaces reconciled.
+
+A new session created from Bridge is an explicit user action and is imported
+immediately. Import membership is persisted per bridge in
+`$DSH_HOME/bridge-imports.json`, separate from agent JSONL and the archive set.
 
 ### Connection lifecycle
 
@@ -105,10 +130,12 @@ attachment when there is one, and otherwise returns the cached/short-lived
 catalog (`source: "catalog"`, `cached: true|false`). Model selection with no
 agent stores a pending choice that is applied right after the next attach.
 
-### Settings overlay
+### Settings page
 
-The settings dialog floats above the current page with a left navigation column
-and a right content area:
+Bridge settings is a **standalone page**, not a section inside dsh's own
+Settings dialog. Its overlay shell, nav rail, title hierarchy, cards, buttons,
+inputs, and spacing are copied from the native dsh Settings surfaces (especially
+Models), so it still reads as the same product:
 
 - **Manage bridges**: list every saved bridge, add a bridge, edit its name/mode/
   engine/config, or delete it.
@@ -161,7 +188,8 @@ native workspace browser.
 ```text
 Browser (dsh web)
   ├─ Brand switcher ────────> GET /api/bridge/settings
-  ├─ Bridge settings overlay > POST/PUT/DELETE /api/bridge/bridges
+  ├─ Bridge settings page ──> POST/PUT/DELETE /api/bridge/bridges
+  ├─ Import dialog ─────────> GET/POST /api/bridge/imports
   └─ Bridge main panel ─────> GET /api/bridge/sessions?bridge=<id>
                               /api/bridge/{session,attach,prompt,events,…}
 
@@ -210,7 +238,8 @@ All routes sit below dsh's authenticated `/api` channel.
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | Manage saved bridges |
 | `GET/POST /api/bridge/status` | Read or refresh per-bridge readiness state |
 | `GET /api/bridge/activity?bridge=<id>` | Per-session running/idle/failed activity |
-| `GET /api/bridge/sessions?bridge=<id>` | List one bridge's sessions/workspaces |
+| `GET /api/bridge/sessions?bridge=<id>` | List one bridge's **imported** sessions/workspaces |
+| `GET/POST /api/bridge/imports` | Discover all engine sessions; persist selected session/workspace imports |
 | `GET/POST /api/bridge/directories` | Browse / create local workspace directories |
 | `GET /api/bridge/session?key=…` | One normalized session history |
 | `GET /api/bridge/capabilities` | Protocol and live attachment table |
@@ -229,6 +258,20 @@ All routes sit below dsh's authenticated `/api` channel.
 A session key is `<bridgeId>.<base64url(nativeKey)>`. It resolves only against
 that bridge; changing a bridge's session root invalidates old paths exactly as
 before.
+
+## Session imports
+
+Import state is owned by the bridge host, not browser storage. The host keeps
+`$DSH_HOME/bridge-imports.json` (versioned, 0600, atomic writes) as a per-bridge
+ordered set of native session keys.
+
+- `GET /api/bridge/imports?bridge=<id>` returns every discovered candidate plus
+  `imported: true|false` and the workspace candidates.
+- `POST /api/bridge/imports` accepts `{ bridge, sessionKeys, workspacePaths }`,
+  validates that keys/paths were discovered for that bridge, and is idempotent.
+- `GET /api/bridge/sessions` filters its result through this import set. The
+  workspace store is no longer auto-populated from every discovered `cwd`.
+- Deleting a bridge also deletes its import set.
 
 ## Session archiving
 

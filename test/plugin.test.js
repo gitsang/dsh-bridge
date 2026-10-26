@@ -90,6 +90,15 @@ async function settings(routes) {
   return (await call(routes, 'settings')).json()
 }
 
+/** Import every discovered session for a bridge through the public route. */
+async function importAll(routes, bridge = 'pi-local') {
+  const candidates = await (await call(routes, `imports?bridge=${encodeURIComponent(bridge)}`)).json()
+  return (await call(routes, 'imports', post({
+    bridge,
+    sessionKeys: candidates.sessions.map((session) => session.key),
+  }))).json()
+}
+
 test('registers the bridge-instance route table', () => {
   const { ctx, routes } = host()
   apply(ctx)
@@ -105,6 +114,7 @@ test('registers the bridge-instance route table', () => {
     '/api/bridge/directories',
     '/api/bridge/events',
     '/api/bridge/history-message',
+    '/api/bridge/imports',
     '/api/bridge/models',
     '/api/bridge/prompt',
     '/api/bridge/session',
@@ -187,6 +197,7 @@ test('lists and reads Pi sessions through a configured bridge', async () => {
         config: { sessionsRoot: root },
       }))).json()
       assert.equal(configured.bridges[0].config.sessionsRoot, root)
+      await importAll(routes)
 
       const listed = await (await call(routes, 'sessions?bridge=pi-local')).json()
       assert.equal(listed.ok, true)
@@ -218,6 +229,81 @@ test('lists and reads Pi sessions through a configured bridge', async () => {
   }
 })
 
+test('keeps discovered sessions out of the sidebar until explicitly imported', async () => {
+  const { root, file } = await fixtureSession()
+  const secondFile = join(root, '--work--', 'session-y.jsonl')
+  const lines = [
+    { type: 'session', version: 3, id: 'session-y', timestamp: '2026-10-21T00:00:00.000Z', cwd: '/work' },
+    {
+      type: 'message',
+      id: 'm2',
+      parentId: null,
+      timestamp: '2026-10-21T00:00:01.000Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'second question' }], timestamp: 2 },
+    },
+  ]
+  await writeFile(secondFile, lines.map((line) => JSON.stringify(line)).join('\n') + '\n', 'utf8')
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  try {
+    const { ctx, routes } = host()
+    apply(ctx)
+    await call(routes, 'bridges', put({ id: 'pi-local', config: { sessionsRoot: root } }))
+
+    const before = await (await call(routes, 'sessions?bridge=pi-local')).json()
+    assert.deepEqual(before.sessions, [])
+    assert.deepEqual(before.workspaces, [])
+    assert.deepEqual(before.importedKeys, [])
+
+    const candidates = await (await call(routes, 'imports?bridge=pi-local')).json()
+    assert.equal(candidates.ok, true)
+    assert.equal(candidates.sessions.length, 2)
+    assert.equal(candidates.sessions.every((session) => session.imported === false), true)
+    assert.equal(candidates.workspaces.length, 1)
+    assert.equal(candidates.workspaces[0].path, '/work')
+    assert.equal(candidates.workspaces[0].imported, false)
+
+    const chosen = candidates.sessions.find((session) => session.id === 'session-x')
+    const imported = await (await call(routes, 'imports', post({
+      bridge: 'pi-local',
+      sessionKeys: [chosen.key],
+    }))).json()
+    assert.equal(imported.ok, true)
+    assert.equal(imported.sessions.length, 1)
+    assert.equal(imported.sessions[0].id, 'session-x')
+    assert.deepEqual(imported.workspaces.map((workspace) => workspace.path), ['/work'])
+    assert.equal(imported.workspaces[0].sessionCount, 1)
+
+    const after = await (await call(routes, 'sessions?bridge=pi-local')).json()
+    assert.equal(after.sessions.length, 1)
+    assert.equal(after.sessions[0].id, 'session-x')
+    assert.equal(after.workspaces.length, 1)
+    assert.equal(after.workspaces[0].sessionCount, 1)
+    assert.deepEqual(after.importedKeys, [chosen.key])
+    assert.equal(existsSync(file), true)
+    assert.equal(existsSync(secondFile), true)
+
+    // Re-import is idempotent, and the remaining candidate can be imported later.
+    await call(routes, 'imports', post({ bridge: 'pi-local', sessionKeys: [chosen.key] }))
+    const second = candidates.sessions.find((session) => session.id === 'session-y')
+    await call(routes, 'imports', post({ bridge: 'pi-local', sessionKeys: [second.key] }))
+    const complete = await (await call(routes, 'sessions?bridge=pi-local')).json()
+    assert.equal(complete.sessions.length, 2)
+    assert.equal(complete.workspaces[0].sessionCount, 2)
+
+    // Keys must belong to the discovered candidate set for this bridge.
+    const foreign = await call(routes, 'imports', post({
+      bridge: 'pi-local',
+      sessionKeys: ['pi-local.foreign'],
+    }))
+    assert.equal(foreign.status, 400)
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+  }
+})
+
 test('creates a new Pi session inside a workspace', async () => {
   const { root } = await fixtureSession()
   const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
@@ -227,6 +313,7 @@ test('creates a new Pi session inside a workspace', async () => {
     const { ctx, routes } = host()
     apply(ctx)
     await call(routes, 'bridges', put({ id: 'pi-local', config: { sessionsRoot: root } }))
+    await importAll(routes)
 
     const cwd = join(root, '--work--')
     const created = await (await call(routes, 'sessions', post({ bridge: 'pi-local', cwd }))).json()
@@ -258,6 +345,7 @@ test('renames workspaces durably and soft-deletes without touching Pi data', asy
     const { ctx, routes } = host()
     apply(ctx)
     await call(routes, 'bridges', put({ id: 'pi-local', config: { sessionsRoot: root } }))
+    await importAll(routes)
     const initial = await (await call(routes, 'workspaces?bridge=pi-local')).json()
     const workspace = initial.workspaces[0]
 
@@ -320,6 +408,8 @@ test('archives sessions on the host per bridge and blocks opening them', async (
         config: { sessionsRoot: second.root, binPath: fake },
       }))).json()
       const secondBridge = created.bridges.find((bridge) => bridge.name === 'Second Pi')
+      await importAll(routes)
+      await importAll(routes, secondBridge.id)
 
       const firstList = await (await call(routes, 'sessions?bridge=pi-local')).json()
       const secondList = await (await call(routes, `sessions?bridge=${encodeURIComponent(secondBridge.id)}`)).json()
@@ -404,6 +494,8 @@ test('supports multiple Pi bridges with independent session roots', async () => 
     assert.ok(secondBridge)
 
     await call(routes, 'bridges', put({ id: 'pi-local', config: { sessionsRoot: first.root } }))
+    await importAll(routes)
+    await importAll(routes, secondBridge.id)
     const firstList = await (await call(routes, 'sessions?bridge=pi-local')).json()
     const secondList = await (await call(routes, `sessions?bridge=${encodeURIComponent(secondBridge.id)}`)).json()
     assert.equal(firstList.sessions.length, 1)
@@ -432,6 +524,7 @@ test('attaches a Pi child, prompts it, and detaches', async () => {
         id: 'pi-local',
         config: { sessionsRoot: root, binPath: fake },
       }))
+      await importAll(routes)
       const listed = await (await call(routes, 'sessions?bridge=pi-local')).json()
       const key = listed.sessions[0].key
 
@@ -596,6 +689,7 @@ test('lazy attach: prompt starts the agent and agent-settled closes it', async (
         id: 'pi-local',
         config: { sessionsRoot: root, binPath: fake },
       }))
+      await importAll(routes)
       const listed = await (await call(routes, 'sessions?bridge=pi-local')).json()
       const key = listed.sessions[0].key
       assert.equal(listed.sessions[0].activity.state, 'unknown')
@@ -643,6 +737,7 @@ test('model selection without a live agent is stored and applied on attach', asy
         id: 'pi-local',
         config: { sessionsRoot: root, binPath: fake },
       }))
+      await importAll(routes)
       const listed = await (await call(routes, 'sessions?bridge=pi-local')).json()
       const key = listed.sessions[0].key
 
@@ -683,6 +778,7 @@ test('model catalog falls back to a short-lived engine query when detached', asy
       id: 'pi-local',
       config: { sessionsRoot: root, binPath: fake },
     }))
+    await importAll(routes)
     const listed = await (await call(routes, 'sessions?bridge=pi-local')).json()
     const key = listed.sessions[0].key
     const catalog = await (await call(routes, `models?key=${encodeURIComponent(key)}`)).json()
@@ -748,6 +844,7 @@ test('a configured sessions root gates session keys', async () => {
     const { ctx, routes } = host()
     apply(ctx)
     await call(routes, 'bridges', put({ id: 'pi-local', config: { sessionsRoot: first.root } }))
+    await importAll(routes)
     const listed = await (await call(routes, 'sessions?bridge=pi-local')).json()
     assert.equal(listed.sessions.length, 1)
     const key = listed.sessions[0].key
@@ -759,5 +856,57 @@ test('a configured sessions root gates session keys', async () => {
   } finally {
     if (previousHome === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previousHome
+  }
+})
+
+test('viewing a finished session clears its completion activity', async () => {
+  const { root } = await fixtureSession()
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const previousHome = process.env.DSH_HOME
+  const previousAuto = process.env.BRIDGE_AUTO_CONNECT
+  process.env.DSH_HOME = home
+  process.env.BRIDGE_AUTO_CONNECT = '0'
+  try {
+    const { ctx, routes, disposers } = host()
+    apply(ctx)
+    try {
+      await call(routes, 'bridges', put({
+        id: 'pi-local',
+        config: { sessionsRoot: root, binPath: fake },
+      }))
+      await importAll(routes)
+      const listed = await (await call(routes, 'sessions?bridge=pi-local')).json()
+      const key = listed.sessions[0].key
+
+      // Run one turn so the session ends as "idle/completed".
+      await call(routes, 'prompt', post({ key, message: 'ping' }))
+      const deadline = Date.now() + 5000
+      let activity
+      while (Date.now() < deadline) {
+        activity = (await (await call(routes, `activity?bridge=pi-local`)).json()).activity[0]
+        if (activity?.state === 'idle') break
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      assert.equal(activity.state, 'idle')
+
+      // Opening the session acknowledges it.
+      const detail = await (await call(routes, `session?key=${encodeURIComponent(key)}`)).json()
+      assert.equal(detail.activity.state, 'unknown')
+      const after = await (await call(routes, 'activity?bridge=pi-local')).json()
+      assert.deepEqual(after.activity, [])
+
+      // A running turn is never cleared by an ack.
+      await call(routes, 'prompt', post({ key, message: 'ping' }))
+      const acked = await (await call(routes, 'activity', post({ key }))).json()
+      assert.equal(acked.cleared, false)
+      assert.ok(['running', 'connecting', 'idle'].includes(acked.activity.state))
+    } finally {
+      for (const dispose of disposers.reverse()) await dispose?.()
+    }
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    if (previousAuto === undefined) delete process.env.BRIDGE_AUTO_CONNECT
+    else process.env.BRIDGE_AUTO_CONNECT = previousAuto
   }
 })

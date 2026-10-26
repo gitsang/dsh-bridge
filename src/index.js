@@ -43,11 +43,17 @@ import {
   listWorkspaces,
   publicWorkspace,
   readWorkspaceStore,
-  reconcileWorkspaces,
   removedWorkspacePaths,
   renameWorkspace,
   writeWorkspaceStore,
 } from './workspaces.js'
+import {
+  deleteBridgeImports,
+  importSessions as importNativeSessions,
+  listImportedSessionKeys,
+  readImportStore,
+  writeImportStore,
+} from './imports.js'
 
 export const name = 'bridge'
 export const inject = ['connection']
@@ -330,6 +336,7 @@ export function apply(ctx) {
   let settings = readSettings(process.env, logger)
   let workspaceStore = readWorkspaceStore(process.env, logger)
   let archiveStore = readArchiveStore(process.env, logger)
+  let importStore = readImportStore(process.env, logger)
 
   /**
    * Per-bridge connection state for the startup auto-connect and the status
@@ -385,6 +392,22 @@ export function apply(ctx) {
 
   const setActivity = (key, patch) => {
     sessionActivity.set(key, { ...activityView(key), ...patch })
+  }
+
+  /**
+   * A finished turn is only interesting until the user looks at the session.
+   * Opening it (or an explicit ack) drops the completion marker so the green
+   * dot disappears; a running/connecting turn is never cleared.
+   */
+  const clearFinishedActivity = (key) => {
+    const activity = sessionActivity.get(key)
+    if (activity === undefined) return false
+    // The recorded idle/failed state is the completion acknowledgement. The
+    // engine process may still be alive while it waits for its settle timeout,
+    // so process liveness must not keep the completion dot from clearing.
+    if (activity.state !== 'idle' && activity.state !== 'failed') return false
+    sessionActivity.delete(key)
+    return true
   }
 
   const cancelDispose = (key) => {
@@ -516,11 +539,36 @@ export function apply(ctx) {
     return result
   }
 
+  const importedNativeKeysFor = (bridgeId) => new Set(listImportedSessionKeys(importStore, bridgeId))
+
+  const importedKeysFor = (bridgeId) =>
+    listImportedSessionKeys(importStore, bridgeId)
+      .map((nativeKey) => encodeSessionKey(bridgeId, nativeKey))
+
+  const saveImportStore = (result) => {
+    if (result.changed) importStore = writeImportStore(result.store, process.env)
+    return result
+  }
+
+  /**
+   * Create durable workspace metadata for an imported workspace. Existing
+   * active records are left untouched; an explicitly imported tombstoned path
+   * is revived so import can always bring a folder back into the sidebar.
+   */
+  const ensureImportedWorkspace = (bridgeId, path, name) => {
+    if (typeof path !== 'string' || path === '') return false
+    if (listWorkspaces(workspaceStore, bridgeId).some((workspace) => workspace.path === path)) return false
+    const result = createWorkspace(workspaceStore, bridgeId, { path, name })
+    workspaceStore = writeWorkspaceStore(result.store, process.env)
+    return true
+  }
+
   /**
    * Reconcile the durable workspace metadata with the engine's current session
    * list, then attach live session counts. This runs on every session query so
-   * sessions created outside dsh (for example with the Pi CLI) are discovered
-   * without a separate watcher. Existing names and tombstones are preserved.
+   * only imported sessions are passed in; unimported sessions discovered under
+   * the engine root remain candidates in the import dialog. Existing names and
+   * tombstones are preserved.
    */
   const workspaceSnapshot = (bridgeId, sessions = []) => {
     const counts = new Map()
@@ -533,12 +581,6 @@ export function apply(ctx) {
         .map((workspace) => publicWorkspace(workspace, counts.get(workspace.path) ?? 0)),
       removedWorkspacePaths: removedWorkspacePaths(workspaceStore, bridgeId),
     }
-  }
-
-  const synchronizeWorkspaces = (bridge, discovered, sessions) => {
-    const synced = reconcileWorkspaces(workspaceStore, bridge.id, discovered)
-    if (synced.changed) workspaceStore = writeWorkspaceStore(synced.store, process.env)
-    return workspaceSnapshot(bridge.id, sessions)
   }
 
   const settingsView = () => ({
@@ -695,11 +737,17 @@ export function apply(ctx) {
               config: configFor(bridge, engine),
               env: process.env,
             })
+            // A session created from Bridge is already an explicit user
+            // action; import it immediately so it appears in the sidebar.
+            const nativeKey = session.nativeKey ?? session.key
+            saveImportStore(importNativeSessions(importStore, bridge.id, [nativeKey]))
+            ensureImportedWorkspace(bridge.id, session.cwd, typeof session.cwd === 'string' ? basename(session.cwd) : undefined)
             return json(201, {
               ok: true,
               bridge: bridgeView(bridge),
               engine: engine.id,
               session: publicSession(bridge, engine, session),
+              ...workspaceSnapshot(bridge.id, [session]),
             })
           }
           const id = requireString(new URL(request.url).searchParams.get('bridge'), 'bridge')
@@ -719,11 +767,14 @@ export function apply(ctx) {
           }
           const config = configFor(bridge, engine)
           const result = await engine.listSessions(config, process.env)
-          const sessions = Array.isArray(result.sessions)
-            ? result.sessions.map((session) => publicSession(bridge, engine, session))
-            : []
-          const discovered = Array.isArray(result.workspaces) ? result.workspaces : []
-          const workspaceState = synchronizeWorkspaces(bridge, discovered, sessions)
+          const importedNativeKeys = importedNativeKeysFor(bridge.id)
+          const discovered = Array.isArray(result.sessions) ? result.sessions : []
+          // Import is the only admission path into the sidebar. Sessions that
+          // merely exist under the engine root stay in the import dialog until
+          // the user explicitly selects them.
+          const sessions = discovered
+            .filter((session) => importedNativeKeys.has(session.nativeKey ?? session.key))
+            .map((session) => publicSession(bridge, engine, session))
           const archivedKeys = archivedKeysFor(bridge.id)
           const archivedSet = new Set(archivedKeys)
           return json(200, {
@@ -732,13 +783,136 @@ export function apply(ctx) {
             engine: engine.id,
             available: true,
             root: result.root,
-            ...workspaceState,
+            ...workspaceSnapshot(bridge.id, sessions),
+            importedKeys: importedKeysFor(bridge.id),
             archivedKeys,
             sessions: sessions.map((session) => ({
               ...session,
               archived: archivedSet.has(session.key),
               activity: activityView(session.key),
             })),
+          })
+        } catch (error) {
+          return failure(error, error.status ?? 500)
+        }
+      },
+    },
+    {
+      path: `${ROUTE}/imports`,
+      methods: ['GET', 'POST'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        try {
+          const body = request.method === 'GET'
+            ? { bridge: new URL(request.url).searchParams.get('bridge') }
+            : await readJson(request)
+          const bridge = bridgeFor(requireString(body.bridge, 'bridge'))
+          const engine = engineFor(bridge)
+          if (!engineAvailable(engine)) {
+            return json(200, {
+              ok: true,
+              bridge: bridgeView(bridge),
+              available: false,
+              unavailableReason: engine.unavailableReason,
+              sessions: [],
+              workspaces: [],
+            })
+          }
+          const result = await engine.listSessions(configFor(bridge, engine), process.env)
+          const discovered = Array.isArray(result.sessions) ? result.sessions : []
+          const existingWorkspaces = new Map(
+            listWorkspaces(workspaceStore, bridge.id).map((workspace) => [workspace.path, workspace]),
+          )
+          const importedNativeKeys = importedNativeKeysFor(bridge.id)
+
+          if (request.method === 'GET') {
+            const candidates = discovered.map((session) => ({
+              ...publicSession(bridge, engine, session),
+              imported: importedNativeKeys.has(session.nativeKey ?? session.key),
+            }))
+            const paths = new Map()
+            for (const workspace of Array.isArray(result.workspaces) ? result.workspaces : []) {
+              if (typeof workspace?.path !== 'string' || workspace.path === '') continue
+              paths.set(workspace.path, workspace)
+            }
+            for (const session of discovered) {
+              if (typeof session.cwd !== 'string' || session.cwd === '') continue
+              if (!paths.has(session.cwd)) paths.set(session.cwd, { path: session.cwd, name: basename(session.cwd) })
+            }
+            return json(200, {
+              ok: true,
+              bridge: bridgeView(bridge),
+              engine: engine.id,
+              available: true,
+              root: result.root,
+              sessions: candidates,
+              workspaces: [...paths.values()].map((workspace) => {
+                const saved = existingWorkspaces.get(workspace.path)
+                return {
+                  id: saved?.id ?? workspace.id ?? workspace.path,
+                  path: workspace.path,
+                  name: saved?.name ?? workspace.name ?? basename(workspace.path),
+                  sessionCount: candidates.filter((session) => session.cwd === workspace.path).length,
+                  imported: saved !== undefined,
+                }
+              }),
+            })
+          }
+
+          const requested = Array.isArray(body.sessionKeys) ? body.sessionKeys : []
+          const requestedPaths = Array.isArray(body.workspacePaths) ? body.workspacePaths : []
+          const byNativeKey = new Map(discovered.map((session) => [session.nativeKey ?? session.key, session]))
+          const nativeKeys = []
+          for (const raw of requested) {
+            if (typeof raw !== 'string' || raw === '') continue
+            let nativeKey = raw
+            try {
+              const decoded = decodeSessionKey(raw)
+              if (decoded.bridgeId !== bridge.id) continue
+              nativeKey = decoded.nativeKey
+            } catch {
+              // Accept a raw engine key as well; it is still validated below.
+            }
+            if (byNativeKey.has(nativeKey) && !nativeKeys.includes(nativeKey)) nativeKeys.push(nativeKey)
+          }
+          const allowedPaths = new Set([
+            ...byNativeKey.values().map((session) => session.cwd).filter((path) => typeof path === 'string' && path !== ''),
+            ...(Array.isArray(result.workspaces) ? result.workspaces.map((workspace) => workspace.path) : []),
+          ])
+          const workspacePaths = []
+          for (const raw of requestedPaths) {
+            const path = typeof raw === 'string' ? raw : raw?.path
+            if (typeof path !== 'string' || path === '' || !allowedPaths.has(path) || workspacePaths.includes(path)) continue
+            workspacePaths.push(path)
+          }
+          if (nativeKeys.length === 0 && workspacePaths.length === 0) {
+            throw Object.assign(new Error('select at least one session or workspace to import'), { status: 400 })
+          }
+
+          const saved = saveImportStore(importNativeSessions(importStore, bridge.id, nativeKeys))
+          for (const nativeKey of nativeKeys) {
+            const session = byNativeKey.get(nativeKey)
+            if (typeof session?.cwd === 'string' && session.cwd !== '') {
+              ensureImportedWorkspace(bridge.id, session.cwd, basename(session.cwd))
+            }
+          }
+          for (const path of workspacePaths) {
+            const workspace = existingWorkspaces.get(path)
+            ensureImportedWorkspace(bridge.id, path, workspace?.name ?? basename(path))
+          }
+          const importedSet = new Set(saved.importedKeys)
+          const sessions = discovered
+            .filter((session) => importedSet.has(session.nativeKey ?? session.key))
+            .map((session) => publicSession(bridge, engine, session))
+          logger?.info?.(`bridge: imported ${nativeKeys.length} session(s) and ${workspacePaths.length} workspace(s) (${bridge.id})`)
+          return json(200, {
+            ok: true,
+            bridge: bridgeView(bridge),
+            engine: engine.id,
+            importedKeys: importedKeysFor(bridge.id),
+            importedSessionKeys: saved.addedKeys.map((nativeKey) => encodeSessionKey(bridge.id, nativeKey)),
+            sessions,
+            ...workspaceSnapshot(bridge.id, sessions),
           })
         } catch (error) {
           return failure(error, error.status ?? 500)
@@ -761,16 +935,14 @@ export function apply(ctx) {
               return json(200, { ok: true, bridge: bridgeView(bridge), available: false, workspaces: [] })
             }
             const result = await engine.listSessions(configFor(bridge, engine), process.env)
-            const sessions = Array.isArray(result.sessions) ? result.sessions : []
+            const importedNativeKeys = importedNativeKeysFor(bridge.id)
+            const sessions = (Array.isArray(result.sessions) ? result.sessions : [])
+              .filter((session) => importedNativeKeys.has(session.nativeKey ?? session.key))
             return json(200, {
               ok: true,
               bridge: bridgeView(bridge),
               available: true,
-              ...synchronizeWorkspaces(
-                bridge,
-                Array.isArray(result.workspaces) ? result.workspaces : [],
-                sessions,
-              ),
+              ...workspaceSnapshot(bridge.id, sessions),
             })
           }
           if (request.method === 'POST') {
@@ -831,6 +1003,8 @@ export function apply(ctx) {
         try {
           const key = requireString(new URL(request.url).searchParams.get('key'), 'key')
           const { session } = await sessionFor(key)
+          // Viewing a finished session acknowledges its completion dot.
+          clearFinishedActivity(key)
           return json(200, {
             ok: true,
             session,
@@ -992,10 +1166,17 @@ export function apply(ctx) {
     },
     {
       path: `${ROUTE}/activity`,
-      methods: ['GET'],
+      methods: ['GET', 'POST'],
       requestBody: 'buffered',
       fetch: async (request) => {
         try {
+          if (request.method === 'POST') {
+            const body = await readJson(request)
+            const key = requireString(body.key, 'key')
+            resolveSessionKey(key)
+            const cleared = clearFinishedActivity(key)
+            return json(200, { ok: true, cleared, activity: activityView(key) })
+          }
           const bridgeId = new URL(request.url).searchParams.get('bridge')
           if (bridgeId === null || bridgeId === '') {
             return json(200, {
@@ -1087,6 +1268,8 @@ export function apply(ctx) {
           modelCatalogs.delete(id)
           const pruned = deleteBridgeArchives(archiveStore, id)
           if (pruned.changed) archiveStore = writeArchiveStore(pruned.store, process.env)
+          const prunedImports = deleteBridgeImports(importStore, id)
+          if (prunedImports.changed) importStore = writeImportStore(prunedImports.store, process.env)
           logger?.info?.(`bridge: deleted ${id}`)
           return json(200, { ok: true, ...settingsView() })
         } catch (error) {

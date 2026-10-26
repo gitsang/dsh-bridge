@@ -48,7 +48,7 @@ function moduleExports() {
   })
 }
 
-test('registers the Bridge panel, brand bridge switcher, shell settings overlay, and sidebar', () => {
+test('registers the Bridge panel, brand bridge switcher, standalone settings overlay, and sidebar', () => {
   const exports = moduleExports()
   assert.equal(typeof exports.apply, 'function')
   assert.deepEqual(exports.inject, ['slots', 'locale', 'layout'])
@@ -100,6 +100,7 @@ test('registers the Bridge panel, brand bridge switcher, shell settings overlay,
   assert.equal(bySlot['sidebar.brand.mark'].name, 'sidebar.brand.mark')
   assert.equal(bySlot['sidebar.workspaces'].name, 'sidebar.workspaces')
   assert.equal(bySlot['shell.overlay'].id, 'bridge-settings')
+  assert.equal(bySlot['settings.section'], undefined)
   assert.equal(registered.length, 4)
 })
 
@@ -303,33 +304,38 @@ test('browser bundle wires the model seat and statusline into the composer', asy
   assert.match(source, /dshBridge_contextRing/)
 })
 
-test('Bridge settings mirrors the dsh Web settings shell', async () => {
+test('Bridge settings stay a standalone overlay, not a native Settings section', async () => {
   const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
-  // Same shell geometry and tokens as @deepseek-ai/dsh-client-ui-settings-general.
-  assert.match(source, /\.dshBridge_settingsPanel\{[^}]*width:800px/)
-  assert.match(source, /\.dshBridge_settingsPanel\{[^}]*height:min\(800px,calc\(100vh - 48px\)\)/)
-  assert.match(source, /\.dshBridge_settingsPanel\{[^}]*border-radius:24px/)
-  assert.match(source, /\.dshBridge_settingsPanel\{[^}]*background:var\(--dsw-alias-bg-layer-2\)/)
-  assert.match(source, /\.dshBridge_settingsNav\{[^}]*width:188px/)
-  assert.match(source, /\.dshBridge_settingsHeader\{[^}]*height:54px/)
-  assert.match(source, /\.dshBridge_settingsNavCell\{[^}]*height:40px/)
-  assert.match(source, /\.dshBridge_settingsOptions\{[^}]*padding:0 24px 24px/)
+  assert.match(source, /ctx\.slots\.inject\('shell\.overlay'/)
+  assert.match(source, /id: 'bridge-settings'/)
+  assert.doesNotMatch(source, /ctx\.slots\.inject\('settings\.section'/)
+  assert.doesNotMatch(source, /name: 'settings\.section'/)
+  assert.match(source, /function BridgeSettingsOverlay/)
   assert.match(source, /className: 'dshBridge_settingsOverlay'/)
-  assert.match(source, /'aria-labelledby': 'dshBridge_settingsTitle'/)
-  assert.match(source, /document\.addEventListener\('keydown'/)
-  assert.doesNotMatch(source, /className: 'dshBridge_settingsModal'/)
+  assert.match(source, /className: 'dshBridge_settingsPanel'/)
+})
+
+test('Bridge menu and page header open the standalone settings page', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  assert.match(source, /window\.dispatchEvent\(new CustomEvent\(SETTINGS_EVENT\)\)/)
+  assert.match(source, /window\.addEventListener\(SETTINGS_EVENT, onOpen\)/)
+  assert.match(source, /onClick: openBridgeSettings/)
+  assert.doesNotMatch(source, /button\[aria-haspopup="dialog"\]/)
 })
 
 test('Bridge settings rows and editors follow the dsh Models section rhythm', async () => {
   const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
   assert.match(source, /\.dshBridge_settingsSection\{[^}]*max-width:720px/)
-  assert.match(source, /\.dshBridge_settingsRowCard\{[^}]*border:1px solid var\(--dsw-alias-border-l2\)/)
-  assert.match(source, /\.dshBridge_settingsRowCard\{[^}]*border-radius:12px/)
-  assert.match(source, /\.dshBridge_settingsEditor\{[^}]*background:var\(--dsw-alias-bg-module-platform\)/)
-  assert.match(source, /\.dshBridge_settingsPrimaryButton[^}]*height:36px[^}]*border-radius:18px/)
+  assert.match(source, /\.dshBridge_settingsRowCard\{[^}]*border:\.5px solid var\(--dsw-alias-settings-card-stroke/)
+  assert.match(source, /\.dshBridge_settingsRowCard\{[^}]*background:var\(--dsw-alias-settings-card-fill/)
+  assert.match(source, /\.dshBridge_settingsRowCard\{[^}]*border-radius:var\(--dsw-radius-xl\)/)
+  assert.match(source, /\.dshBridge_settingsEditor\{[^}]*border-radius:var\(--dsw-radius-lg\)/)
+  assert.match(source, /\.dshBridge_settingsEditor\{[^}]*background:var\(--dsw-alias-bg-module-platform/)
+  assert.match(source, /\.dshBridge_settingsPrimaryButton[^}]*height:36px[^}]*border-radius:var\(--dsw-radius-md\)/)
   assert.match(source, /\.dshBridge_settingsAddButton\{[^}]*border:1px dashed var\(--dsw-alias-border-l3\)/)
   assert.match(source, /className: 'dshBridge_settingsDangerButton'/)
   assert.match(source, /className: 'dshBridge_settingsSaved'/)
+  assert.match(source, /h\(Switch, \{/)
 })
 
 test('Bridge menu puts the status dot where the menu check sits', async () => {
@@ -358,4 +364,36 @@ test('Bridge conversations share dsh Web content-width handles', async () => {
   assert.equal(exports.__test.resolveContentWidth(1200, 1000), 1000)
   assert.equal(exports.__test.resolveContentWidth(1200, 100), 640)
   assert.equal(exports.__test.resolveContentWidth(1200, 5000), 1024)
+})
+
+test('Bridge sidebar imports sessions through a tree/list dialog', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  assert.match(source, /function BridgeImportDialog/)
+  assert.match(source, /importSessionsTitle/)
+  assert.match(source, /api\(`imports\?bridge=\$\{encodeURIComponent\(bridgeId\)\}`\)/)
+  assert.match(source, /api\('imports', \{\s*method: 'POST'/)
+  assert.match(source, /setMode\('tree'\)/)
+  assert.match(source, /setMode\('list'\)/)
+  assert.match(source, /dshBridge_import_tree/)
+  assert.match(source, /dshBridge_import_list/)
+  assert.match(source, /aria-label': t\('importSessions'\)/)
+  assert.match(source, /onImported: handleImported/)
+  assert.match(source, /sessionKeys: \[\.\.\.selected\]/)
+  assert.match(source, /workspacePaths: selectedWorkspacePaths/)
+
+  const exports = moduleExports()
+  const dictionaries = []
+  exports.apply({
+    effect: (factory) => factory(),
+    layout: {
+      selectPanel() {},
+      panelInfo: { getSnapshot: () => ({ activePanelId: null }), subscribe: () => () => {} },
+    },
+    locale: { register: (namespace, dict) => dictionaries.push(dict), bind: () => (key) => key },
+    slots: { inject: () => {}, register: () => () => {} },
+  })
+  assert.equal(dictionaries[0].zh.importSessions, '导入会话')
+  assert.equal(dictionaries[0].zh.importTree, '树视图')
+  assert.equal(dictionaries[0].zh.importList, '列表视图')
+  assert.equal(dictionaries[0].en.importConfirm, 'Import')
 })

@@ -15,7 +15,7 @@ Pi 是第一个完整支持的引擎。Codex、OpenCode、远程 DSH 会出现�
 
 - [x] 桥接实例模型（`bridges[]`，不再是全局“当前后端”）
 - [x] 同一引擎可配置多个桥接，各自独立配置
-- [x] 设置悬浮层内新增 / 编辑 / 删除桥接
+- [x] 独立 Bridge 设置页内新增 / 编辑 / 删除桥接（视觉规格对齐 dsh 原生设置）
 - [x] CLI / Web 模式与按模式过滤的引擎列表
 - [x] Pi 引擎完整可用：JSONL 会话、RPC attach、事件归一化、prompt
 - [x] 左上角「本机 + 已配置桥接」下拉框，带实时连接状态点
@@ -23,11 +23,14 @@ Pi 是第一个完整支持的引擎。Codex、OpenCode、远程 DSH 会出现�
 - [x] 按轮次 lazy attach：发送时启动 Pi，结束即关闭
 - [x] 侧边栏会话状态：运行中转圈、完成变绿点
 - [x] 选中桥接后由侧边栏直接展示该桥接的工作区 / 会话
+- [x] 导入模式：外部会话在用户显式导入前不会进入侧边栏
+- [x] 导入弹窗支持工作区树 / 单列表、搜索与多选
 - [x] 与 dsh Web 一致的侧边栏浏览器：按工作区 / 工作区树 / 单列表分组、手动 / 最近更新排序、会话筛选
 - [x] dsh 风格搜索按钮与结果列表
 - [x] dsh 风格“选择工作区目录”弹窗，可新建文件夹并加入工作区
 - [x] 每个工作区右侧的新建会话按钮，以及工作区重命名 / 软删除
 - [x] 工作区映射持久化到 `bridge-workspaces.json`，删除只做标记，不碰 Pi JSONL
+- [x] 按桥接隔离的导入成员持久化到 `bridge-imports.json`
 - [x] 按桥接隔离的归档状态持久化到 `bridge-archives.json`，并在 attach / prompt 时校验
 - [x] dsh 风格对话界面与 composer
 - [x] 与 dsh Web 一致的左右内容宽度拖拽手柄，共用宽度偏好
@@ -55,7 +58,7 @@ Bridge 设置
 - 每个已配置桥接都是独立一行；同一个引擎出现多行是正常的。
 - 每个桥接右侧有状态点：绿色=已连接、橙色=正在连接、红色=连接失败；悬停可看原因。
 - 未接入的引擎仍然展示，但不可选择。
-- **Bridge 设置**：在当前页面上悬浮打开设置弹窗，不跳转页面。
+- **Bridge 设置**：单独打开 Bridge 设置页，不进入 dsh 原生设置，也不跳转当前对话。
 
 ### 连接生命周期
 
@@ -92,9 +95,11 @@ attach 之后以实时 state 为准。
 目录，否则用短命进程/缓存（`source: "catalog"`）。未连接时选择的模型会先记为
 pending，下次 attach 后立即应用。
 
-### 设置悬浮层
+### 设置页
 
-设置弹窗左侧是导航，右侧是内容：
+Bridge 设置是**独立页面**，不注册进 dsh 原生设置；但弹窗外壳、左侧导航、
+标题层级、卡片、按钮、输入框与排版均按 dsh 原生设置（尤其是 Models 分页）
+1:1 复刻：
 
 - **管理桥接**：列出已配置桥接，可新增、编辑、删除。
 - 新增桥接：
@@ -107,6 +112,24 @@ pending，下次 attach 后立即应用。
     - Bin 地址
     - 离线启动
   - DSH 包括服务地址和访问令牌。令牌不会出现在 API 响应里；编辑时留空会保留原值。
+
+### 导入会话
+
+Bridge 采用**导入模式**：引擎 Session 根目录下发现的会话只是候选，不会自动
+进入侧边栏。用户显式导入之前，侧边栏保持不变，避免外部 CLI 创建的会话悄悄出现
+在所有浏览器里。
+
+Bridge 侧边栏标题栏的数据库图标是导入按钮。弹窗会读取该桥接的完整会话列表：
+
+- **树视图**按工作区目录分组，支持工作区级全选（包含子目录中的会话）；
+- **列表视图**按最近更新平铺展示，便于快速浏览；
+- 搜索可按会话名、首条消息、id 或工作区路径过滤；
+- 已导入的行会标记并禁用，弹窗可随时重新打开；
+- 点击**导入**后，前端调用 `POST /api/bridge/imports`，选中的会话才会进入左侧
+  工作区并补齐对应的工作区记录。
+
+通过 Bridge 新建的会话本身就是显式操作，会立即导入。导入成员按桥接持久化在
+`$DSH_HOME/bridge-imports.json`，与 agent JSONL 和归档状态彼此独立。
 
 ### 选中桥接后
 
@@ -138,7 +161,8 @@ dsh 的 session projection：外部 agent 有自己的会话模型。
 ```text
 Browser (dsh web)
   ├─ 品牌下拉框 ───────────> GET /api/bridge/settings
-  ├─ Bridge 设置悬浮层 ────> POST/PUT/DELETE /api/bridge/bridges
+  ├─ Bridge settings page ──> POST/PUT/DELETE /api/bridge/bridges
+  ├─ 导入弹窗 ─────────────> GET/POST /api/bridge/imports
   └─ Bridge 主面板 ────────> GET /api/bridge/sessions?bridge=<id>
                               /api/bridge/{session,attach,prompt,events,…}
 
@@ -183,7 +207,8 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | 管理桥接 |
 | `GET/POST /api/bridge/status` | 读取或刷新每个桥接的就绪状态 |
 | `GET /api/bridge/activity?bridge=<id>` | 每个会话的运行/空闲/失败状态 |
-| `GET/POST /api/bridge/sessions` | 列出某个桥接的会话/工作区；在指定工作区新建 Pi 会话 |
+| `GET/POST /api/bridge/sessions` | 列出某个桥接**已导入**的会话/工作区；在指定工作区新建 Pi 会话 |
+| `GET/POST /api/bridge/imports` | 发现全部引擎会话；持久化选中的会话/工作区导入 |
 | `GET/POST/PUT/DELETE /api/bridge/workspaces` | 工作区列表、添加、重命名、软删除 |
 | `POST /api/bridge/archive` | 在 host 端归档 / 取消归档单个会话 |
 | `GET/POST /api/bridge/directories` | 浏览 / 新建本地工作区目录 |
@@ -203,6 +228,19 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 
 会话 key 为 `<bridgeId>.<base64url(nativeKey)>`，只能解析到该桥接；修改桥接的
 会话根目录后，旧路径会像之前一样被拒绝。
+
+## 会话导入
+
+导入状态由 bridge host 持有，不保存在浏览器。host 把每个桥接的已导入原生 session
+key 有序集合写入 `$DSH_HOME/bridge-imports.json`（带版本、0600、原子写入）。
+
+- `GET /api/bridge/imports?bridge=<id>` 返回全部候选会话（带 `imported` 标记）
+  和工作区候选；
+- `POST /api/bridge/imports` 接收 `{ bridge, sessionKeys, workspacePaths }`，校验
+  key/路径确实属于该桥接的候选集，并且是幂等的；
+- `GET /api/bridge/sessions` 只返回导入集合内的会话；工作区不再从每次扫描到的
+  全部 `cwd` 自动补齐；
+- 删除桥接时会一并删除它的导入集合。
 
 ## 会话归档
 
@@ -234,8 +272,7 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 `demo`），旧版本曾把完整路径写成默认名的记录会自动纠正。它是“工作区路径 →
 显示名 / 删除标记”的持久映射：重命名只改这里，
 删除只写入 `deletedAt`，不会删除 Pi 目录、JSONL 或其中的消息。Pi 侧新增会话
-后，在下一次会话查询时（打开面板、点刷新、窗口重新聚焦、回合结束、新建/重命名/
-删除工作区）会重新读取会话列表的 `cwd`，自动并入已有工作区或补建新工作区。
+只会出现在导入弹窗中；用户显式导入后才并入左侧工作区。
 
 ```json
 {
