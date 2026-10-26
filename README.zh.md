@@ -74,6 +74,24 @@ Agent 进程是**按轮次**的：
 因此同一时刻每个桥接最多只有一个 Pi 进程，而不是「打开过几个会话就有几个」。
 同一会话再次发送会重新 attach。
 
+### 未连接时也能看到当前模型
+
+Pi 会把生效模型持久化在会话 JSONL 里：每次切换写一条 `model_change` 树条目，
+每条 assistant 消息也带 `provider` / `model` / `thinkingLevel`。Bridge 解析当前
+分支后返回 `session.model`，所以没连接也能显示当前模型，而不是一个占位符。
+attach 之后以实时 state 为准。
+
+### 未连接时也能加载模型目录
+
+`get_available_models` 由 Pi 的 model runtime 计算（用户 `models.json`、内置目录、
+凭据、扩展注册的 provider），无法从会话文件推出。Bridge 不常驻控制进程，而是
+临时启动一个 `pi --mode rpc --no-session`，查询目录后立刻退出；Host 按桥接缓存
+10 分钟。
+
+因此 `GET /api/bridge/models?key=…` 在未连接时同样可用：有 attachment 时用实时
+目录，否则用短命进程/缓存（`source: "catalog"`）。未连接时选择的模型会先记为
+pending，下次 attach 后立即应用。
+
 ### 设置悬浮层
 
 设置弹窗左侧是导航，右侧是内容：
@@ -178,7 +196,7 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 | `POST /api/bridge/prompt` | 提问、steer、follow up |
 | `POST /api/bridge/abort` | 中断当前回复 |
 | `POST /api/bridge/ui-response` | 回复扩展对话框 |
-| `GET /api/bridge/models?key=…` | 模型目录 |
+| `GET /api/bridge/models?key=…` | 模型目录（未连接也可用） |
 | `POST /api/bridge/models` | 在实时 attachment 上选择 provider/model |
 | `GET /api/bridge/stats?key=…` | 引擎会话统计 |
 | `GET /api/bridge/history-message?key=…` | 纯文本历史 |

@@ -182,6 +182,28 @@ activity lives in the host `sessionActivity` map and is exposed through
 startup auto-connect and a user attach cannot spawn two Pi children for one
 session.
 
+## Model state without an agent
+
+Two different problems, two different answers:
+
+**Current model** is durable. Pi writes a `model_change` entry on every switch
+and stamps each assistant message with `provider` / `model` /
+`thinkingLevel`. `readPiSession` walks the current branch and returns
+`session.model`, so the composer shows the right model before any agent exists.
+The newest assistant message wins over an older `model_change`, which handles
+fallback-model turns.
+
+**Model catalog** is not durable in the session. It is
+`modelRuntime.getAvailableSnapshot()` — user `models.json` + bundled catalog +
+credentials + extension providers. The Pi engine answers it with a short-lived
+`pi --mode rpc --no-session` child (`queryPiModels`), and the host caches the
+result per bridge for 10 minutes. `/api/bridge/models` prefers a live
+attachment's catalog and otherwise falls back to that cached query, so the
+picker works while detached.
+
+Selecting a model with no live agent records a pending selection; `attach`
+applies it with `set_model` right after `get_state`.
+
 ## Browser integration
 
 ### Brand switcher

@@ -628,6 +628,79 @@ test('lazy attach: prompt starts the agent and agent-settled closes it', async (
   }
 })
 
+test('model selection without a live agent is stored and applied on attach', async () => {
+  const { root } = await fixtureSession()
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const previousHome = process.env.DSH_HOME
+  const previousAuto = process.env.BRIDGE_AUTO_CONNECT
+  process.env.DSH_HOME = home
+  process.env.BRIDGE_AUTO_CONNECT = '0'
+  try {
+    const { ctx, routes, disposers } = host()
+    apply(ctx)
+    try {
+      await call(routes, 'bridges', put({
+        id: 'pi-local',
+        config: { sessionsRoot: root, binPath: fake },
+      }))
+      const listed = await (await call(routes, 'sessions?bridge=pi-local')).json()
+      const key = listed.sessions[0].key
+
+      const pending = await (await call(routes, 'models', post({
+        key,
+        provider: 'fake',
+        model: 'fake-model-2',
+      }))).json()
+      assert.equal(pending.ok, true)
+      assert.equal(pending.pending, true)
+
+      // Attaching applies the remembered choice before the first prompt.
+      const attached = await (await call(routes, 'attach', post({ key }))).json()
+      assert.equal(attached.ok, true)
+      assert.equal(attached.state.model.id, 'fake-model-2')
+    } finally {
+      for (const dispose of disposers.reverse()) await dispose?.()
+    }
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    if (previousAuto === undefined) delete process.env.BRIDGE_AUTO_CONNECT
+    else process.env.BRIDGE_AUTO_CONNECT = previousAuto
+  }
+})
+
+test('model catalog falls back to a short-lived engine query when detached', async () => {
+  const { root } = await fixtureSession()
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const previousHome = process.env.DSH_HOME
+  const previousAuto = process.env.BRIDGE_AUTO_CONNECT
+  process.env.DSH_HOME = home
+  process.env.BRIDGE_AUTO_CONNECT = '0'
+  try {
+    const { ctx, routes } = host()
+    apply(ctx)
+    await call(routes, 'bridges', put({
+      id: 'pi-local',
+      config: { sessionsRoot: root, binPath: fake },
+    }))
+    const listed = await (await call(routes, 'sessions?bridge=pi-local')).json()
+    const key = listed.sessions[0].key
+    const catalog = await (await call(routes, `models?key=${encodeURIComponent(key)}`)).json()
+    assert.equal(catalog.ok, true)
+    assert.equal(catalog.source, 'catalog')
+    assert.equal(catalog.cached, false)
+    assert.equal(catalog.models[0].id, 'fake-model')
+    // A second read is served from the per-bridge cache.
+    const warm = await (await call(routes, `models?key=${encodeURIComponent(key)}`)).json()
+    assert.equal(warm.cached, true)
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    if (previousAuto === undefined) delete process.env.BRIDGE_AUTO_CONNECT
+    else process.env.BRIDGE_AUTO_CONNECT = previousAuto
+  }
+})
+
 test('creates, edits, redacts and deletes bridges through the manager route', async () => {
   const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
   const previousHome = process.env.DSH_HOME

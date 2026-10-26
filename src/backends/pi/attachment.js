@@ -353,3 +353,90 @@ export class PiAttachment extends EventEmitter {
     if (!this.exited) child.kill('SIGKILL')
   }
 }
+
+const MODEL_QUERY_TIMEOUT_MS = 45_000
+
+/**
+ * Query Pi's model catalog with a short-lived RPC child.
+ *
+ * The catalog merges user `models.json`, the bundled catalog, credentials and
+ * extension-provided providers, so it cannot be derived from the session JSONL.
+ * A control process would have to stay resident for that; instead this spawns
+ * `pi --mode rpc --no-session`, asks for `get_available_models`, and exits.
+ * Callers cache the result.
+ */
+export function queryPiModels(env = process.env) {
+  const resolved = resolvePiCommand(env)
+  const args = [...resolved.prefixArgs, '--mode', 'rpc', '--no-session']
+  return new Promise((resolve, reject) => {
+    const child = spawn(resolved.command, args, {
+      cwd: tryExisting(env.HOME) ?? process.cwd(),
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    const finish = (error, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try { child.stdin.end() } catch { /* already closed */ }
+      const terminate = () => {
+        try { child.kill('SIGTERM') } catch { /* already gone */ }
+        // A wedged child must not keep the host's event loop (or a test run)
+        // alive after we already have an answer or a failure.
+        const force = setTimeout(() => {
+          try { child.kill('SIGKILL') } catch { /* already gone */ }
+        }, 1000)
+        force.unref?.()
+      }
+      if (error !== undefined) {
+        terminate()
+        reject(error)
+      } else {
+        terminate()
+        resolve(value)
+      }
+    }
+    const timer = setTimeout(() => {
+      finish(new Error(`Pi model query timed out after ${MODEL_QUERY_TIMEOUT_MS}ms`))
+    }, MODEL_QUERY_TIMEOUT_MS)
+    timer.unref?.()
+
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (chunk) => { stderr = (stderr + chunk).slice(-4096) })
+    child.on('error', (error) => finish(error))
+    child.on('exit', () => {
+      if (!settled) finish(new Error(stderr.trim() === '' ? 'Pi exited before answering the model query' : `Pi exited: ${stderr.trim()}`))
+    })
+    const decoder = createLineDecoder((line) => {
+      let record
+      try { record = JSON.parse(line) } catch { return }
+      if (record?.type !== 'response' || record.id !== 'models') return
+      if (record.success === false) {
+        finish(new Error(record.error ?? 'Pi rejected the model query'))
+        return
+      }
+      const models = Array.isArray(record.data?.models) ? record.data.models : []
+      finish(undefined, models)
+    })
+    child.stdout.on('data', (chunk) => decoder.push(chunk))
+    child.stdout.on('end', () => decoder.flush())
+    try {
+      child.stdin.write(`${JSON.stringify({ id: 'models', type: 'get_available_models' })}\n`)
+    } catch (error) {
+      finish(error instanceof Error ? error : new Error(String(error)))
+    }
+  })
+}
+
+function tryExisting(path) {
+  if (typeof path !== 'string' || path === '') return undefined
+  try {
+    return existsSync(path) ? path : undefined
+  } catch {
+    return undefined
+  }
+}

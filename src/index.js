@@ -319,6 +319,13 @@ export function apply(ctx) {
   const pendingAttachments = new Map()
   const sessionActivity = new Map()
   const disposeTimers = new Map()
+  // Model catalogs are engine-wide, not session-wide: cache per bridge so an
+  // unconnected session can still show the picker. Cold start spawns one
+  // short-lived Pi child, warm reads are free.
+  const modelCatalogs = new Map()
+  const modelCatalogPending = new Map()
+  // Chosen model while no agent is alive; applied right after the next attach.
+  const pendingModels = new Map()
   const logger = ctx.logger
   let settings = readSettings(process.env, logger)
   let workspaceStore = readWorkspaceStore(process.env, logger)
@@ -337,6 +344,35 @@ export function apply(ctx) {
 
   /** Guardrail: a settled turn keeps its process only long enough to flush. */
   const SESSION_SETTLE_CLOSE_MS = 1200
+  const MODEL_CATALOG_TTL_MS = 10 * 60 * 1000
+
+  const modelsForBridge = async (bridge, { force = false } = {}) => {
+    const cached = modelCatalogs.get(bridge.id)
+    if (!force && cached !== undefined && Date.now() - cached.at < MODEL_CATALOG_TTL_MS) {
+      return { models: cached.models, cached: true, at: cached.at }
+    }
+    const pending = modelCatalogPending.get(bridge.id)
+    if (pending !== undefined) return pending
+    const job = (async () => {
+      const engine = engineFor(bridge)
+      if (!engineAvailable(engine)) {
+        throw Object.assign(new Error(engine.unavailableReason ?? `${engine.label} is not available`), { status: 409 })
+      }
+      if (typeof engine.listModels !== 'function') {
+        throw Object.assign(new Error(`${engine.label} does not expose a model catalog`), { status: 409 })
+      }
+      const models = await engine.listModels(configFor(bridge, engine), process.env)
+      const entry = { at: Date.now(), models: Array.isArray(models) ? models : [] }
+      modelCatalogs.set(bridge.id, entry)
+      return { models: entry.models, cached: false, at: entry.at }
+    })()
+    modelCatalogPending.set(bridge.id, job)
+    try {
+      return await job
+    } finally {
+      if (modelCatalogPending.get(bridge.id) === job) modelCatalogPending.delete(bridge.id)
+    }
+  }
 
   const activityView = (key) => ({
     state: 'unknown',
@@ -548,6 +584,15 @@ export function apply(ctx) {
       await attachment.start()
       try {
         await attachment.getState()
+        const pendingModel = pendingModels.get(key)
+        if (pendingModel !== undefined && typeof attachment.setModel === 'function') {
+          try {
+            await attachment.setModel(pendingModel.provider, pendingModel.id)
+            pendingModels.delete(key)
+          } catch (error) {
+            logger?.warn?.(`bridge: could not apply pending model ${pendingModel.provider}/${pendingModel.id}: ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
       } catch (error) {
         const detail = attachment.stderr.trim()
         await attachment.dispose()
@@ -1031,6 +1076,7 @@ export function apply(ctx) {
             settings = writeSettings(result.settings, process.env)
             logger?.info?.(`bridge: updated ${id}`)
             connections.delete(id)
+            modelCatalogs.delete(id)
             void autoConnectBridge(result.bridge)
             return json(200, { ok: true, bridge: bridgeWithConnection(result.bridge), ...settingsView() })
           }
@@ -1038,6 +1084,7 @@ export function apply(ctx) {
           settings = writeSettings(result.settings, process.env)
           connections.delete(id)
           probeTokens.delete(id)
+          modelCatalogs.delete(id)
           const pruned = deleteBridgeArchives(archiveStore, id)
           if (pruned.changed) archiveStore = writeArchiveStore(pruned.store, process.env)
           logger?.info?.(`bridge: deleted ${id}`)
@@ -1103,23 +1150,44 @@ export function apply(ctx) {
       fetch: async (request) => {
         try {
           if (request.method === 'GET') {
-            const key = requireString(new URL(request.url).searchParams.get('key'), 'key')
-            const attachment = attachmentFor(key).attachment
-            if (typeof attachment.getAvailableModels !== 'function') {
-              throw Object.assign(new Error('this bridge engine does not expose a model catalog'), { status: 409 })
+            const url = new URL(request.url)
+            const key = url.searchParams.get('key')
+            if (key !== null && key !== '') {
+              const live = attachments.get(key)
+              if (live !== undefined && typeof live.attachment.getAvailableModels === 'function') {
+                return json(200, {
+                  ok: true,
+                  models: await live.attachment.getAvailableModels(),
+                  source: 'attachment',
+                })
+              }
+              // Fall through: an unconnected session still needs a catalog.
+              const { bridge } = resolveSessionKey(key)
+              const catalog = await modelsForBridge(bridge, { force: url.searchParams.get('refresh') === '1' })
+              return json(200, { ok: true, models: catalog.models, source: 'catalog', cached: catalog.cached, at: catalog.at })
             }
-            return json(200, { ok: true, models: await attachment.getAvailableModels() })
+            const bridgeId = requireString(url.searchParams.get('bridge'), 'bridge')
+            const bridge = bridgeFor(bridgeId)
+            const catalog = await modelsForBridge(bridge, { force: url.searchParams.get('refresh') === '1' })
+            return json(200, { ok: true, models: catalog.models, source: 'catalog', cached: catalog.cached, at: catalog.at })
           }
           const body = await readJson(request)
           const key = requireString(body.key, 'key')
           const provider = requireString(body.provider, 'provider')
           const model = requireString(body.model, 'model')
-          const attachment = attachmentFor(key).attachment
-          if (typeof attachment.setModel !== 'function') {
+          const selection = { provider, id: model }
+          const live = attachments.get(key)
+          if (live === undefined) {
+            // No agent yet: remember the choice and apply it on the next attach.
+            pendingModels.set(key, selection)
+            return json(200, { ok: true, model: selection, pending: true })
+          }
+          if (typeof live.attachment.setModel !== 'function') {
             throw Object.assign(new Error('this bridge engine does not support model selection'), { status: 409 })
           }
-          const selected = await attachment.setModel(provider, model)
-          return json(200, { ok: true, model: selected })
+          const selected = await live.attachment.setModel(provider, model)
+          pendingModels.delete(key)
+          return json(200, { ok: true, model: selected ?? selection })
         } catch (error) {
           return failure(error, error.status ?? 409)
         }

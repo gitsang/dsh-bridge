@@ -8,7 +8,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, delimiter, isAbsolute, join, resolve } from 'node:path'
-import { PiAttachment, resolvePiCommand } from './attachment.js'
+import { PiAttachment, queryPiModels, resolvePiCommand } from './attachment.js'
 import {
   createPiSession,
   listPiSessions,
@@ -163,6 +163,19 @@ export const piEngine = {
 
   probe(config, env) {
     return probePi(config, env)
+  },
+
+  /**
+   * Read-only model catalog for a bridge that has no live agent. Spawns a
+   * short-lived Pi RPC child and lets the host cache the result.
+   */
+  async listModels(config, env) {
+    const childEnv = {
+      ...env,
+      ...(config.binPath === null || config.binPath === undefined ? {} : { PI_BIN: config.binPath }),
+      ...(config.offline ? { PI_OFFLINE: env.PI_OFFLINE ?? '1' } : {}),
+    }
+    return queryPiModels(childEnv)
   },
 
   /** Map Pi's wire events onto the backend-neutral bridge event vocabulary. */

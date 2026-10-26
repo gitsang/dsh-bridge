@@ -303,11 +303,33 @@ test('browser bundle wires the model seat and statusline into the composer', asy
   assert.match(source, /dshBridge_contextRing/)
 })
 
-test('Bridge settings modal overrides the primitive dialog width', async () => {
+test('Bridge settings mirrors the dsh Web settings shell', async () => {
   const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
-  assert.match(source, /className: 'dshBridge_settingsModal'/)
-  assert.match(source, /\.dshBridge_settingsModal\.dshBridge_settingsModal\{width:min\(880px,100%\)\}/)
-  assert.match(source, /\.dshBridge_settingsShell\{[^}]*width:100%;max-width:100%/)
+  // Same shell geometry and tokens as @deepseek-ai/dsh-client-ui-settings-general.
+  assert.match(source, /\.dshBridge_settingsPanel\{[^}]*width:800px/)
+  assert.match(source, /\.dshBridge_settingsPanel\{[^}]*height:min\(800px,calc\(100vh - 48px\)\)/)
+  assert.match(source, /\.dshBridge_settingsPanel\{[^}]*border-radius:24px/)
+  assert.match(source, /\.dshBridge_settingsPanel\{[^}]*background:var\(--dsw-alias-bg-layer-2\)/)
+  assert.match(source, /\.dshBridge_settingsNav\{[^}]*width:188px/)
+  assert.match(source, /\.dshBridge_settingsHeader\{[^}]*height:54px/)
+  assert.match(source, /\.dshBridge_settingsNavCell\{[^}]*height:40px/)
+  assert.match(source, /\.dshBridge_settingsOptions\{[^}]*padding:0 24px 24px/)
+  assert.match(source, /className: 'dshBridge_settingsOverlay'/)
+  assert.match(source, /'aria-labelledby': 'dshBridge_settingsTitle'/)
+  assert.match(source, /document\.addEventListener\('keydown'/)
+  assert.doesNotMatch(source, /className: 'dshBridge_settingsModal'/)
+})
+
+test('Bridge settings rows and editors follow the dsh Models section rhythm', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  assert.match(source, /\.dshBridge_settingsSection\{[^}]*max-width:720px/)
+  assert.match(source, /\.dshBridge_settingsRowCard\{[^}]*border:1px solid var\(--dsw-alias-border-l2\)/)
+  assert.match(source, /\.dshBridge_settingsRowCard\{[^}]*border-radius:12px/)
+  assert.match(source, /\.dshBridge_settingsEditor\{[^}]*background:var\(--dsw-alias-bg-module-platform\)/)
+  assert.match(source, /\.dshBridge_settingsPrimaryButton[^}]*height:36px[^}]*border-radius:18px/)
+  assert.match(source, /\.dshBridge_settingsAddButton\{[^}]*border:1px dashed var\(--dsw-alias-border-l3\)/)
+  assert.match(source, /className: 'dshBridge_settingsDangerButton'/)
+  assert.match(source, /className: 'dshBridge_settingsSaved'/)
 })
 
 test('Bridge menu puts the status dot where the menu check sits', async () => {

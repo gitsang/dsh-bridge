@@ -84,6 +84,27 @@ one process per opened session. Sending again in the same session re-attaches.
 Session activity is host-owned (`sessionActivity`) and exposed via
 `GET /api/bridge/activity?bridge=<id>`; the sidebar polls it every 2s.
 
+### Current model without an agent
+
+Pi records its effective model durably in the session JSONL: a `model_change`
+tree entry on every switch, plus `provider` / `model` / `thinkingLevel` on each
+assistant message. The bridge parses the current branch and reports
+`session.model`, so an unconnected session still shows its model instead of a
+placeholder. Live attachment state stays authoritative and overrides it.
+
+### Model catalog without an agent
+
+`get_available_models` is computed by Pi's model runtime (user `models.json`,
+bundled catalog, credentials, extension providers), so it cannot be derived from
+a session file. Instead of a resident control process, the Pi engine spawns a
+short-lived `pi --mode rpc --no-session` child, asks for the catalog, and exits.
+The host caches the result per bridge for 10 minutes.
+
+`GET /api/bridge/models?key=…` therefore works while detached: it reads the live
+attachment when there is one, and otherwise returns the cached/short-lived
+catalog (`source: "catalog"`, `cached: true|false`). Model selection with no
+agent stores a pending choice that is applied right after the next attach.
+
 ### Settings overlay
 
 The settings dialog floats above the current page with a left navigation column
@@ -200,7 +221,7 @@ All routes sit below dsh's authenticated `/api` channel.
 | `POST /api/bridge/prompt` | Prompt, steer, or follow up |
 | `POST /api/bridge/abort` | Abort the running turn |
 | `POST /api/bridge/ui-response` | Answer an extension dialog |
-| `GET /api/bridge/models?key=…` | Provider/model catalog |
+| `GET /api/bridge/models?key=…` | Provider/model catalog (works while detached) |
 | `POST /api/bridge/models` | Select a provider/model on the live attachment |
 | `GET /api/bridge/stats?key=…` | Engine session statistics |
 | `GET /api/bridge/history-message?key=…` | Concatenated plain-text history |

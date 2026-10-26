@@ -1568,41 +1568,73 @@ window.__ModuleLoader__.load({
       '.dshBridge_railWorkspace{display:flex;justify-content:center;padding:6px 0}',
       '.dshBridge_railButton{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:var(--dsw-radius-md,10px);background:transparent;color:var(--dsw-alias-label-secondary,currentColor);cursor:pointer}',
       '.dshBridge_railButton:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
-      '.dshBridge_settingsModal.dshBridge_settingsModal{width:min(880px,100%)}',
-      '.dshBridge_settingsShell{display:flex;width:100%;max-width:100%;min-height:520px;max-height:76vh;border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));border-radius:var(--dsw-radius-md,12px);overflow:hidden;background:var(--dsw-alias-bg-layer-1,Canvas)}',
-      '.dshBridge_settingsNav{flex:none;display:flex;flex-direction:column;gap:4px;width:190px;padding:12px 8px;box-sizing:border-box;border-right:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1));background:var(--dsw-alias-bg-layer-2,transparent)}',
-      '.dshBridge_settingsNavTitle{padding:2px 8px 8px;font-size:11px;line-height:16px;font-weight:600;color:var(--dsw-alias-label-tertiary,currentColor)}',
-      '.dshBridge_settingsNavItem{display:flex;align-items:center;gap:8px;width:100%;padding:8px 9px;border:0;border-radius:var(--dsw-radius-md,10px);background:transparent;color:var(--dsw-alias-label-secondary,currentColor);font:inherit;font-size:12px;text-align:left;cursor:pointer}',
-      '.dshBridge_settingsNavItem[data-selected="true"]{background:var(--dsw-alias-interactive-bg-active,rgba(0,0,0,.07));color:var(--dsw-alias-label-primary,currentColor)}',
-      '.dshBridge_settingsNavHint{padding:6px 9px;font-size:10px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor)}',
-      '.dshBridge_settingsMain{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;padding:14px 16px;box-sizing:border-box;overflow:auto}',
-      '.dshBridge_settingsEmpty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:36px 16px;text-align:center;color:var(--dsw-alias-label-tertiary,currentColor)}',
-      '.dshBridge_bridgeForm{display:flex;flex-direction:column;gap:14px;min-width:0;padding:2px 2px 8px}',
-      '.dshBridge_formHead{display:flex;align-items:center;gap:10px;min-height:34px}',
-      '.dshBridge_formTitle{flex:1;min-width:0;font-size:14px;line-height:20px;font-weight:600;color:var(--dsw-alias-label-primary,currentColor)}',
-      '.dshBridge_linkButton{padding:4px 6px;border:0;border-radius:var(--dsw-radius-sm,7px);background:transparent;color:var(--dsw-alias-label-tertiary,currentColor);font:inherit;font-size:12px;cursor:pointer}',
-      '.dshBridge_linkButton:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05));color:var(--dsw-alias-label-primary,currentColor)}',
-      '.dshBridge_chipRow{display:flex;flex-wrap:wrap;gap:6px}',
-      '.dshBridge_chip{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.14));border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,currentColor);font:inherit;font-size:12px;cursor:pointer}',
-      '.dshBridge_chip:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
-      '.dshBridge_chip[data-selected="true"]{border-color:var(--dsw-alias-state-business-primary,#3b82f6);background:var(--dsw-alias-interactive-bg-active,rgba(0,0,0,.06));color:var(--dsw-alias-label-primary,currentColor)}',
-      '.dshBridge_chipMeta{font-size:9px;line-height:12px;color:var(--dsw-alias-label-tertiary,currentColor)}',
-      '.dshBridge_warning{color:var(--dsw-alias-state-warning-primary,#b45309)}',
-      '.dshBridge_formActions{display:flex;justify-content:flex-end;gap:8px;padding-top:4px}',
-      '.dshBridge_primaryButton{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:30px;padding:0 12px;border:0;border-radius:var(--dsw-radius-md,10px);background:var(--dsw-alias-button-primary-fill,#0f1115);color:var(--dsw-alias-label-primary-foreground,#fff);font:inherit;font-size:12px;cursor:pointer}',
-      '.dshBridge_primaryButton:disabled{opacity:.4;cursor:default}',
-      '.dshBridge_secondaryButton{min-height:30px;padding:0 12px;border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.14));border-radius:var(--dsw-radius-md,10px);background:transparent;color:var(--dsw-alias-label-secondary,currentColor);font:inherit;font-size:12px;cursor:pointer}',
-      '.dshBridge_secondaryButton:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
-      '.dshBridge_bridgeListPane{display:flex;flex-direction:column;gap:10px;min-height:0;flex:1}',
-      '.dshBridge_bridgeCards{display:flex;flex-direction:column;gap:8px;overflow:auto;padding-bottom:6px}',
-      '.dshBridge_bridgeCard{display:flex;align-items:flex-start;gap:12px;padding:12px;border:.5px solid var(--dsw-alias-border-l2,rgba(0,0,0,.12));border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-base,transparent)}',
-      '.dshBridge_bridgeCardMain{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}',
-      '.dshBridge_bridgeCardTitleRow{display:flex;align-items:center;gap:8px;min-width:0}',
-      '.dshBridge_bridgeCardTitle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;line-height:20px;font-weight:600;color:var(--dsw-alias-label-primary,currentColor)}',
-      '.dshBridge_bridgeConfigSummary{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.dshBridge_bridgeCardActions{flex:none;display:flex;align-items:center;gap:2px}',
-      '.dshBridge_dangerButton:hover:not(:disabled){color:var(--dsw-alias-state-error-primary,#d33)!important}',
-      '.dshBridge_settingsNotice{margin-top:8px;padding:6px 9px;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));font-size:11px;line-height:17px;color:var(--dsw-alias-label-secondary,currentColor)}',
+      /* The settings surface mirrors the shipped dsh Settings root: an 800px
+       * layer-2 panel with a 188px nav rail, a 54px header, and the same
+       * section/editor/button rhythm used by the Models settings section. */
+      '.dshBridge_settingsOverlay{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center}',
+      '.dshBridge_settingsMask{position:absolute;inset:0;background:var(--dsw-alias-bg-mask-1);backdrop-filter:var(--dsw-mask-blur)}',
+      '.dshBridge_settingsPanel{position:relative;z-index:1;display:flex;width:800px;max-width:calc(100vw - 48px);height:min(800px,calc(100vh - 48px));overflow:hidden;border-radius:24px;background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-shadow-lv3);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2)}',
+      '.dshBridge_settingsNav{box-sizing:border-box;flex:none;display:flex;flex-direction:column;gap:18px;width:188px;padding:22px 12px 0}',
+      '.dshBridge_settingsNavTitle{padding:0 12px;color:var(--dsw-alias-label-primary);font-size:16px;font-weight:500;line-height:24px}',
+      '.dshBridge_settingsNavList{display:flex;flex-direction:column;gap:4px}',
+      '.dshBridge_settingsNavCell{box-sizing:border-box;display:flex;align-items:center;gap:8px;height:40px;padding:9px 16px 9px 12px;border:0;border-radius:12px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;font-weight:400;line-height:22px;text-align:left;cursor:pointer}',
+      '.dshBridge_settingsNavCell:hover{background:var(--dsw-specific-sidebar-nav-item-hover)}',
+      '.dshBridge_settingsNavCell[data-active="true"]{background:var(--dsw-specific-sidebar-nav-item-active)}',
+      '.dshBridge_settingsNavIcon{flex:none}',
+      '.dshBridge_settingsNavLabel{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.dshBridge_settingsContent{flex:1;min-width:0;display:flex;flex-direction:column}',
+      '.dshBridge_settingsHeader{box-sizing:border-box;flex:none;display:flex;align-items:flex-start;justify-content:space-between;gap:8px;height:54px;padding:20px 14px 8px 10px}',
+      '.dshBridge_settingsActions{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0;margin-left:auto}',
+      '.dshBridge_settingsClose{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:28px;background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer}',
+      '.dshBridge_settingsClose:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+      '.dshBridge_settingsOptions{flex:1;min-height:0;padding:0 24px 24px;overflow-y:auto}',
+      '.dshBridge_settingsHiddenLabel{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}',
+      '.dshBridge_settingsSection{display:flex;flex-direction:column;gap:12px;max-width:720px;color:var(--dsw-alias-label-primary)}',
+      '.dshBridge_settingsTitle{margin:0;color:var(--dsw-alias-label-primary);font-size:16px;font-weight:500;line-height:24px}',
+      '.dshBridge_settingsIntro{margin:0;color:var(--dsw-alias-label-tertiary);font-size:14px;line-height:22px}',
+      '.dshBridge_settingsNotice{margin:0;color:var(--dsw-alias-state-warn-label);font-size:12px;line-height:18px}',
+      '.dshBridge_settingsSaved{margin:0;color:var(--dsw-alias-state-success-primary);font-size:12px;line-height:18px}',
+      '.dshBridge_settingsError{margin:0;color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px}',
+      '.dshBridge_settingsRows{display:flex;flex-direction:column;gap:8px;margin:12px 0 0;padding:0;list-style:none}',
+      '.dshBridge_settingsRowCard{display:flex;flex-direction:column;gap:12px;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px}',
+      '.dshBridge_settingsRowHead{display:flex;align-items:center;gap:10px}',
+      '.dshBridge_settingsRowIdentity{display:inline-flex;align-items:center;gap:6px;min-width:0}',
+      '.dshBridge_settingsRowName{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:22px}',
+      '.dshBridge_settingsRowTag{flex:none;padding:1px 6px;border:1px solid var(--dsw-alias-border-l3);border-radius:4px;color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px}',
+      '.dshBridge_settingsRowActions{display:inline-flex;align-items:center;gap:4px;margin-left:auto}',
+      '.dshBridge_settingsConfigSummary{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.dshBridge_settingsEmpty{margin:0;padding:12px;border:1px dashed var(--dsw-alias-border-l3);border-radius:8px;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;text-align:center}',
+      '.dshBridge_settingsPrimaryButton,.dshBridge_settingsSecondaryButton,.dshBridge_settingsAddButton{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:4px;height:36px;padding:0 14px;border:none;border-radius:18px;font:inherit;font-size:14px;line-height:22px;cursor:pointer}',
+      '.dshBridge_settingsPrimaryButton{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground)}',
+      '.dshBridge_settingsPrimaryButton:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}',
+      '.dshBridge_settingsSecondaryButton,.dshBridge_settingsAddButton{border:1px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-primary)}',
+      '.dshBridge_settingsSecondaryButton:hover:not(:disabled),.dshBridge_settingsAddButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}',
+      '.dshBridge_settingsDangerButton{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border:none;border-radius:18px;background:transparent;color:var(--dsw-alias-state-error-primary);font:inherit;font-size:14px;line-height:22px;cursor:pointer}',
+      '.dshBridge_settingsDangerButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger)}',
+      '.dshBridge_settingsPrimaryButton:disabled,.dshBridge_settingsSecondaryButton:disabled,.dshBridge_settingsDangerButton:disabled,.dshBridge_settingsAddButton:disabled{opacity:.4;cursor:default}',
+      '.dshBridge_settingsRowActions .dshBridge_settingsSecondaryButton,.dshBridge_settingsRowActions .dshBridge_settingsDangerButton{height:28px;padding:0 10px;border-radius:14px;font-size:12px;line-height:18px}',
+      '.dshBridge_settingsPrimaryButton:focus-visible,.dshBridge_settingsSecondaryButton:focus-visible,.dshBridge_settingsDangerButton:focus-visible,.dshBridge_settingsAddButton:focus-visible{box-shadow:0 0 0 2px var(--dsw-alias-border-l3);outline:none}',
+      '.dshBridge_settingsAddBlock{display:flex;flex-direction:column;gap:12px}',
+      '.dshBridge_settingsAddButton{flex:1 1 0;min-width:180px;height:44px;border:1px dashed var(--dsw-alias-border-l3);border-radius:12px}',
+      '.dshBridge_settingsEditor{display:flex;flex-direction:column;gap:14px;padding:14px 16px;border-radius:12px;background:var(--dsw-alias-bg-module-platform)}',
+      '.dshBridge_settingsEditorHeader{display:flex;align-items:baseline;gap:8px}',
+      '.dshBridge_settingsEditorTitle{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:500;line-height:22px}',
+      '.dshBridge_settingsField{display:flex;flex-direction:column;gap:6px}',
+      '.dshBridge_settingsFieldLabel{display:inline-flex;align-items:center;gap:10px;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:500;line-height:18px}',
+      '.dshBridge_settingsInput{box-sizing:border-box;width:100%;height:32px;padding:0 10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:22px}',
+      '.dshBridge_settingsInput:focus{border-color:var(--dsw-alias-brand-primary);outline:none}',
+      '.dshBridge_settingsInput::placeholder{color:var(--dsw-alias-label-dimmed)}',
+      '.dshBridge_settingsInput:disabled{opacity:.6;cursor:default}',
+      '.dshBridge_settingsSelect{appearance:none;max-width:240px;padding-right:32px;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 12 12\' fill=\'none\'%3E%3Cpath d=\'M3 4.5L6 7.5L9 4.5\' stroke=\'%2381858C\' stroke-width=\'1.5\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E");background-position:right 12px center;background-repeat:no-repeat;background-size:12px 12px;cursor:pointer}',
+      '.dshBridge_settingsSwitchRow{display:flex;align-items:flex-start;gap:10px}',
+      '.dshBridge_settingsSwitchText{display:flex;flex:1;flex-direction:column;gap:2px;min-width:0}',
+      '.dshBridge_settingsSwitch{position:relative;flex:none;width:36px;height:20px;margin-top:1px;padding:0;border:0;border-radius:999px;background:var(--dsw-alias-border-l3);cursor:pointer;transition:background .15s ease}',
+      '.dshBridge_settingsSwitch[data-on="true"]{background:var(--dsw-alias-state-business-primary)}',
+      '.dshBridge_settingsSwitchKnob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:999px;background:var(--dsw-switch-thumb,#fff);transition:transform .15s ease}',
+      '.dshBridge_settingsSwitch[data-on="true"] .dshBridge_settingsSwitchKnob{transform:translateX(16px)}',
+      '.dshBridge_settingsEditorActions{display:flex;justify-content:flex-end;gap:8px}',
+      '.dshBridge_settingsLinkButton{box-sizing:border-box;display:inline-flex;align-items:center;height:28px;padding:0 10px;border:0;border-radius:14px;background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:12px;line-height:18px;cursor:pointer}',
+      '.dshBridge_settingsLinkButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
       `.dshBridge_browser_root{--dsh-session-list-edge-inset:var(--dsh-sidebar-inline-padding);--dsh-session-list-scrollbar-width:5px;--dsh-session-list-scrollbar-offset:2px;box-sizing:border-box;min-height:0;padding-right:var(--dsh-session-list-edge-inset);flex-direction:column;flex:1;display:flex}.dshBridge_browser_root.dshBridge_browser_rail{padding-right:0}.dshBridge_browser_iconButton{border-radius:var(--dsw-radius-sm);cursor:pointer;width:28px;height:28px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.dshBridge_browser_iconButton:focus-visible,.dshBridge_browser_searchButton:focus-visible,.dshBridge_browser_clearButton:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}.dshBridge_browser_iconButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_browser_viewOptionsMenu{min-width:200px}.dshBridge_browser_sectionHeader{box-sizing:border-box;border-radius:var(--dsw-radius-md);height:36px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:flex-end;align-items:center;gap:4px;margin-bottom:4px;padding-left:4px;display:flex;overflow:hidden}.dshBridge_browser_root:not(.dshBridge_browser_rail) .dshBridge_browser_sectionHeader{margin-top:2px;margin-right:-4px}.dshBridge_browser_sectionLabel{white-space:nowrap;opacity:1;visibility:visible;min-width:0;max-width:45%;transition:max-width .18s var(--ds-ease-in-out),margin-right .18s var(--ds-ease-in-out),opacity .12s var(--ds-ease-in-out),transform .18s var(--ds-ease-in-out),visibility 0s linear;flex:none;line-height:20px;overflow:hidden}.dshBridge_browser_sectionLabelHidden{opacity:0;visibility:hidden;max-width:0;margin-right:-4px;transition-delay:0s,0s,0s,0s,.18s;transform:translate(-4px)}.dshBridge_browser_searchSlot{box-sizing:border-box;min-width:0;max-width:28px;transition:max-width .18s var(--ds-ease-in-out),padding-left .18s var(--ds-ease-in-out);flex:1;align-items:center;margin-left:auto;padding-left:0;display:flex}.dshBridge_browser_searchSlotExpanded{max-width:100%;padding-left:0}.dshBridge_browser_headerActions{opacity:1;visibility:visible;max-width:60px;transition:max-width .18s var(--ds-ease-in-out),opacity .12s var(--ds-ease-in-out),transform .18s var(--ds-ease-in-out),visibility 0s linear;flex:none;align-items:center;gap:4px;display:flex;overflow:hidden}.dshBridge_browser_headerActionsHidden{opacity:0;visibility:hidden;pointer-events:none;max-width:0;transition-delay:0s,0s,0s,.18s;transform:translate(4px)}.dshBridge_browser_search{box-sizing:border-box;border-radius:var(--dsw-radius-sm);cursor:text;width:100%;height:28px;color:var(--dsw-alias-label-secondary);transition:width .18s var(--ds-ease-in-out),padding .18s var(--ds-ease-in-out),border-color .18s var(--ds-ease-in-out),background-color .18s var(--ds-ease-in-out);background:0 0;border:none;flex:none;align-items:center;gap:0;margin:0;padding:0;display:flex;overflow:hidden}.dshBridge_browser_searchExpanded{border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md);width:calc(100% + 4px);height:30px;color:var(--dsw-alias-label-caption);background:0 0;margin-inline:-2px;padding:0 4px 0 0}.dshBridge_browser_searchButton{border-radius:var(--dsw-radius-sm);cursor:pointer;width:28px;height:28px;color:inherit;background:0 0;border:none;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.dshBridge_browser_searchExpanded .dshBridge_browser_searchButton{width:28px;height:30px}.dshBridge_browser_searchButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_browser_searchExpanded .dshBridge_browser_searchButton:hover{background:0 0}.dshBridge_browser_searchInput{opacity:0;pointer-events:none;width:0;min-width:0;color:var(--dsw-alias-label-primary);transition:opacity .12s var(--ds-ease-in-out);background:0 0;border:none;outline:none;flex:1;font-size:13px;line-height:18px}.dshBridge_browser_searchExpanded .dshBridge_browser_searchInput{opacity:1;pointer-events:auto;margin-left:-2px}.dshBridge_browser_searchInput::placeholder{color:var(--dsw-alias-label-tertiary)}.dshBridge_browser_clearButton{border-radius:var(--dsw-radius-sm);cursor:pointer;width:24px;height:24px;color:var(--dsw-alias-label-secondary);background:0 0;border:none;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.dshBridge_browser_clearButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_browser_rail .dshBridge_browser_sectionHeader{justify-content:flex-start;gap:0;margin-bottom:12px;padding-left:0}.dshBridge_browser_rail .dshBridge_browser_headerActions{max-width:none}.dshBridge_browser_rail .dshBridge_browser_iconButton{border-radius:var(--dsw-radius-md);width:36px;height:36px;color:var(--dsw-alias-label-primary)}.dshBridge_browser_rail .dshBridge_browser_search{border-radius:var(--dsw-radius-md);background:0 0;border-color:#0000;gap:0;width:36px;height:36px;margin:0 0 12px;padding:0}.dshBridge_browser_rail .dshBridge_browser_searchButton{border-radius:var(--dsw-radius-md);width:36px;height:36px;color:var(--dsw-alias-label-primary)}.dshBridge_browser_rail .dshBridge_browser_searchButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_browser_listArea{min-height:0;margin-left:-4px;margin-right:calc(-1 * var(--dsh-session-list-edge-inset));flex-direction:column;flex:1;padding-left:4px;display:flex;overflow:visible}.dshBridge_browser_rail .dshBridge_browser_listArea{margin-left:0;margin-right:0;padding-left:0}.dshBridge_browser_treeBody{flex-direction:column;flex:1;min-height:0;display:flex;position:relative}.dshBridge_browser_fade{left:0;right:var(--dsh-session-list-edge-inset);background:linear-gradient(to bottom,transparent,var(--dsw-specific-sidebar-fill));pointer-events:none;height:24px;position:absolute;bottom:0}[data-platform=darwin] .dshBridge_browser_fade{display:none}.dshBridge_browser_wide{animation:dshBridge_browser_wide-in .2s var(--ds-ease-in-out)}@keyframes dshBridge_browser_wide-in{0%{opacity:0}}.dshBridge_browser_list{min-height:0;margin-left:-4px;margin-right:var(--dsh-session-list-scrollbar-offset);padding-left:4px;padding-right:calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-width) - var(--dsh-session-list-scrollbar-offset));scrollbar-gutter:stable;flex:1;padding-bottom:16px;overflow-y:auto}.dshBridge_browser_flatList>*+*,.dshBridge_browser_searchTree>[role=treeitem]+[role=treeitem],.dshBridge_browser_groupSection>*+*{margin-top:2px}.dshBridge_browser_searchStatus{color:var(--dsw-alias-label-tertiary);padding:10px 12px;font-size:12px;line-height:18px}.dshBridge_browser_groupSection{position:relative}.dshBridge_browser_groupSection+.dshBridge_browser_groupSection{margin-top:4px}.dshBridge_browser_listTopDropIndicator,.dshBridge_browser_workspaceDropBefore:before,.dshBridge_browser_workspaceDropAfter:after{content:"";z-index:1;background:linear-gradient(55deg,transparent calc(50% - 1px),var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px),transparent calc(50% + 1px)) 0 0 / 5px 7px no-repeat,linear-gradient(125deg,transparent calc(50% - 1px),var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px),transparent calc(50% + 1px)) 0 5px / 5px 7px no-repeat,linear-gradient(var(--dsw-alias-state-business-primary) 0 0) 4px 5px / calc(100% - 4px) 2px no-repeat;pointer-events:none;height:12px;position:absolute;left:0;right:0}.dshBridge_browser_listTopDropIndicator{top:-8px;left:0;right:var(--dsh-session-list-edge-inset)}.dshBridge_browser_listTopDropActive>.dshBridge_browser_workspaceDropBefore:first-child:before{display:none}.dshBridge_browser_workspaceDropBefore:before{top:-8px}.dshBridge_browser_workspaceDropAfter:after{bottom:-8px}.dshBridge_browser_sessionOverflowButton{border-radius:var(--dsw-radius-sm);width:100%;height:28px;padding:0 12px 0 calc(28px + var(--dsh-workspace-indent,0px));cursor:pointer;text-align:left;color:var(--dsw-alias-label-tertiary);background:0 0;border:none;font-size:12px}.dshBridge_browser_groupSection>.dshBridge_browser_sessionOverflowButton{margin-top:0}.dshBridge_browser_sessionOverflowButton:hover{color:var(--dsw-alias-label-secondary);background:0 0}.dshBridge_browser_empty{color:var(--dsw-alias-label-tertiary);padding:16px 12px;font-size:13px}.dshBridge_browser_emptyState{color:var(--dsw-alias-label-tertiary);flex-direction:column;align-items:center;gap:8px;margin-top:80px;padding:0 12px;font-size:13px;line-height:20px;display:flex}.dshBridge_browser_emptyState>svg{color:var(--dsw-alias-label-caption);margin-bottom:4px}.dshBridge_browser_emptyAction{cursor:pointer;color:var(--dsw-alias-link);background:0 0;border:none;padding:0;font-size:13px;line-height:20px}.dshBridge_browser_renameInput{box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-lg);width:100%;height:44px;color:var(--dsw-alias-label-primary);background:0 0;outline:none;padding:7px 14px;font-size:14px;font-weight:400;line-height:22px}.dshBridge_browser_renameInput:disabled{color:var(--dsw-alias-label-dimmed)}.dshBridge_browser_renameError{color:var(--dsw-alias-state-error-primary);margin-top:8px;font-size:12px;line-height:18px}.dshBridge_browser_deleteAction:not(:disabled){color:var(--dsw-alias-state-error-primary)}.dshBridge_browser_deleteStatus{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}@media (prefers-reduced-motion:reduce){.dshBridge_browser_wide{animation:none}.dshBridge_browser_search,.dshBridge_browser_sectionLabel,.dshBridge_browser_searchSlot,.dshBridge_browser_searchInput,.dshBridge_browser_headerActions{transition:none}}`,
       `.dshBridge_row_projectRow,.dshBridge_row_sessionRow{border-radius:var(--dsw-radius-md);padding:0 8px;cursor:pointer;user-select:none;color:var(--dsw-alias-label-primary);align-items:center;gap:6px;padding-inline-start:calc(8px + var(--dsh-workspace-indent,0px));display:flex}.dshBridge_row_projectRow:hover,.dshBridge_row_sessionRow:hover,.dshBridge_row_sessionRow.dshBridge_row_selected{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_row_searchResultRow{box-sizing:border-box;border-radius:var(--dsw-radius-lg);cursor:pointer;text-align:left;width:100%;min-height:48px;color:var(--dsw-alias-label-primary);background:0 0;border:none;flex-direction:column;align-items:stretch;padding:4px 8px;display:flex}.dshBridge_row_searchResultRow:hover,.dshBridge_row_searchResultRow.dshBridge_row_selected{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_row_searchResultHeading{align-items:center;min-width:0;display:flex}.dshBridge_row_searchResultTitle{text-overflow:ellipsis;white-space:nowrap;flex:0 auto;min-width:0;margin-left:4px;font-size:14px;line-height:20px;overflow:hidden}.dshBridge_row_searchResultMeta{align-items:center;gap:6px;min-width:0;margin-left:20px;display:flex}.dshBridge_row_searchResultWorkspace,.dshBridge_row_searchResultSnippet{text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:17px;overflow:hidden}.dshBridge_row_searchResultWorkspace{max-width:40%;color:var(--dsw-alias-label-tertiary);flex:none}.dshBridge_row_searchResultWorkspace:only-child{max-width:100%}.dshBridge_row_searchResultSnippet{min-width:0;color:var(--dsw-alias-label-secondary);flex:1}.dshBridge_row_projectRow{box-sizing:border-box;align-items:center;height:34px}.dshBridge_row_projectRow .dshBridge_row_rowActions{height:20px}.dshBridge_row_sessionRow{gap:0;height:32px}.dshBridge_row_sessionRow .dshBridge_row_title{margin:0 6px 0 4px}.dshBridge_row_slot{width:16px;height:20px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;display:inline-flex}.dshBridge_row_visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}.dshBridge_row_folderActive{color:var(--dsw-alias-state-business-primary)}.dshBridge_row_projectRow .dshBridge_row_chevron{display:none}.dshBridge_row_projectRow:hover .dshBridge_row_chevron{display:inline-flex}.dshBridge_row_projectRow:hover .dshBridge_row_folder{display:none}.dshBridge_row_arrow{transition:transform .15s var(--ds-ease-in-out)}.dshBridge_row_arrowOpen{transform:rotate(90deg)}.dshBridge_row_projectText{flex-direction:column;flex:1;gap:2px;min-width:0;display:flex}.dshBridge_row_title{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;line-height:20px;overflow:hidden}.dshBridge_row_renameInput{border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-button-elevated-fill);min-width:0;color:inherit;outline:none;padding:0 2px;font-size:14px;line-height:20px}.dshBridge_row_sessionRow .dshBridge_row_title{flex:1}.dshBridge_row_meta{text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px;overflow:hidden}.dshBridge_row_time{color:var(--dsw-alias-label-tertiary);flex:none;font-size:10px;line-height:16px}.dshBridge_row_spinner{box-sizing:border-box;width:10px;height:10px;border-radius:999px;border:1.5px solid color-mix(in srgb,var(--dsw-alias-state-business-primary,#3b82f6) 30%,transparent);border-top-color:var(--dsw-alias-state-business-primary,#3b82f6);animation:dshBridgeSpin .8s linear infinite}.dshBridge_row_doneDot{width:7px;height:7px;border-radius:999px;background:var(--dsw-alias-state-success-primary,#16a34a)}.dshBridge_row_failedDot{width:7px;height:7px;border-radius:999px;background:var(--dsw-alias-state-error-primary,#dc2626)}@keyframes dshBridgeSpin{to{transform:rotate(360deg)}}.dshBridge_row_pinIndicator{width:16px;height:20px;color:var(--dsw-alias-label-caption);flex:none;justify-content:center;align-items:center;margin-left:6px;display:inline-flex}.dshBridge_row_sessionRow.dshBridge_row_archived .dshBridge_row_title,.dshBridge_row_searchResultRow.dshBridge_row_archived .dshBridge_row_searchResultTitle,.dshBridge_row_searchResultRow.dshBridge_row_archived .dshBridge_row_searchResultWorkspace,.dshBridge_row_searchResultRow.dshBridge_row_archived .dshBridge_row_searchResultSnippet{color:var(--dsw-alias-label-caption)}.dshBridge_row_dot{flex:none}.dshBridge_row_rowActions{flex:none;align-items:center;gap:10px;display:none}.dshBridge_row_projectRow:hover .dshBridge_row_rowActions,.dshBridge_row_sessionRow:hover .dshBridge_row_rowActions,.dshBridge_row_searchResultRow:hover .dshBridge_row_rowActions,.dshBridge_row_projectRow.dshBridge_row_menuOpen .dshBridge_row_rowActions,.dshBridge_row_sessionRow.dshBridge_row_menuOpen .dshBridge_row_rowActions{display:inline-flex}.dshBridge_row_searchResultHeading .dshBridge_row_rowActions{margin-left:auto}.dshBridge_row_sessionRow:hover .dshBridge_row_time,.dshBridge_row_sessionRow.dshBridge_row_menuOpen .dshBridge_row_time,.dshBridge_row_sessionRow:hover .dshBridge_row_pinIndicator,.dshBridge_row_sessionRow.dshBridge_row_menuOpen .dshBridge_row_pinIndicator{display:none}@media (hover:hover){.dshBridge_row_sessionRow:hover .dshBridge_row_title,.dshBridge_row_sessionRow.dshBridge_row_menuOpen .dshBridge_row_title{text-overflow:clip}}.dshBridge_row_projectRow.dshBridge_row_menuOpen,.dshBridge_row_sessionRow.dshBridge_row_menuOpen{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_row_sessionRow.dshBridge_row_dropBefore,.dshBridge_row_sessionRow.dshBridge_row_dropAfter{position:relative}.dshBridge_row_sessionRow.dshBridge_row_dropBefore:before,.dshBridge_row_sessionRow.dshBridge_row_dropAfter:after{content:"";z-index:1;background:linear-gradient(55deg,transparent calc(50% - 1px),var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px),transparent calc(50% + 1px)) 0 0 / 5px 7px no-repeat,linear-gradient(125deg,transparent calc(50% - 1px),var(--dsw-alias-state-business-primary) calc(50% - 1px) calc(50% + 1px),transparent calc(50% + 1px)) 0 5px / 5px 7px no-repeat,linear-gradient(var(--dsw-alias-state-business-primary) 0 0) 4px 5px / calc(100% - 4px) 2px no-repeat;pointer-events:none;height:12px;position:absolute;left:0;right:4px}.dshBridge_row_sessionRow.dshBridge_row_dropBefore:before{top:-7px}.dshBridge_row_sessionRow.dshBridge_row_dropAfter:after{bottom:-7px}.dshBridge_row_hoverContent{flex-direction:column;gap:8px;display:flex}.dshBridge_row_hoverTitle{color:#fff;overflow-wrap:break-word;font-size:14px;line-height:20px}.dshBridge_row_hoverPath{color:#cfd3d6;word-break:break-all;font-size:12px;line-height:16px}.dshBridge_row_hoverTime{color:#cfd3d6;font-size:12px;line-height:16px}.dshBridge_row_hoverStatus{color:#adb2b8;align-items:center;gap:8px;font-size:12px;line-height:20px;display:flex}.dshBridge_row_iconButton{border-radius:var(--dsw-radius-xs);cursor:pointer;width:16px;height:16px;color:var(--dsw-alias-label-tertiary);background:0 0;border:none;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.dshBridge_row_iconButton:hover{color:var(--dsw-alias-label-primary)}.dshBridge_row_chevron{color:var(--dsw-alias-label-caption)}@media (prefers-reduced-motion:reduce){.dshBridge_row_arrow{transition:none;animation:none}}`,
       `.dshBridge_dir_dialog.dshBridge_dir_dialog{--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);gap:0;width:min(680px,100%);height:min(500px,100dvh - 32px);padding:0}.dshBridge_dir_editorScope{display:contents}.dshBridge_dir_header{border-bottom:.5px solid var(--dsw-alias-border-l3);flex-direction:column;flex:none;gap:8px;padding:16px 14px 8px 24px;display:flex}.dshBridge_dir_title{min-height:28px;color:var(--dsw-alias-label-primary);align-items:flex-end;margin:0;font-size:16px;font-weight:510;line-height:24px;display:flex}.dshBridge_dir_crumbBar{box-sizing:border-box;border-radius:var(--dsw-radius-sm);border:1px solid #0000;align-items:center;gap:4px;min-height:24px;margin-left:-9px;padding:0 8px;display:flex}.dshBridge_dir_crumbBar:has(.dshBridge_dir_crumbEditZone:enabled:hover),.dshBridge_dir_crumbBar:has(.dshBridge_dir_crumbEditZone:focus-visible),.dshBridge_dir_crumbBar:has(.dshBridge_dir_pathInput){border-color:var(--dsw-alias-border-l2)}.dshBridge_dir_millerRow{scrollbar-width:none;flex:1 1 0;align-items:stretch;gap:12px;min-height:0;display:flex;overflow-x:auto}.dshBridge_dir_crumbTrail{scrollbar-width:none;flex:0 auto;align-items:center;gap:4px;min-width:0;display:flex;overflow-x:auto}.dshBridge_dir_crumbSeat{flex:none;align-items:center;gap:4px;min-width:0;display:inline-flex}.dshBridge_dir_crumb{text-overflow:ellipsis;white-space:nowrap;max-width:160px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:none;padding:0;font-size:13px;font-weight:500;line-height:20px;overflow:hidden}.dshBridge_dir_crumb:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}.dshBridge_dir_crumb:hover{color:var(--dsw-alias-label-primary)}.dshBridge_dir_crumbChevron{color:var(--dsw-alias-label-tertiary);flex:none}.dshBridge_dir_crumbEditZone{cursor:text;background:0 0;border:none;outline:none;flex:1 0 34px;justify-content:flex-end;align-items:center;min-width:34px;height:22px;padding:0;display:flex}.dshBridge_dir_crumbEditGlyph{color:var(--dsw-alias-label-tertiary);flex:none}.dshBridge_dir_crumbEditZone:enabled:hover .dshBridge_dir_crumbEditGlyph,.dshBridge_dir_crumbEditZone:focus-visible .dshBridge_dir_crumbEditGlyph{color:var(--dsw-alias-label-primary)}.dshBridge_dir_crumbEditZone:disabled{cursor:default}.dshBridge_dir_crumbEditZone:disabled .dshBridge_dir_crumbEditGlyph{color:var(--dsw-alias-label-caption)}.dshBridge_dir_pathInput{box-sizing:border-box;min-width:0;height:22px;color:var(--dsw-alias-label-primary);background:0 0;border:none;outline:none;flex:1 1 0;padding:0;font-size:13px;line-height:20px}.dshBridge_dir_content{flex-direction:column;flex:1 1 0;min-height:0;padding:16px 16px 16px 24px;display:flex;position:relative}.dshBridge_dir_column{flex-direction:column;flex:1 1 0;gap:2px;min-width:256px;padding-right:8px;display:flex;overflow-y:auto}.dshBridge_dir_divider{background:var(--dsw-alias-border-l3);flex:none;width:.5px}.dshBridge_dir_rowSeat{flex:none;display:flex}.dshBridge_dir_row{border-radius:var(--dsw-radius-sm);text-align:left;cursor:pointer;background:0 0;border:none;flex:none;align-items:center;gap:4px;width:100%;height:28px;padding:4px;display:flex}.dshBridge_dir_row:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}.dshBridge_dir_row:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshBridge_dir_rowSelected,.dshBridge_dir_rowSelected:hover{background:var(--dsw-alias-interactive-bg-active,var(--dsw-alias-interactive-bg-hover))}.dshBridge_dir_rowIcon{color:var(--dsw-alias-label-secondary);flex:none}.dshBridge_dir_rowIconSelected{color:var(--dsw-alias-button-info-fill);flex:none}.dshBridge_dir_rowName{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-primary);flex:1 1 0;font-size:13px;font-weight:500;line-height:20px;overflow:hidden}.dshBridge_dir_rowChevron{color:var(--dsw-alias-label-tertiary);flex:none}.dshBridge_dir_status,.dshBridge_dir_error{padding:4px 120px 4px 4px;font-size:12px;line-height:18px}.dshBridge_dir_status{color:var(--dsw-alias-label-secondary)}.dshBridge_dir_error{color:var(--dsw-alias-state-error-primary)}.dshBridge_dir_loadingFloat{background:var(--dsw-alias-bg-layer-2);padding:2px 8px;position:absolute;bottom:8px;right:16px}.dshBridge_dir_footerBar{border-top:.5px solid var(--dsw-alias-border-l3);flex-wrap:wrap;flex:none;align-items:center;gap:8px;padding:16px 24px;display:flex}.dshBridge_dir_showHiddenToggle{color:var(--dsw-alias-label-secondary);cursor:pointer;white-space:nowrap;background:0 0;border:none;align-items:center;gap:4px;padding:0;font-size:13px;font-weight:500;line-height:20px;display:inline-flex}.dshBridge_dir_showHiddenToggle:hover{color:var(--dsw-alias-label-primary)}.dshBridge_dir_showHiddenToggle:disabled{color:var(--dsw-alias-label-caption);cursor:default}.dshBridge_dir_showHiddenToggleActive{color:var(--dsw-alias-label-primary)}.dshBridge_dir_footerGap{flex:1 1 0}.dshBridge_dir_footerAction{min-width:72px}.dshBridge_dir_createDialog.dshBridge_dir_createDialog{gap:0;width:min(380px,100%);padding:0}.dshBridge_dir_createBody{flex-direction:column;gap:12px;padding:22px 24px 20px;display:flex}.dshBridge_dir_createTitle{color:var(--dsw-alias-label-primary);margin:0;font-size:16px;font-weight:510;line-height:24px}.dshBridge_dir_createIn{color:var(--dsw-alias-label-primary);margin:0;font-size:14px;line-height:22px}.dshBridge_dir_createInput{box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-lg);width:100%;height:44px;color:var(--dsw-alias-label-primary);background:0 0;outline:none;padding:7px 14px;font-size:14px;line-height:22px}.dshBridge_dir_createInput::placeholder{color:var(--dsw-alias-label-caption)}.dshBridge_dir_createActions{justify-content:flex-end;align-items:center;gap:8px;margin-top:8px;display:flex}`,
@@ -2343,18 +2375,18 @@ window.__ModuleLoader__.load({
       if (field.type === 'boolean') {
         return h(
           'div',
-          { className: 'dshBridge_switchRow' },
+          { className: 'dshBridge_settingsSwitchRow' },
           h(
             'div',
-            { className: 'dshBridge_switchText' },
-            h('div', { className: 'dshBridge_label' }, label),
-            hint === '' ? null : h('div', { className: 'dshBridge_desc' }, hint),
+            { className: 'dshBridge_settingsSwitchText' },
+            h('span', { className: 'dshBridge_settingsFieldLabel' }, label),
+            hint === '' ? null : h('span', { className: 'dshBridge_settingsIntro' }, hint),
           ),
           h(
             'button',
             {
               type: 'button',
-              className: 'dshBridge_switch',
+              className: 'dshBridge_settingsSwitch',
               'data-on': value !== false ? 'true' : 'false',
               role: 'switch',
               'aria-checked': value !== false,
@@ -2362,23 +2394,23 @@ window.__ModuleLoader__.load({
               disabled,
               onClick: () => onChange(value === false),
             },
-            h('span', { className: 'dshBridge_switchKnob' }),
+            h('span', { className: 'dshBridge_settingsSwitchKnob' }),
           ),
         )
       }
       return h(
         'div',
-        { className: 'dshBridge_field' },
-        h('div', { className: 'dshBridge_label' }, label),
+        { className: 'dshBridge_settingsField' },
+        h('span', { className: 'dshBridge_settingsFieldLabel' }, label),
         h('input', {
-          className: 'dshBridge_input',
+          className: 'dshBridge_settingsInput',
           type: field.type === 'secret' ? 'password' : 'text',
           value: value ?? '',
           placeholder: field.placeholder ?? '',
           disabled,
           onChange: (event) => onChange(event.target.value),
         }),
-        shownHint === '' ? null : h('div', { className: 'dshBridge_desc' }, shownHint),
+        shownHint === '' ? null : h('span', { className: 'dshBridge_settingsIntro' }, shownHint),
       )
     }
 
@@ -2411,6 +2443,7 @@ window.__ModuleLoader__.load({
       const [saving, setSaving] = useState(false)
       const [error, setError] = useState(null)
       const [notice, setNotice] = useState(null)
+      const closeButton = useRef(null)
 
       const load = useCallback(async () => {
         setLoading(true)
@@ -2435,6 +2468,18 @@ window.__ModuleLoader__.load({
         window.addEventListener(SETTINGS_EVENT, onOpen)
         return () => window.removeEventListener(SETTINGS_EVENT, onOpen)
       }, [load])
+
+      // Match dsh's Settings shell: Escape closes and focus starts on the close
+      // control. The listener only exists while the layer is mounted.
+      useEffect(() => {
+        if (!open) return undefined
+        const onKeyDown = (event) => {
+          if (event.key === 'Escape') setOpen(false)
+        }
+        document.addEventListener('keydown', onKeyDown)
+        closeButton.current?.focus?.()
+        return () => document.removeEventListener('keydown', onKeyDown)
+      }, [open])
 
       const engines = Array.isArray(data?.engines) ? data.engines : []
       const bridges = Array.isArray(data?.bridges) ? data.bridges : []
@@ -2521,101 +2566,107 @@ window.__ModuleLoader__.load({
       let right
       if (view === 'form') {
         if (selectedEngine === undefined) {
-          right = h('div', { className: 'dshBridge_settingsEmpty' }, t('loading'))
+          right = h(
+            'div',
+            { className: 'dshBridge_settingsSection' },
+            h('h2', { className: 'dshBridge_settingsTitle' }, t('addBridge')),
+            h('p', { className: 'dshBridge_settingsIntro' }, t('loading')),
+          )
         } else {
           const engineOptions = engines.filter((engine) => engine.mode === mode)
           right = h(
             'div',
-            { className: 'dshBridge_bridgeForm' },
-            h(
-              'div',
-              { className: 'dshBridge_formHead' },
-              h('div', { className: 'dshBridge_formTitle' }, editingId === null ? t('addBridge') : t('editBridge')),
-              h('button', { type: 'button', className: 'dshBridge_linkButton', onClick: () => setView('list') }, t('dialogCancel')),
-            ),
-            h(
-              'div',
-              { className: 'dshBridge_field' },
-              h('div', { className: 'dshBridge_label' }, t('bridgeName')),
-              h('input', {
-                className: 'dshBridge_input',
-                value: name,
-                placeholder: t('bridgeNamePlaceholder'),
-                onChange: (event) => setName(event.target.value),
-              }),
-            ),
-            h(
-              'div',
-              { className: 'dshBridge_field' },
-              h('div', { className: 'dshBridge_label' }, t('bridgeMode')),
-              h(
-                'div',
-                { className: 'dshBridge_chipRow' },
-                ...modes.map((entry) =>
-                  h(
-                    'button',
-                    {
-                      key: entry.id,
-                      type: 'button',
-                      className: 'dshBridge_chip',
-                      'data-selected': mode === entry.id ? 'true' : undefined,
-                      onClick: () => chooseMode(entry.id),
-                    },
-                    entry.id === 'cli' ? t('modeCli') : t('modeWeb'),
-                  ),
-                ),
-              ),
-            ),
-            h(
-              'div',
-              { className: 'dshBridge_field' },
-              h('div', { className: 'dshBridge_label' }, t('bridgeEngine')),
-              h(
-                'div',
-                { className: 'dshBridge_chipRow' },
-                ...engineOptions.map((engine) =>
-                  h(
-                    'button',
-                    {
-                      key: engine.id,
-                      type: 'button',
-                      className: 'dshBridge_chip',
-                      'data-selected': engineId === engine.id ? 'true' : undefined,
-                      onClick: () => chooseEngine(engine.id),
-                    },
-                    engine.label,
-                    engine.available === false ? h('span', { className: 'dshBridge_chipMeta' }, t('bridgeUnavailable')) : null,
-                  ),
-                ),
-              ),
-            ),
-            selectedEngine.available === false
-              ? h('div', { className: 'dshBridge_desc dshBridge_warning' }, `${t('bridgeUnavailableHint')} ${selectedEngine.unavailableReason ?? ''}`)
+            { className: 'dshBridge_settingsSection' },
+            h('h2', { className: 'dshBridge_settingsTitle' }, editingId === null ? t('addBridge') : t('editBridge')),
+            h('p', { className: 'dshBridge_settingsIntro' }, t('bridgeSettingsHint')),
+            error !== null
+              ? h('p', { className: 'dshBridge_settingsError', role: 'alert' }, `${t('settingsFailed')}: ${error}`)
               : null,
-            ...(selectedEngine.configFields ?? []).map((field) =>
-              h(ConfigField, {
-                key: field.key,
-                field,
-                value: config[field.key],
-                configured: editingId !== null && bridges.find((bridge) => bridge.id === editingId)?.configured?.[field.key] === true,
-                disabled: saving,
-                onChange: (value) => setConfig((current) => ({ ...current, [field.key]: value })),
-                t,
-              }),
-            ),
             h(
               'div',
-              { className: 'dshBridge_formActions' },
-              h('button', { type: 'button', className: 'dshBridge_secondaryButton', onClick: () => setView('list') }, t('dialogCancel')),
+              { className: 'dshBridge_settingsEditor' },
               h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dshBridge_primaryButton',
-                  disabled: saving || name.trim() === '',
-                  onClick: save,
-                },
-                saving ? t('savingBridge') : t('saveBridge'),
+                'div',
+                { className: 'dshBridge_settingsField' },
+                h('span', { className: 'dshBridge_settingsFieldLabel' }, t('bridgeName')),
+                h('input', {
+                  className: 'dshBridge_settingsInput',
+                  value: name,
+                  placeholder: t('bridgeNamePlaceholder'),
+                  disabled: saving,
+                  onChange: (event) => setName(event.target.value),
+                }),
+              ),
+              h(
+                'div',
+                { className: 'dshBridge_settingsField' },
+                h('span', { className: 'dshBridge_settingsFieldLabel' }, t('bridgeMode')),
+                h(
+                  'select',
+                  {
+                    className: 'dshBridge_settingsInput dshBridge_settingsSelect',
+                    value: mode,
+                    disabled: saving,
+                    onChange: (event) => chooseMode(event.target.value),
+                  },
+                  ...modes.map((entry) =>
+                    h('option', { key: entry.id, value: entry.id }, entry.id === 'cli' ? t('modeCli') : t('modeWeb')),
+                  ),
+                ),
+              ),
+              h(
+                'div',
+                { className: 'dshBridge_settingsField' },
+                h('span', { className: 'dshBridge_settingsFieldLabel' }, t('bridgeEngine')),
+                h(
+                  'select',
+                  {
+                    className: 'dshBridge_settingsInput dshBridge_settingsSelect',
+                    value: engineId,
+                    disabled: saving,
+                    onChange: (event) => chooseEngine(event.target.value),
+                  },
+                  ...engineOptions.map((engine) =>
+                    h(
+                      'option',
+                      { key: engine.id, value: engine.id },
+                      engine.available === false ? `${engine.label} (${t('bridgeUnavailable')})` : engine.label,
+                    ),
+                  ),
+                ),
+              ),
+              selectedEngine.available === false
+                ? h('p', { className: 'dshBridge_settingsNotice' }, `${t('bridgeUnavailableHint')} ${selectedEngine.unavailableReason ?? ''}`)
+                : null,
+              ...(selectedEngine.configFields ?? []).map((field) =>
+                h(ConfigField, {
+                  key: field.key,
+                  field,
+                  value: config[field.key],
+                  configured: editingId !== null && bridges.find((bridge) => bridge.id === editingId)?.configured?.[field.key] === true,
+                  disabled: saving,
+                  onChange: (value) => setConfig((current) => ({ ...current, [field.key]: value })),
+                  t,
+                }),
+              ),
+              h(
+                'div',
+                { className: 'dshBridge_settingsEditorActions' },
+                h(
+                  'button',
+                  { type: 'button', className: 'dshBridge_settingsSecondaryButton', onClick: () => setView('list') },
+                  t('dialogCancel'),
+                ),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dshBridge_settingsPrimaryButton',
+                    disabled: saving || name.trim() === '',
+                    onClick: save,
+                  },
+                  saving ? t('savingBridge') : t('saveBridge'),
+                ),
               ),
             ),
           )
@@ -2623,103 +2674,152 @@ window.__ModuleLoader__.load({
       } else {
         right = h(
           'div',
-          { className: 'dshBridge_bridgeListPane' },
+          { className: 'dshBridge_settingsSection' },
+          h('h2', { className: 'dshBridge_settingsTitle' }, t('bridgeSettingsGeneral')),
+          h('p', { className: 'dshBridge_settingsIntro' }, t('bridgeSettingsHint')),
+          error !== null
+            ? h('p', { className: 'dshBridge_settingsError', role: 'alert' }, `${t('settingsFailed')}: ${error}`)
+            : null,
+          notice !== null
+            ? h('p', { className: 'dshBridge_settingsSaved', role: 'status', 'aria-live': 'polite' }, notice)
+            : null,
+          loading
+            ? h('p', { className: 'dshBridge_settingsIntro' }, t('loading'))
+            : bridges.length === 0
+              ? h('p', { className: 'dshBridge_settingsEmpty' }, `${t('noBridges')} ${t('noBridgesHint')}`)
+              : h(
+                  'ul',
+                  { className: 'dshBridge_settingsRows' },
+                  ...bridges.map((bridge) => {
+                    const summary = configSummary(bridge, t)
+                    return h(
+                      'li',
+                      { key: bridge.id, className: 'dshBridge_settingsRowCard' },
+                      h(
+                        'div',
+                        { className: 'dshBridge_settingsRowHead' },
+                        h(
+                          'span',
+                          { className: 'dshBridge_settingsRowIdentity' },
+                          h('span', { className: 'dshBridge_settingsRowName' }, bridge.name),
+                          h(
+                            'span',
+                            { className: 'dshBridge_settingsRowTag' },
+                            bridge.available
+                              ? `${bridge.mode === 'cli' ? t('modeCli') : t('modeWeb')} · ${bridge.engineLabel}`
+                              : t('bridgeUnavailable'),
+                          ),
+                        ),
+                        h(
+                          'span',
+                          { className: 'dshBridge_settingsRowActions' },
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dshBridge_settingsSecondaryButton',
+                              'aria-label': t('editBridge'),
+                              onClick: () => startEdit(bridge),
+                            },
+                            t('editBridge'),
+                          ),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dshBridge_settingsDangerButton',
+                              'aria-label': t('deleteBridge'),
+                              onClick: () => remove(bridge),
+                            },
+                            t('deleteBridge'),
+                          ),
+                        ),
+                      ),
+                      bridge.description
+                        ? h('span', { className: 'dshBridge_settingsConfigSummary' }, bridge.description)
+                        : null,
+                      summary !== '' ? h('span', { className: 'dshBridge_settingsConfigSummary' }, summary) : null,
+                    )
+                  }),
+                ),
           h(
             'div',
-            { className: 'dshBridge_formHead' },
-            h('div', { className: 'dshBridge_formTitle' }, `${t('bridgeList')} · ${bridges.length}`),
+            { className: 'dshBridge_settingsAddBlock' },
             h(
               'button',
-              { type: 'button', className: 'dshBridge_primaryButton', onClick: startCreate },
-              h(IconPlusOutlineRegular, { size: 14 }),
+              {
+                type: 'button',
+                className: 'dshBridge_settingsAddButton',
+                onClick: startCreate,
+                disabled: loading || engines.length === 0,
+              },
+              h(IconPlusOutlineRegular, { size: 16 }),
               h('span', null, t('addBridge')),
             ),
           ),
-          loading
-            ? h('div', { className: 'dshBridge_settingsEmpty' }, t('loading'))
-            : bridges.length === 0
-              ? h(
-                  'div',
-                  { className: 'dshBridge_settingsEmpty' },
-                  h('div', { className: 'dshBridge_blankTitle' }, t('noBridges')),
-                  h('div', { className: 'dshBridge_blankHint' }, t('noBridgesHint')),
-                )
-              : h(
-                  'div',
-                  { className: 'dshBridge_bridgeCards' },
-                  ...bridges.map((bridge) =>
-                    h(
-                      'article',
-                      { key: bridge.id, className: 'dshBridge_bridgeCard' },
-                      h(
-                        'div',
-                        { className: 'dshBridge_bridgeCardMain' },
-                        h('div', { className: 'dshBridge_bridgeCardTitleRow' },
-                          h('span', { className: 'dshBridge_bridgeCardTitle' }, bridge.name),
-                          h('span', { className: 'dshBridge_tag', 'data-active': bridge.available ? 'true' : undefined },
-                            bridge.available ? `${bridge.mode === 'cli' ? t('modeCli') : t('modeWeb')} · ${bridge.engineLabel}` : t('bridgeUnavailable'))),
-                        h('div', { className: 'dshBridge_desc' }, bridge.description ?? ''),
-                        configSummary(bridge, t) !== ''
-                          ? h('div', { className: 'dshBridge_bridgeConfigSummary' }, configSummary(bridge, t))
-                          : null,
-                      ),
-                      h(
-                        'div',
-                        { className: 'dshBridge_bridgeCardActions' },
-                        h(
-                          Tooltip,
-                          { label: t('editBridge') },
-                          h('button', {
-                            type: 'button',
-                            className: 'dshBridge_iconButton',
-                            'aria-label': t('editBridge'),
-                            onClick: () => startEdit(bridge),
-                          }, h(IconEditOutlineRegular, { size: 14 })),
-                        ),
-                        h(
-                          Tooltip,
-                          { label: t('deleteBridge') },
-                          h('button', {
-                            type: 'button',
-                            className: 'dshBridge_iconButton dshBridge_dangerButton',
-                            'aria-label': t('deleteBridge'),
-                            onClick: () => remove(bridge),
-                          }, h(IconTrashOutlineRegular, { size: 14 })),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-          error !== null ? h('div', { className: 'dshBridge_error' }, `${t('settingsFailed')}: ${error}`) : null,
-          notice !== null ? h('div', { className: 'dshBridge_settingsNotice' }, notice) : null,
         )
       }
 
+      if (!open) return null
       return h(
-        Modal,
-        {
-          open,
-          onClose: () => setOpen(false),
-          title: t('bridgeSettingsTitle'),
-          closeLabel: t('settingsClose'),
-          className: 'dshBridge_settingsModal',
-        },
+        'div',
+        { className: 'dshBridge_settingsOverlay', role: 'presentation' },
+        h('div', {
+          className: 'dshBridge_settingsMask',
+          'aria-hidden': 'true',
+          onClick: () => setOpen(false),
+        }),
         h(
           'div',
-          { className: 'dshBridge_settingsShell' },
+          {
+            className: 'dshBridge_settingsPanel',
+            role: 'dialog',
+            'aria-modal': 'true',
+            'aria-labelledby': 'dshBridge_settingsTitle',
+          },
           h(
-            'aside',
+            'nav',
             { className: 'dshBridge_settingsNav' },
-            h('div', { className: 'dshBridge_settingsNavTitle' }, t('settingsTitle')),
+            h('div', { className: 'dshBridge_settingsNavTitle', id: 'dshBridge_settingsTitle' }, t('settingsTitle')),
             h(
-              'button',
-              { type: 'button', className: 'dshBridge_settingsNavItem', 'data-selected': 'true' },
-              h(IconSettingsOutlineRegular, { size: 15 }),
-              h('span', null, t('bridgeSettingsGeneral')),
+              'div',
+              { className: 'dshBridge_settingsNavList' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dshBridge_settingsNavCell',
+                  'data-active': 'true',
+                  'aria-current': 'true',
+                  onClick: () => setView('list'),
+                },
+                h(IconSettingsOutlineRegular, { size: 16, className: 'dshBridge_settingsNavIcon' }),
+                h('span', { className: 'dshBridge_settingsNavLabel' }, t('bridgeSettingsGeneral')),
+              ),
             ),
-            h('div', { className: 'dshBridge_settingsNavHint' }, t('bridgeSettingsGeneralHint')),
           ),
-          h('div', { className: 'dshBridge_settingsMain' }, right),
+          h(
+            'div',
+            { className: 'dshBridge_settingsContent' },
+            h(
+              'div',
+              { className: 'dshBridge_settingsHeader' },
+              h('div', { className: 'dshBridge_settingsActions' }),
+              h(
+                'button',
+                {
+                  ref: closeButton,
+                  type: 'button',
+                  className: 'dshBridge_settingsClose',
+                  'aria-label': t('settingsClose'),
+                  onClick: () => setOpen(false),
+                },
+                h(IconCloseFillRegular, { size: 14 }),
+                h('span', { className: 'dshBridge_settingsHiddenLabel' }, t('settingsClose')),
+              ),
+            ),
+            h('div', { className: 'dshBridge_settingsOptions' }, right),
+          ),
         ),
       )
     }
@@ -3715,6 +3815,7 @@ window.__ModuleLoader__.load({
       const [modelsLoading, setModelsLoading] = useState(false)
       const [modelsError, setModelsError] = useState(null)
       const [modelSwitching, setModelSwitching] = useState(false)
+      const [pendingModel, setPendingModel] = useState(null)
       const [sessionStats, setSessionStats] = useState(null)
       const [statsVersion, setStatsVersion] = useState(0)
       const sourceRef = useRef(null)
@@ -3795,7 +3896,7 @@ window.__ModuleLoader__.load({
       // reloaded after the agent settles so the composer and statusline track
       // the live session rather than the stale history snapshot.
       useEffect(() => {
-        if (!attached || selectedKey === null) {
+        if (selectedKey === null) {
           setModels([])
           setModelsLoading(false)
           setModelsError(null)
@@ -3805,6 +3906,7 @@ window.__ModuleLoader__.load({
         let cancelled = false
         setModelsLoading(true)
         setModelsError(null)
+        // The catalog is bridge-scoped, so it loads before any agent exists.
         api(`models?key=${encodeURIComponent(selectedKey)}`)
           .then((body) => {
             if (cancelled) return
@@ -3818,18 +3920,22 @@ window.__ModuleLoader__.load({
           .finally(() => {
             if (!cancelled) setModelsLoading(false)
           })
-        api(`stats?key=${encodeURIComponent(selectedKey)}`)
+        if (attached) {
+          api(`stats?key=${encodeURIComponent(selectedKey)}`)
           .then((body) => {
             if (!cancelled) setSessionStats(normalizeBridgeStats(body.stats))
           })
-          .catch(() => {
-            // Engines without a stats RPC still get the transcript fold below.
-            if (!cancelled) setSessionStats(null)
-          })
+            .catch(() => {
+              // Engines without a stats RPC still get the transcript fold below.
+              if (!cancelled) setSessionStats(null)
+            })
+        } else {
+          setSessionStats(null)
+        }
         return () => {
           cancelled = true
         }
-      }, [attached, selectedKey, statsVersion])
+      }, [attached, bridgeId, selectedKey, statsVersion])
 
       useEffect(() => {
         const onNotice = (event) => {
@@ -3909,6 +4015,7 @@ window.__ModuleLoader__.load({
           bridgeUi.set({ selectedKey: key })
           setAttached(false)
           setState(null)
+          setPendingModel(null)
           setStreamingMessage(null)
           setDialog(null)
           setTranscript([])
@@ -4031,6 +4138,7 @@ window.__ModuleLoader__.load({
               return
             }
             if (payload?.running === false) setAttached(false)
+            if (payload?.activity?.state === 'running') setPendingModel(null)
             if (firstSnapshotRef.current) {
               firstSnapshotRef.current = false
               lastSeqRef.current = payload?.sequence ?? 0
@@ -4140,6 +4248,7 @@ window.__ModuleLoader__.load({
               model: model.id,
             }),
           })
+          if (body.pending === true) setPendingModel({ provider: model.provider, id: model.id })
           setState((current) => (current === null ? current : {
             ...current,
             model: { ...model, ...(body.model !== null && typeof body.model === 'object' ? body.model : {}) },
@@ -4206,6 +4315,13 @@ window.__ModuleLoader__.load({
       )
       const statusStats = sessionStats ?? fallbackStats
       const selectedSession = detail ?? sessions.find((session) => session.key === selectedKey)
+      // Live state is authoritative; otherwise fall back to what the session
+      // JSONL recorded, so an unconnected session still shows its model.
+      const currentModel = state?.model ?? detail?.model ?? (pendingModel === null ? null : {
+        provider: pendingModel.provider,
+        id: pendingModel.id,
+        name: pendingModel.id,
+      })
       const title = selectedSession?.name ?? selectedSession?.firstMessage ?? t('title')
 
       return h(
@@ -4326,7 +4442,7 @@ window.__ModuleLoader__.load({
                             { className: 'dshBridge_modelSeat' },
                             h(BridgeModelSelect, {
                               models,
-                              current: state?.model ?? null,
+                              current: currentModel,
                               loading: modelsLoading,
                               error: modelsError,
                               disabled: modelSwitching,

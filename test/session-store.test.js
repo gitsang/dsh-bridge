@@ -125,3 +125,52 @@ test('skips malformed files while listing', async () => {
   assert.equal(sessions.length, 1)
   assert.equal(sessions[0].id, 'session-1')
 })
+
+test('reads the current model and thinking level from the durable branch', async () => {
+  const lines = [
+    ...baseLines(),
+    { type: 'model_change', id: 'mchg1', parentId: 'a4', timestamp: '2026-10-20T00:00:05.000Z', provider: 'saigw', modelId: 'deepseek-flash' },
+    {
+      type: 'message',
+      id: 'b1',
+      parentId: 'mchg1',
+      timestamp: '2026-10-20T00:00:06.000Z',
+      message: {
+        role: 'assistant',
+        provider: 'saigw',
+        model: 'deepseek-flash',
+        thinkingLevel: 'high',
+        content: [{ type: 'text', text: 'done' }],
+        timestamp: 6,
+      },
+    },
+  ]
+  const { file } = await writeSession(lines)
+  const session = await readPiSession(file)
+  assert.deepEqual(session.model, { provider: 'saigw', id: 'deepseek-flash' })
+  assert.equal(session.thinkingLevel, 'high')
+})
+
+test('an assistant fallback model overrides an older model_change entry', async () => {
+  const lines = [
+    ...baseLines(),
+    { type: 'model_change', id: 'mchg1', parentId: 'a4', timestamp: '2026-10-20T00:00:05.000Z', provider: 'saigw', modelId: 'mimo-pro' },
+    {
+      type: 'message',
+      id: 'b1',
+      parentId: 'mchg1',
+      timestamp: '2026-10-20T00:00:06.000Z',
+      message: { role: 'assistant', provider: 'saigw', model: 'gpt-6-astra', content: [], timestamp: 6 },
+    },
+  ]
+  const { file } = await writeSession(lines)
+  const session = await readPiSession(file)
+  assert.deepEqual(session.model, { provider: 'saigw', id: 'gpt-6-astra' })
+})
+
+test('sessions without model entries report no model', async () => {
+  const { file } = await writeSession(baseLines())
+  const session = await readPiSession(file)
+  assert.equal(session.model, null)
+  assert.equal(session.thinkingLevel, null)
+})

@@ -131,10 +131,32 @@ export async function readPiSession(filePath) {
   const messages = []
   const tools = []
   let name
+  let model
+  let thinkingLevel
   for (const entry of branch) {
     if (entry.type === 'session_info' && typeof entry.name === 'string') name = entry.name
+    // Pi records the effective model as a dedicated tree entry whenever the
+    // user switches models, and stamps every assistant message with the model
+    // that produced it. Both are durable, so the current model is readable
+    // without attaching an agent.
+    if (entry.type === 'model_change') {
+      if (typeof entry.provider === 'string' && typeof entry.modelId === 'string') {
+        model = { provider: entry.provider, id: entry.modelId }
+      }
+      continue
+    }
+    if (entry.type === 'thinking_level_change') {
+      if (typeof entry.level === 'string') thinkingLevel = entry.level
+      continue
+    }
     if (entry.type !== 'message' || !entry.message) continue
     const message = entry.message
+    if (message.role === 'assistant' && typeof message.provider === 'string' && typeof message.model === 'string') {
+      // The newest assistant turn is a stronger signal than an older
+      // model_change when a turn used a fallback model.
+      model = { provider: message.provider, id: message.model }
+      if (typeof message.thinkingLevel === 'string') thinkingLevel = message.thinkingLevel
+    }
     if (message.role === 'user' || message.role === 'assistant' || message.role === 'toolResult') {
       messages.push(message)
     } else if (message.role === 'custom' || message.role === 'bashExecution') {
@@ -162,6 +184,8 @@ export async function readPiSession(filePath) {
     bytes: last.size,
     messageCount: messages.length,
     firstMessage: clip(textOfContent(firstUser?.content)),
+    model: model ?? null,
+    thinkingLevel: thinkingLevel ?? null,
     messages,
     tools,
   }
