@@ -113,7 +113,16 @@ test('workspace rows expose new-session, rename, and soft-delete actions', async
   assert.match(source, /cwd: workspace\.path \?\? workspace\.cwd/)
   assert.match(source, /api\('workspaces', \{\s*method: 'PUT'/)
   assert.match(source, /api\('workspaces', \{\s*method: 'DELETE'/)
-  assert.match(source, /pendingAttachKey/)
+  assert.match(source, /bridgeUi\.selectSession\(body\.session\.key\)/)
+})
+
+test('archive state is host-owned and archived rows are not openable', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  assert.match(source, /api\('archive', \{\s*method: 'POST'/)
+  assert.match(source, /archivedKeys: Array\.isArray\(body\.archivedKeys\)/)
+  assert.match(source, /archivedNotOpenable/)
+  assert.doesNotMatch(source, /archivedKeys: state\.archivedKeys/)
+  assert.doesNotMatch(source, /stored\.archivedKeys/)
 })
 
 test('bridge dictionaries describe bridges as saved instances, not engines', () => {
@@ -143,6 +152,15 @@ test('bridge dictionaries describe bridges as saved instances, not engines', () 
   assert.equal(dictionaries[0].en.bridgeEngine, 'Engine')
   assert.equal(dictionaries[0].zh.backendPi, undefined)
   assert.doesNotMatch(dictionaries[0].en.emptyHint, /\bpi\b/i)
+})
+
+test('sending lazily attaches and the explicit connect button is gone', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  assert.match(source, /const ensureAttached = useCallback/)
+  assert.match(source, /if \(!attached\) \{\s*const ready = await ensureAttached\(selectedKey\)/)
+  assert.doesNotMatch(source, /t\('attach'\)/)
+  assert.match(source, /dshBridge_row_spinner/)
+  assert.match(source, /dshBridge_row_doneDot/)
 })
 
 test('browser bundle has no Pi-specific route, env, or runtime coupling', async () => {

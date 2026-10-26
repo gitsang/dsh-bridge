@@ -20,13 +20,16 @@ the add-bridge form but are marked as pending until their adapters are connected
 - [x] CLI / Web mode selection and mode-specific engine list
 - [x] Confirmed Pi engine: JSONL sessions, RPC attach, normalized events, prompts
 - [x] Top-left “Local + configured bridges” dropdown with live connection dots
-- [x] Startup auto-connect: each bridge warms its newest session
+- [x] Startup readiness probe per bridge (no agent spawned)
+- [x] Per-turn lazy attach: send starts Pi, settle closes it
+- [x] Sidebar session status: spinner while running, green dot when done
 - [x] Bridge-owned sidebar while a bridge is selected
 - [x] dsh-identical workspace browser: workspace / workspace-tree / flat grouping, manual / last-updated ordering, session filter
 - [x] dsh-style search button and result list
 - [x] dsh-style Select Workspace Directory dialog with New folder
 - [x] Per-workspace New Session action plus workspace rename / soft delete
 - [x] Durable workspace mapping in `bridge-workspaces.json`; delete marks only, never touches Pi JSONL
+- [x] Host-owned, per-bridge session archive in `bridge-archives.json` with attach/prompt admission checks
 - [x] dsh-styled transcript and composer
 - [x] Draggable left/right content-width handles, sharing dsh Web's width preference
 - [x] Composer model picker and a dsh-style statusline (turns/steps, tokens, cache hit)
@@ -61,17 +64,25 @@ Bridge settings
 
 ### Connection lifecycle
 
-When the dsh host starts, every configured bridge is auto-connected by
-`bridge: auto-connect`. For Pi this means:
+When the dsh host starts, every configured bridge is probed by
+`bridge: auto-connect`. For Pi the probe only checks the launcher and sessions
+root; **no agent process is spawned**. The status endpoint
+`GET /api/bridge/status` reports that readiness, and the switcher polls it while
+open.
 
-1. probe the launcher and sessions root;
-2. list the bridge's sessions;
-3. attach the newest session over Pi RPC and keep that process alive.
+Agent processes are **per turn**:
 
-The status endpoint `GET /api/bridge/status` reports the per-bridge state, and
-the switcher polls it while open. A disconnect marks the dot red; re-running a
-check or attaching again turns it green. Set `BRIDGE_AUTO_CONNECT=0` to keep
-session attachments lazy.
+1. opening a session reads JSONL history only (composer is already available);
+2. the first send calls `POST /api/bridge/attach` and then `prompt`;
+3. the sidebar row shows a spinner while the turn runs;
+4. `agent_settled` marks the row green and closes the Pi process ~1.2s later
+   (long enough to flush the final events).
+
+So one bridge needs at most one Pi process while a turn is active, rather than
+one process per opened session. Sending again in the same session re-attaches.
+
+Session activity is host-owned (`sessionActivity`) and exposed via
+`GET /api/bridge/activity?bridge=<id>`; the sidebar polls it every 2s.
 
 ### Settings overlay
 
@@ -176,7 +187,8 @@ All routes sit below dsh's authenticated `/api` channel.
 | --- | --- |
 | `GET /api/bridge/settings` | Modes, engines, and redacted bridge list |
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | Manage saved bridges |
-| `GET/POST /api/bridge/status` | Read or refresh per-bridge connection state |
+| `GET/POST /api/bridge/status` | Read or refresh per-bridge readiness state |
+| `GET /api/bridge/activity?bridge=<id>` | Per-session running/idle/failed activity |
 | `GET /api/bridge/sessions?bridge=<id>` | List one bridge's sessions/workspaces |
 | `GET/POST /api/bridge/directories` | Browse / create local workspace directories |
 | `GET /api/bridge/session?key=…` | One normalized session history |
@@ -196,6 +208,29 @@ All routes sit below dsh's authenticated `/api` channel.
 A session key is `<bridgeId>.<base64url(nativeKey)>`. It resolves only against
 that bridge; changing a bridge's session root invalidates old paths exactly as
 before.
+
+## Session archiving
+
+Archive state is owned by the bridge host, not by browser storage. The host
+keeps `$DSH_HOME/bridge-archives.json` (versioned, 0600, atomic writes) as a
+per-bridge ordered set of native session keys. Pi JSONL files, workspace
+accounting, and message history are never modified.
+
+- `GET /api/bridge/sessions` returns both `archivedKeys` (browser-facing,
+  bridge-prefixed keys) and an `archived` flag on every session summary.
+- `POST /api/bridge/archive` takes `{ key, archived }` and returns the complete
+  authoritative key set, so open tabs converge on the same state.
+- Archived sessions cannot be attached or prompted through the bridge. An idle
+  attachment is closed when its session is archived; a running session is
+  rejected with `409` and must be aborted first.
+- Startup auto-connect warms the newest **unarchived** session.
+- Deleting a bridge also deletes its archive set.
+- Legacy browser-local `archivedKeys` are ignored rather than migrated, since
+  they were scoped to one browser profile and cannot be trusted as host state.
+
+This mirrors dsh Web's model of a durable registry-global archive set while
+keeping bridge instances isolated from one another. An external Pi CLI process
+is outside the bridge host and therefore cannot be stopped by this gate.
 
 ## Configuration
 

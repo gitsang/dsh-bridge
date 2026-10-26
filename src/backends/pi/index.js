@@ -172,8 +172,9 @@ export const piEngine = {
       case 'agent_start':
         return { type: 'agent-start' }
       case 'agent_end':
-      case 'agent_settled':
         return { type: 'agent-end' }
+      case 'agent_settled':
+        return { type: 'agent-settled', aborted: record.aborted === true }
       case 'message_start':
         return { type: 'message-start', message: record.message }
       case 'message_update':

@@ -100,7 +100,8 @@ test('request rejects after dispose', async () => {
 test('Pi adapter maps native events onto the backend-neutral vocabulary', async () => {
   const { piEngine } = await import('../src/backends/pi/index.js')
   assert.deepEqual(piEngine.normalizeEvent({ type: 'agent_start' }), { type: 'agent-start' })
-  assert.deepEqual(piEngine.normalizeEvent({ type: 'agent_settled' }), { type: 'agent-end' })
+  assert.deepEqual(piEngine.normalizeEvent({ type: 'agent_settled', aborted: false }), { type: 'agent-settled', aborted: false })
+  assert.deepEqual(piEngine.normalizeEvent({ type: 'agent_end' }), { type: 'agent-end' })
   assert.deepEqual(
     piEngine.normalizeEvent({ type: 'tool_execution_start', toolCallId: 't1', toolName: 'read', args: { path: 'x' } }),
     { type: 'tool-start', toolCallId: 't1', name: 'read', arguments: { path: 'x' } },

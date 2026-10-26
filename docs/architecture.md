@@ -84,6 +84,7 @@ A browser-facing session key is:
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | Manage bridge instances |
 | `GET/POST /api/bridge/sessions` | List one bridge's sessions/workspaces; create a session |
 | `GET/POST/PUT/DELETE /api/bridge/workspaces` | List, add, rename, soft-delete workspaces |
+| `POST /api/bridge/archive` | Archive / unarchive a session on the host |
 | `GET /api/bridge/session?key=…` | Full normalized history |
 | `GET /api/bridge/capabilities` | Protocol and live attachment table |
 | `POST /api/bridge/attach` | Start an engine attachment |
@@ -114,6 +115,42 @@ an id, display name, timestamps, and an optional `deletedAt` tombstone.
   workspace mutation. A filesystem watcher is deliberately unnecessary: Pi's
   JSONL remains the source of truth for sessions and titles.
 
+## Session archive state
+
+Pi has no native archive flag and browser `localStorage` does not travel with a
+bridge. The host therefore owns archive state in
+`$DSH_HOME/bridge-archives.json`:
+
+```json
+{
+  "version": 1,
+  "bridges": {
+    "pi-work": { "sessionKeys": ["<nativeKey>", "…"] }
+  }
+}
+```
+
+The store is versioned, mode 0600, and written atomically. A native key is
+scoped by its bridge id; the same Pi path archived in one bridge has no effect
+in another. Backend-neutral archive operations are:
+
+- `GET /api/bridge/sessions` → `archivedKeys` plus per-session `archived`;
+- `POST /api/bridge/archive` `{ key, archived }` → complete `archivedKeys`.
+
+The browser keeps `archivedKeys` only as the current projection for its
+existing `default | show | only` filter. It does not write archive state to
+storage. The host gate is applied in three places:
+
+1. `attach()` rejects an archived session;
+2. `prompt` rejects an archived session before dispatching;
+3. startup auto-connect ignores archived sessions when choosing a warm target.
+
+Archiving closes an idle attachment and refuses a running one with HTTP 409;
+unarchiving only removes the durable marker, so the session returns to its
+existing workspace/order position. Workspace accounting and Pi JSONL are never
+touched. Deleting a bridge prunes its archive entry. An external Pi process is
+outside this admission gate.
+
 ## Connection lifecycle and status
 
 The host keeps a per-bridge connection state, not a per-session one:
@@ -123,11 +160,22 @@ connections: bridgeId -> { state: idle|connecting|connected|failed,
                            error, checkedAt, latencyMs, detail }
 ```
 
-On host start (unless `BRIDGE_AUTO_CONNECT=0`) every bridge is auto-connected:
-the engine probe validates the launcher/session root, the newest session is
-listed, and Pi is attached over RPC. That attachment stays in the host
-`attachments` map and survives browser disconnects; closing the browser only
-removes an SSE subscriber.
+On host start every bridge is probed: the engine probe validates the launcher
+and session root only. **No agent is spawned at startup**, so the switcher dot
+means "this bridge is ready", not "a child process is running".
+
+Agent processes are per turn:
+
+1. Opening a session is a read-only JSONL parse; the composer is available.
+2. The first send calls `attach` (lazy) and then `prompt`.
+3. `agent-start` flips the session activity to `running` (sidebar spinner).
+4. `agent-settled` flips it to `idle` (green dot) and schedules a 1.2s
+   `closeSession`, which disposes the Pi child.
+
+`attachments` therefore holds at most one live process per actively running
+session, and `pendingAttachments` deduplicates concurrent spawns. Per-session
+activity lives in the host `sessionActivity` map and is exposed through
+`GET /api/bridge/activity?bridge=<id>`; the sidebar polls it every 2s.
 
 `GET /api/bridge/status` exposes the states and `POST` re-runs a probe.
 `attach()` deduplicates concurrent spawns with a pending-attachment map, so

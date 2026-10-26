@@ -19,13 +19,16 @@ Pi 是第一个完整支持的引擎。Codex、OpenCode、远程 DSH 会出现�
 - [x] CLI / Web 模式与按模式过滤的引擎列表
 - [x] Pi 引擎完整可用：JSONL 会话、RPC attach、事件归一化、prompt
 - [x] 左上角「本机 + 已配置桥接」下拉框，带实时连接状态点
-- [x] 启动自动连接：每个桥接预热最新会话
+- [x] 启动时只做就绪探测（不启动 agent 进程）
+- [x] 按轮次 lazy attach：发送时启动 Pi，结束即关闭
+- [x] 侧边栏会话状态：运行中转圈、完成变绿点
 - [x] 选中桥接后由侧边栏直接展示该桥接的工作区 / 会话
 - [x] 与 dsh Web 一致的侧边栏浏览器：按工作区 / 工作区树 / 单列表分组、手动 / 最近更新排序、会话筛选
 - [x] dsh 风格搜索按钮与结果列表
 - [x] dsh 风格“选择工作区目录”弹窗，可新建文件夹并加入工作区
 - [x] 每个工作区右侧的新建会话按钮，以及工作区重命名 / 软删除
 - [x] 工作区映射持久化到 `bridge-workspaces.json`，删除只做标记，不碰 Pi JSONL
+- [x] 按桥接隔离的归档状态持久化到 `bridge-archives.json`，并在 attach / prompt 时校验
 - [x] dsh 风格对话界面与 composer
 - [x] 与 dsh Web 一致的左右内容宽度拖拽手柄，共用宽度偏好
 - [x] composer 模型选择器与 dsh 风格 statusline（轮次/步数、Token、缓存命中）
@@ -56,15 +59,20 @@ Bridge 设置
 
 ### 连接生命周期
 
-dsh Host 启动时会自动连接所有已配置桥接。对 Pi 来说：
+dsh Host 启动时会对每个已配置桥接做一次就绪探测，**不会启动 agent 进程**。
+探测只检查 Pi 可执行文件和 Session 根目录。`GET /api/bridge/status` 返回该
+状态，下拉框打开时会轮询刷新。
 
-1. 探测可执行文件和 Session 根目录；
-2. 列出该桥接的会话；
-3. 用 Pi RPC 连接最新会话，并保持该进程存活。
+Agent 进程是**按轮次**的：
 
-`GET /api/bridge/status` 返回每个桥接的连接状态，下拉框打开时会轮询刷新。
-连接断开后状态点变红；重新检测或再次 attach 会恢复绿色。设置
-`BRIDGE_AUTO_CONNECT=0` 可以关闭自动连接，恢复按需连接。
+1. 打开会话只读取 JSONL 历史，composer 直接可用；
+2. 第一次发送调用 `POST /api/bridge/attach`，随后 `prompt`；
+3. 运行期间侧边栏该会话显示转圈；
+4. `agent_settled` 后显示绿点，并在约 1.2 秒后关闭 Pi 进程
+   （留一点时间把最后的事件刷给浏览器）。
+
+因此同一时刻每个桥接最多只有一个 Pi 进程，而不是「打开过几个会话就有几个」。
+同一会话再次发送会重新 attach。
 
 ### 设置悬浮层
 
@@ -155,9 +163,11 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 | --- | --- |
 | `GET /api/bridge/settings` | 模式、引擎和脱敏后的桥接列表 |
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | 管理桥接 |
-| `GET/POST /api/bridge/status` | 读取或刷新每个桥接的连接状态 |
+| `GET/POST /api/bridge/status` | 读取或刷新每个桥接的就绪状态 |
+| `GET /api/bridge/activity?bridge=<id>` | 每个会话的运行/空闲/失败状态 |
 | `GET/POST /api/bridge/sessions` | 列出某个桥接的会话/工作区；在指定工作区新建 Pi 会话 |
 | `GET/POST/PUT/DELETE /api/bridge/workspaces` | 工作区列表、添加、重命名、软删除 |
+| `POST /api/bridge/archive` | 在 host 端归档 / 取消归档单个会话 |
 | `GET/POST /api/bridge/directories` | 浏览 / 新建本地工作区目录 |
 | `GET /api/bridge/session?key=…` | 单个会话历史 |
 | `GET /api/bridge/capabilities` | 协议版本与 attachment 表 |
@@ -175,6 +185,26 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 
 会话 key 为 `<bridgeId>.<base64url(nativeKey)>`，只能解析到该桥接；修改桥接的
 会话根目录后，旧路径会像之前一样被拒绝。
+
+## 会话归档
+
+归档状态由 bridge host 持有，不再保存在浏览器里。host 把每个桥接的归档会话
+原生 key 有序集合写入 `$DSH_HOME/bridge-archives.json`（带版本、0600、原子写
+入）。不会修改 Pi JSONL、workspace 记账或消息历史。
+
+- `GET /api/bridge/sessions` 同时返回 `archivedKeys`（供浏览器使用的带桥接前缀
+  key）和每个会话摘要上的 `archived` 标记。
+- `POST /api/bridge/archive` 接收 `{ key, archived }`，返回完整的权威 key 集合，
+  多个标签页最终看到同一份状态。
+- 已归档会话不能通过 bridge attach 或 prompt。归档空闲会话会关闭它的
+  attachment；如果回合仍在运行则返回 `409`，需要先 abort。
+- 启动自动连接只预热最新的**未归档**会话。
+- 删除桥接时会一并删除该桥接的归档集合。
+- 旧版浏览器 localStorage 里的 `archivedKeys` 会被忽略而不是迁移，因为它只属于
+  某个浏览器 profile，不能当作 host 状态。
+- 外部 Pi CLI 直接打开的会话超出 bridge host 的控制范围，不受该 gate 限制。
+
+这与 dsh Web 的持久化归档集合模型一致，同时按 bridge 实例隔离。
 
 ## 配置
 

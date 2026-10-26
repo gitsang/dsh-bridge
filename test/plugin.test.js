@@ -96,6 +96,7 @@ test('registers the bridge-instance route table', () => {
   assert.equal(name, 'bridge')
   assert.deepEqual([...routes.keys()].sort(), [
     '/api/bridge/abort',
+    '/api/bridge/activity',
     '/api/bridge/archive',
     '/api/bridge/attach',
     '/api/bridge/bridges',
@@ -351,12 +352,24 @@ test('archives sessions on the host per bridge and blocks opening them', async (
       assert.deepEqual(restored.archivedKeys, [])
       const attached = await (await call(routes, 'attach', post({ key }))).json()
       assert.equal(attached.ok, true)
-      await call(routes, 'detach', post({ key }))
 
-      // Deleting a bridge prunes its archive set but leaves other bridges alone.
+      // Archiving an idle attached session closes the engine process; a later
+      // state request must report no attachment.
+      const archivedWhileAttached = await (await call(routes, 'archive', post({ key, archived: true }))).json()
+      assert.deepEqual(archivedWhileAttached.archivedKeys, [key])
+      const detachedByArchive = await call(routes, `state?key=${encodeURIComponent(key)}`)
+      assert.equal(detachedByArchive.status, 409)
+
+      await call(routes, 'archive', post({ key, archived: false }))
+
+      // Deleting a bridge prunes its own archive set. Archive membership in
+      // another bridge is independent and unaffected.
+      await call(routes, 'archive', post({ key, archived: true }))
       await call(routes, 'bridges', del({ id: secondBridge.id }))
       const finalStore = readArchiveStore({ ...process.env, DSH_HOME: home })
       assert.equal(finalStore.bridges[secondBridge.id], undefined)
+      assert.deepEqual(finalStore.bridges['pi-local'].sessionKeys, [decodeNativeKey(key, 'pi-local')])
+
     } finally {
       for (const dispose of disposers.reverse()) await dispose?.()
     }
@@ -537,7 +550,7 @@ test('a failing connection probe reports a red state with the reason', async () 
   assert.match(probed.bridges[0].error, /does not exist/)
 })
 
-test('auto-connect warms the newest session at host startup when enabled', async () => {
+test('startup readiness probe connects without spawning an agent', async () => {
   const { root } = await fixtureSession()
   const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
   const previousHome = process.env.DSH_HOME
@@ -556,8 +569,57 @@ test('auto-connect warms the newest session at host startup when enabled', async
     await new Promise((resolve) => setTimeout(resolve, 150))
     const status = await (await call(routes, 'status')).json()
     assert.equal(status.bridges[0].state, 'connected')
-    assert.match(status.bridges[0].detail.warmSession, /^pi-local\./)
+    assert.equal(status.bridges[0].detail.sessionsRoot, root)
+    const capabilities = await (await call(routes, 'capabilities')).json()
+    assert.deepEqual(capabilities.attachments, [])
     for (const dispose of disposers.reverse()) await dispose?.()
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    if (previousAuto === undefined) delete process.env.BRIDGE_AUTO_CONNECT
+    else process.env.BRIDGE_AUTO_CONNECT = previousAuto
+  }
+})
+
+test('lazy attach: prompt starts the agent and agent-settled closes it', async () => {
+  const { root } = await fixtureSession()
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const previousHome = process.env.DSH_HOME
+  const previousAuto = process.env.BRIDGE_AUTO_CONNECT
+  process.env.DSH_HOME = home
+  process.env.BRIDGE_AUTO_CONNECT = '0'
+  try {
+    const { ctx, routes, disposers } = host()
+    apply(ctx)
+    try {
+      await call(routes, 'bridges', put({
+        id: 'pi-local',
+        config: { sessionsRoot: root, binPath: fake },
+      }))
+      const listed = await (await call(routes, 'sessions?bridge=pi-local')).json()
+      const key = listed.sessions[0].key
+      assert.equal(listed.sessions[0].activity.state, 'unknown')
+
+      const detail = await (await call(routes, `session?key=${encodeURIComponent(key)}`)).json()
+      assert.equal(detail.attached, false)
+
+      const prompted = await (await call(routes, 'prompt', post({ key, message: 'ping' }))).json()
+      assert.equal(prompted.ok, true)
+      // The fake agent settles immediately, so this may already be idle.
+      assert.ok(['running', 'idle'].includes(prompted.activity.state))
+
+      await new Promise((resolve) => setTimeout(resolve, 700))
+      const activity = await (await call(routes, 'activity?bridge=pi-local')).json()
+      assert.equal(activity.activity.length, 1)
+      assert.equal(activity.activity[0].state, 'idle')
+
+      // The settled-turn timer closes the per-turn Pi process.
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+      const after = await (await call(routes, `session?key=${encodeURIComponent(key)}`)).json()
+      assert.equal(after.attached, false)
+    } finally {
+      for (const dispose of disposers.reverse()) await dispose?.()
+    }
   } finally {
     if (previousHome === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previousHome

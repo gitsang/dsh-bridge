@@ -161,6 +161,8 @@ class AttachmentSession {
     this.sequence = 0
     this.disposed = false
     this.intentionalClose = false
+    this.onAgentStart = null
+    this.onAgentSettled = null
   }
 
   publish(event, data) {
@@ -181,6 +183,7 @@ class AttachmentSession {
       session: this.session,
       pid: this.attachment.pid,
       running: this.attachment.running,
+      activity: typeof this.activity === 'function' ? this.activity() : null,
       sequence: this.sequence,
       recentEvents: this.ring.slice(-100),
     })
@@ -198,7 +201,11 @@ class AttachmentSession {
         ? this.engine.normalizeEvent(record)
         : { type: 'backend-event', event: record }
       const events = Array.isArray(normalized) ? normalized : normalized === null ? [] : [normalized]
-      for (const event of events) this.publish('bridge-event', event)
+      for (const event of events) {
+        if (event.type === 'agent-start') this.onAgentStart?.(event)
+        else if (event.type === 'agent-settled') this.onAgentSettled?.(event)
+        this.publish('bridge-event', event)
+      }
     })
     listen('ui-request', forward('bridge-ui-request'))
     listen('ui-notification', forward('bridge-ui-notification'))
@@ -216,6 +223,9 @@ class AttachmentSession {
     if (this.disposed) return
     this.disposed = true
     this.intentionalClose = true
+    // Let subscribers learn that the per-turn agent is gone before their
+    // streams are torn down; otherwise the browser keeps a stale attached flag.
+    this.publish('bridge-session-closed', { key: this.key, activity: typeof this.activity === 'function' ? this.activity() : null })
     for (const unsubscribe of this.subscriptions) unsubscribe()
     this.subscriptions = []
     for (const client of this.clients) client.close()
@@ -307,6 +317,8 @@ async function createDirectory(parentValue, nameValue) {
 export function apply(ctx) {
   const attachments = new Map()
   const pendingAttachments = new Map()
+  const sessionActivity = new Map()
+  const disposeTimers = new Map()
   const logger = ctx.logger
   let settings = readSettings(process.env, logger)
   let workspaceStore = readWorkspaceStore(process.env, logger)
@@ -322,6 +334,29 @@ export function apply(ctx) {
   const probeTokens = new Map()
 
   const engineAvailable = (engine) => engine.available !== false
+
+  /** Guardrail: a settled turn keeps its process only long enough to flush. */
+  const SESSION_SETTLE_CLOSE_MS = 1200
+
+  const activityView = (key) => ({
+    state: 'unknown',
+    startedAt: null,
+    completedAt: null,
+    error: null,
+    aborted: false,
+    ...(sessionActivity.get(key) ?? {}),
+  })
+
+  const setActivity = (key, patch) => {
+    sessionActivity.set(key, { ...activityView(key), ...patch })
+  }
+
+  const cancelDispose = (key) => {
+    const timer = disposeTimers.get(key)
+    if (timer === undefined) return
+    clearTimeout(timer)
+    disposeTimers.delete(key)
+  }
 
   const connectionView = (bridgeId) => {
     const value = connections.get(bridgeId)
@@ -344,11 +379,10 @@ export function apply(ctx) {
   const autoConnectEnabled = () => process.env.BRIDGE_AUTO_CONNECT !== '0'
 
   /**
-   * Startup connection. In auto-connect mode this warms the newest session of
-   * the bridge through the real RPC attachment, then leaves the green status
-   * tied to that live process. Without a session, a successful engine probe
-   * still reports the bridge as ready. With auto-connect disabled, only the
-   * probe runs (used by tests and by operators who want lazy sessions).
+   * Startup readiness probe. It answers "would a lazy attach for this bridge
+   * be able to start?" without spawning an agent: launcher plus session root.
+   * Sessions are attached only for the duration of one turn, so no process is
+   * created here and the bridge dot means "ready", not "child running".
    */
   const autoConnectBridge = async (bridge) => {
     const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -360,71 +394,15 @@ export function apply(ctx) {
       if (!engineAvailable(engine)) throw new Error(engine.unavailableReason ?? `${engine.label} is not available`)
       const config = configFor(bridge, engine)
       const detail = typeof engine.probe === 'function' ? await engine.probe(config, process.env) : null
-      const existing = [...attachments.values()].find((entry) => entry.bridgeId === bridge.id && entry.attachment.running)
-      if (existing !== undefined) {
-        if (probeTokens.get(bridge.id) !== token) return
-        setConnection(bridge.id, {
-          state: 'connected',
-          error: null,
-          checkedAt: Date.now(),
-          latencyMs: Date.now() - startedAt,
-          detail: wireSafe({ ...detail, warmSession: existing.key, pid: existing.attachment.pid }),
-        })
-        return
-      }
-      if (!autoConnectEnabled()) {
-        if (probeTokens.get(bridge.id) !== token) return
-        setConnection(bridge.id, {
-          state: 'connected',
-          error: null,
-          checkedAt: Date.now(),
-          latencyMs: Date.now() - startedAt,
-          detail: wireSafe(detail),
-        })
-        return
-      }
-
-      const listed = await engine.listSessions(config, process.env)
-      const sessions = Array.isArray(listed.sessions) ? listed.sessions : []
-      if (sessions.length === 0) {
-        if (probeTokens.get(bridge.id) !== token) return
-        setConnection(bridge.id, {
-          state: 'connected',
-          error: null,
-          checkedAt: Date.now(),
-          latencyMs: Date.now() - startedAt,
-          detail: wireSafe({ ...detail, warmSession: null }),
-        })
-        return
-      }
-      const openSessions = sessions.filter((session) => {
-        const nativeKey = session.nativeKey ?? session.key
-        return !isArchivedKey(nativeKey, bridge.id)
-      })
-      if (openSessions.length === 0) {
-        if (probeTokens.get(bridge.id) !== token) return
-        setConnection(bridge.id, {
-          state: 'connected',
-          error: null,
-          checkedAt: Date.now(),
-          latencyMs: Date.now() - startedAt,
-          detail: wireSafe({ ...detail, warmSession: null }),
-        })
-        return
-      }
-      const newest = [...openSessions].sort((left, right) => String(right.modified ?? '').localeCompare(String(left.modified ?? '')))[0]
-      const nativeKey = newest.nativeKey ?? newest.key
-      const key = encodeSessionKey(bridge.id, nativeKey)
-      const live = await attach(key)
       if (probeTokens.get(bridge.id) !== token) return
       setConnection(bridge.id, {
         state: 'connected',
         error: null,
         checkedAt: Date.now(),
         latencyMs: Date.now() - startedAt,
-        detail: wireSafe({ ...detail, warmSession: key, pid: live.attachment.pid }),
+        detail: wireSafe(detail),
       })
-      logger?.info?.(`bridge: auto-connected ${bridge.name} (${bridge.id}) warm session ${key}`)
+      logger?.info?.(`bridge: ready ${bridge.name} (${bridge.id})`)
     } catch (error) {
       if (probeTokens.get(bridge.id) !== token) return
       const message = error instanceof Error ? error.message : String(error)
@@ -435,7 +413,7 @@ export function apply(ctx) {
         latencyMs: Date.now() - startedAt,
         detail: null,
       })
-      logger?.warn?.(`bridge: auto-connect failed for ${bridge.name} (${bridge.id}): ${message}`)
+      logger?.warn?.(`bridge: readiness probe failed for ${bridge.name} (${bridge.id}): ${message}`)
     }
   }
 
@@ -556,6 +534,8 @@ export function apply(ctx) {
     if (pending !== undefined) return pending
 
     const job = (async () => {
+      cancelDispose(key)
+      setActivity(key, { state: 'connecting', startedAt: Date.now(), completedAt: null, error: null, aborted: false })
       const { bridge, engine, nativeKey, session } = await sessionFor(key)
       assertNotArchived(nativeKey, bridge.id)
       const config = configFor(bridge, engine)
@@ -580,12 +560,25 @@ export function apply(ctx) {
         throw failure
       }
       const live = new AttachmentSession({ bridge, engine, attachment, session, key }).watch()
+      live.activity = () => activityView(key)
+      live.onAgentStart = () => {
+        setActivity(key, { state: 'running', startedAt: Date.now(), completedAt: null, error: null, aborted: false })
+      }
+      live.onAgentSettled = (event) => {
+        setActivity(key, {
+          state: 'idle',
+          completedAt: Date.now(),
+          error: null,
+          aborted: event?.aborted === true,
+        })
+        scheduleDispose(key)
+      }
       live.onExit = () => {
         if (attachments.get(key) === live) attachments.delete(key)
         const stillLive = [...attachments.values()].some((entry) => entry.bridgeId === bridge.id && entry.attachment.running)
         if (stillLive) return
         if (live.intentionalClose) {
-          setConnection(bridge.id, { state: 'idle', error: null, checkedAt: Date.now(), latencyMs: null, detail: null })
+          setConnection(bridge.id, { state: 'connected', error: null, checkedAt: Date.now(), latencyMs: null, detail: null })
         } else {
           setConnection(bridge.id, {
             state: 'failed',
@@ -593,9 +586,15 @@ export function apply(ctx) {
             checkedAt: Date.now(),
             latencyMs: null,
           })
+          setActivity(key, {
+            state: 'failed',
+            completedAt: Date.now(),
+            error: 'agent process exited',
+          })
         }
       }
       attachments.set(key, live)
+      setActivity(key, { state: 'idle', startedAt: null, completedAt: null, error: null, aborted: false })
       setConnection(bridge.id, { state: 'connected', error: null, checkedAt: Date.now(), latencyMs: null })
       logger?.info?.(`bridge: attached ${bridge.name} (${bridge.id}) session ${session.id ?? nativeKey} (pid ${attachment.pid})`)
       return live
@@ -607,6 +606,25 @@ export function apply(ctx) {
     } finally {
       if (pendingAttachments.get(key) === job) pendingAttachments.delete(key)
     }
+  }
+
+  const closeSession = async (key) => {
+    cancelDispose(key)
+    const live = attachments.get(key)
+    if (live === undefined) return false
+    attachments.delete(key)
+    await live.close()
+    return true
+  }
+
+  const scheduleDispose = (key) => {
+    cancelDispose(key)
+    const timer = setTimeout(() => {
+      disposeTimers.delete(key)
+      void closeSession(key)
+    }, SESSION_SETTLE_CLOSE_MS)
+    timer.unref?.()
+    disposeTimers.set(key, timer)
   }
 
   const routes = [
@@ -671,7 +689,11 @@ export function apply(ctx) {
             root: result.root,
             ...workspaceState,
             archivedKeys,
-            sessions: sessions.map((session) => ({ ...session, archived: archivedSet.has(session.key) })),
+            sessions: sessions.map((session) => ({
+              ...session,
+              archived: archivedSet.has(session.key),
+              activity: activityView(session.key),
+            })),
           })
         } catch (error) {
           return failure(error, error.status ?? 500)
@@ -764,7 +786,12 @@ export function apply(ctx) {
         try {
           const key = requireString(new URL(request.url).searchParams.get('key'), 'key')
           const { session } = await sessionFor(key)
-          return json(200, { ok: true, session })
+          return json(200, {
+            ok: true,
+            session,
+            attached: attachments.has(key),
+            activity: activityView(key),
+          })
         } catch (error) {
           return failure(error, error.status ?? 400)
         }
@@ -789,7 +816,8 @@ export function apply(ctx) {
           engines: ENGINES.map(engineView),
           modes: BRIDGE_MODES,
           attachments: live,
-          protocol: 3,
+          activity: [...sessionActivity.entries()].map(([key, value]) => ({ key, ...activityView(key) })),
+          protocol: 4,
         })
       },
     },
@@ -804,7 +832,13 @@ export function apply(ctx) {
           const live = await attach(key)
           const state = await live.attachment.snapshot()
           live.publish('bridge-state', state)
-          return json(200, { ok: true, bridge: live.bridgeId, engine: live.engineId, state })
+          return json(200, {
+            ok: true,
+            bridge: live.bridgeId,
+            engine: live.engineId,
+            state,
+            activity: activityView(key),
+          })
         } catch (error) {
           return failure(error, error.status ?? 500)
         }
@@ -818,10 +852,8 @@ export function apply(ctx) {
         try {
           const body = await readJson(request)
           const key = requireString(body.key, 'key')
-          const live = attachments.get(key)
-          if (live === undefined) return json(200, { ok: true, detached: false })
-          attachments.delete(key)
-          await live.close()
+          const detached = await closeSession(key)
+          if (!detached) return json(200, { ok: true, detached: false })
           return json(200, { ok: true, detached: true })
         } catch (error) {
           return failure(error, error.status ?? 500)
@@ -852,15 +884,28 @@ export function apply(ctx) {
           const message = requireString(body.message, 'message')
           const { bridge, nativeKey } = resolveSessionKey(key)
           assertNotArchived(nativeKey, bridge.id)
-          const live = attachmentFor(key)
+          // Lazy attach: the first send starts the agent, later sends reuse it
+          // until the settled-turn timer closes it.
+          cancelDispose(key)
+          const live = await attach(key)
           const mode = body.mode ?? 'auto'
           const state = await live.attachment.getState()
+          setActivity(key, { state: 'running', startedAt: Date.now(), completedAt: null, error: null, aborted: false })
           let accepted
-          if (mode === 'steer') accepted = await live.attachment.steer(message)
-          else if (mode === 'followUp') accepted = await live.attachment.followUp(message)
-          else if (state.isStreaming === true) accepted = await live.attachment.steer(message)
-          else accepted = await live.attachment.prompt(message)
-          return json(202, { ok: true, accepted })
+          try {
+            if (mode === 'steer') accepted = await live.attachment.steer(message)
+            else if (mode === 'followUp') accepted = await live.attachment.followUp(message)
+            else if (state.isStreaming === true) accepted = await live.attachment.steer(message)
+            else accepted = await live.attachment.prompt(message)
+          } catch (error) {
+            setActivity(key, {
+              state: 'failed',
+              completedAt: Date.now(),
+              error: error instanceof Error ? error.message : String(error),
+            })
+            throw error
+          }
+          return json(202, { ok: true, accepted, activity: activityView(key) })
         } catch (error) {
           return failure(error, error.status ?? 409)
         }
@@ -897,6 +942,33 @@ export function apply(ctx) {
           return json(202, { ok: true })
         } catch (error) {
           return failure(error, error.status ?? 409)
+        }
+      },
+    },
+    {
+      path: `${ROUTE}/activity`,
+      methods: ['GET'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        try {
+          const bridgeId = new URL(request.url).searchParams.get('bridge')
+          if (bridgeId === null || bridgeId === '') {
+            return json(200, {
+              ok: true,
+              activity: [...sessionActivity.entries()].map(([key, value]) => ({ key, ...activityView(key) })),
+            })
+          }
+          const bridge = bridgeFor(bridgeId)
+          const prefix = `${bridge.id}.`
+          return json(200, {
+            ok: true,
+            bridge: bridge.id,
+            activity: [...sessionActivity.entries()]
+              .filter(([key]) => key.startsWith(prefix))
+              .map(([key]) => ({ key, ...activityView(key) })),
+          })
+        } catch (error) {
+          return failure(error, error.status ?? 500)
         }
       },
     },
@@ -996,6 +1068,13 @@ export function apply(ctx) {
               }
             }
             const result = saveArchiveStore(archiveNativeSession(archiveStore, bridge.id, nativeKey))
+            // An idle attachment has no work to stop, but keeping it alive would
+            // leave an engine process attached to a session the user archived.
+            const liveAttachment = attachments.get(key)
+            if (liveAttachment !== undefined) {
+              attachments.delete(key)
+              await liveAttachment.close()
+            }
             logger?.info?.(`bridge: archived session ${nativeKey} (${bridge.id})`)
             return json(200, {
               ok: true,
