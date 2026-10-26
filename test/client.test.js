@@ -103,6 +103,19 @@ test('registers the Bridge panel, brand bridge switcher, shell settings overlay,
   assert.equal(registered.length, 4)
 })
 
+test('workspace rows expose new-session, rename, and soft-delete actions', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  assert.match(source, /IconNewChatOutlineRegular/)
+  assert.match(source, /newSessionIn/)
+  assert.match(source, /beginWorkspaceAction\('rename'/)
+  assert.match(source, /beginWorkspaceAction\('delete'/)
+  assert.match(source, /api\('sessions', \{\s*method: 'POST'/)
+  assert.match(source, /cwd: workspace\.path \?\? workspace\.cwd/)
+  assert.match(source, /api\('workspaces', \{\s*method: 'PUT'/)
+  assert.match(source, /api\('workspaces', \{\s*method: 'DELETE'/)
+  assert.match(source, /pendingAttachKey/)
+})
+
 test('bridge dictionaries describe bridges as saved instances, not engines', () => {
   const exports = moduleExports()
   const dictionaries = []
@@ -286,4 +299,23 @@ test('Bridge menu puts the status dot where the menu check sits', async () => {
   assert.match(source, /\.dshBridge_statusDotSlot\{[^}]*width:14px;height:14px/)
   assert.match(source, /\.dshBridge_statusDot\{[^}]*width:7px;height:7px/)
   assert.match(source, /\[role="menuitem"\]:has\(\.dshBridge_statusDotSlot\) > svg\{display:none\}/)
+})
+
+test('Bridge conversations share dsh Web content-width handles', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  assert.match(source, /className: 'wSkVaW_widthHandle'/)
+  assert.match(source, /'data-side': side/)
+  assert.match(source, /'data-width-handle': side/)
+  assert.match(source, /\['left', 'right'\]\.map\(\(side\) => h\(BridgeWidthHandle/)
+  assert.match(source, /setPointerCapture\(event\.pointerId\)/)
+  assert.match(source, /writeContentWidthPreference/)
+  assert.match(source, /dsh\.conversation\.contentWidth/)
+  assert.match(source, /\.dshBridge_column\{[^}]*max-width:var\(--dsh-chat-content-width/)
+  assert.match(source, /\.wSkVaW_widthHandle\[data-side=left\]\{right:calc\(50% \+ var\(--dsh-chat-content-width\) \/ 2 \+ 24px\)\}/)
+
+  const exports = moduleExports()
+  assert.equal(exports.__test.resolveContentWidth(1200, null), 768)
+  assert.equal(exports.__test.resolveContentWidth(1200, 1000), 1000)
+  assert.equal(exports.__test.resolveContentWidth(1200, 100), 640)
+  assert.equal(exports.__test.resolveContentWidth(1200, 5000), 1024)
 })

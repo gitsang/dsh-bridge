@@ -16,7 +16,6 @@
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
-    "icon.svg",
     "LICENSE"
   ],
   "scripts": {
@@ -56,7 +55,6 @@
     "@deepseek-ai/dsh-client-ui-primitives": "0.2.0-rc.2",
     "react": "^18.2.0"
   },
-  "icon": "./icon.svg",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/gitsang/dsh-bridge.git"

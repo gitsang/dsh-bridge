@@ -8,7 +8,9 @@
  * needs the durable view, and keeping the parser here avoids a hard runtime
  * dependency on one Pi version.
  */
+import { randomUUID } from 'node:crypto'
 import { closeSync, createReadStream, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
+import { mkdir, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 
@@ -252,6 +254,39 @@ function summarizeSessionText(text, filePath, stats) {
     messageCount: undefined,
     firstMessage: clip(textOfContent(firstUser?.content)),
   }
+}
+
+/**
+ * Encode a cwd into the same project-directory name Pi uses below its session
+ * root. Keeping this local avoids importing the Pi CLI just to create a file.
+ */
+export function piSessionDirFor(cwd, root = piSessionsRoot()) {
+  const resolvedCwd = resolve(cwd)
+  const safePath = `--${resolvedCwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`
+  return join(resolve(root), safePath)
+}
+
+/**
+ * Create one empty, Pi-compatible JSONL session for a workspace.
+ *
+ * Pi normally defers creating a session file until the first user message.
+ * The Bridge needs a stable file/key before the composer can attach, so we
+ * write the session header ourselves. Pi opens this file by `--session` and
+ * appends its own entries when the user sends the first message.
+ */
+export async function createPiSession(cwd, root = piSessionsRoot()) {
+  const resolvedCwd = resolve(cwd)
+  const info = await stat(resolvedCwd)
+  if (!info.isDirectory()) throw Object.assign(new Error(`not a directory: ${resolvedCwd}`), { status: 400 })
+  const directory = piSessionDirFor(resolvedCwd, root)
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  const id = randomUUID()
+  const timestamp = new Date().toISOString()
+  const fileTimestamp = timestamp.replace(/[:.]/g, '-')
+  const file = join(directory, `${fileTimestamp}_${id}.jsonl`)
+  const header = { type: 'session', version: 3, id, timestamp, cwd: resolvedCwd }
+  await writeFile(file, `${JSON.stringify(header)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+  return readPiSessionSummary(file)
 }
 
 /** List Pi sessions for the sidebar without opening full histories. */

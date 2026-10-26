@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { afterEach, beforeEach } from 'node:test'
 import { apply, name, sessionKey } from '../src/index.js'
+import { readArchiveStore } from '../src/archives.js'
 
 const fake = new URL('./fixtures/fake-pi.mjs', import.meta.url).pathname
 
@@ -94,6 +96,7 @@ test('registers the bridge-instance route table', () => {
   assert.equal(name, 'bridge')
   assert.deepEqual([...routes.keys()].sort(), [
     '/api/bridge/abort',
+    '/api/bridge/archive',
     '/api/bridge/attach',
     '/api/bridge/bridges',
     '/api/bridge/capabilities',
@@ -110,6 +113,7 @@ test('registers the bridge-instance route table', () => {
     '/api/bridge/stats',
     '/api/bridge/status',
     '/api/bridge/ui-response',
+    '/api/bridge/workspaces',
   ])
 })
 
@@ -191,7 +195,11 @@ test('lists and reads Pi sessions through a configured bridge', async () => {
       assert.equal(listed.sessions[0].id, 'session-x')
       assert.equal(listed.sessions[0].bridge, 'pi-local')
       assert.equal(listed.sessions[0].engine, 'pi')
-      assert.deepEqual(listed.workspaces, [{ id: '/work', name: '/work', path: '/work', sessionCount: 1 }])
+      assert.equal(listed.workspaces.length, 1)
+      assert.equal(listed.workspaces[0].path, '/work')
+      assert.equal(listed.workspaces[0].name, 'work')
+      assert.equal(listed.workspaces[0].sessionCount, 1)
+      assert.equal(typeof listed.workspaces[0].id, 'string')
 
       const key = listed.sessions[0].key
       assert.notEqual(key, sessionKey(file))
@@ -208,6 +216,161 @@ test('lists and reads Pi sessions through a configured bridge', async () => {
     else process.env.PI_CODING_AGENT_SESSION_DIR = previousRoot
   }
 })
+
+test('creates a new Pi session inside a workspace', async () => {
+  const { root } = await fixtureSession()
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  try {
+    const { ctx, routes } = host()
+    apply(ctx)
+    await call(routes, 'bridges', put({ id: 'pi-local', config: { sessionsRoot: root } }))
+
+    const cwd = join(root, '--work--')
+    const created = await (await call(routes, 'sessions', post({ bridge: 'pi-local', cwd }))).json()
+    assert.equal(created.ok, true)
+    assert.equal(created.session.cwd, cwd)
+    assert.equal(created.session.name, undefined)
+    assert.equal(created.session.bridge, 'pi-local')
+
+    const listed = await (await call(routes, 'sessions?bridge=pi-local')).json()
+    assert.equal(listed.sessions.length, 2)
+    assert.ok(listed.sessions.some((session) => session.key === created.session.key))
+    assert.equal(listed.workspaces.length, 2)
+    assert.equal(listed.workspaces.find((workspace) => workspace.path === cwd).sessionCount, 1)
+
+    const invalid = await call(routes, 'sessions', post({ bridge: 'pi-local', cwd: '/definitely/missing/workspace' }))
+    assert.equal(invalid.status, 404)
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+  }
+})
+
+test('renames workspaces durably and soft-deletes without touching Pi data', async () => {
+  const { root, file } = await fixtureSession()
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  try {
+    const { ctx, routes } = host()
+    apply(ctx)
+    await call(routes, 'bridges', put({ id: 'pi-local', config: { sessionsRoot: root } }))
+    const initial = await (await call(routes, 'workspaces?bridge=pi-local')).json()
+    const workspace = initial.workspaces[0]
+
+    const renamed = await (await call(routes, 'workspaces', put({
+      bridge: 'pi-local',
+      id: workspace.id,
+      name: 'Renamed workspace',
+    }))).json()
+    assert.equal(renamed.workspace.name, 'Renamed workspace')
+
+    const afterRename = await (await call(routes, 'workspaces?bridge=pi-local')).json()
+    assert.equal(afterRename.workspaces[0].name, 'Renamed workspace')
+
+    const deleted = await (await call(routes, 'workspaces', del({ bridge: 'pi-local', id: workspace.id }))).json()
+    assert.equal(deleted.deleted, true)
+    assert.deepEqual(deleted.workspaces, [])
+
+    // Re-querying the engine must not resurrect a tombstoned workspace.
+    const afterDelete = await (await call(routes, 'sessions?bridge=pi-local')).json()
+    assert.deepEqual(afterDelete.workspaces, [])
+    assert.deepEqual(afterDelete.removedWorkspacePaths, ['/work'])
+    assert.equal(afterDelete.sessions.length, 1)
+    assert.equal(typeof afterDelete.sessions[0].key, 'string')
+    assert.equal(existsSync(file), true)
+    assert.equal(existsSync(root), true)
+
+    // A different folder can be added while the original tombstone remains;
+    // the deleted path stays ungrouped instead of being discovered again.
+    const readded = await (await call(routes, 'workspaces', post({ bridge: 'pi-local', path: join(root, '--work--') }))).json()
+    assert.equal(readded.workspace.name, '--work--')
+    assert.deepEqual(readded.removedWorkspacePaths, ['/work'])
+    const finalList = await (await call(routes, 'sessions?bridge=pi-local')).json()
+    assert.equal(finalList.workspaces.length, 1)
+    assert.equal(finalList.workspaces[0].path, join(root, '--work--'))
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+  }
+})
+
+
+test('archives sessions on the host per bridge and blocks opening them', async () => {
+  const first = await fixtureSession()
+  const second = await fixtureSession()
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  try {
+    const { ctx, routes, disposers } = host()
+    apply(ctx)
+    try {
+      await call(routes, 'bridges', put({
+        id: 'pi-local',
+        config: { sessionsRoot: first.root, binPath: fake },
+      }))
+      const created = await (await call(routes, 'bridges', post({
+        name: 'Second Pi',
+        mode: 'cli',
+        engine: 'pi',
+        config: { sessionsRoot: second.root, binPath: fake },
+      }))).json()
+      const secondBridge = created.bridges.find((bridge) => bridge.name === 'Second Pi')
+
+      const firstList = await (await call(routes, 'sessions?bridge=pi-local')).json()
+      const secondList = await (await call(routes, `sessions?bridge=${encodeURIComponent(secondBridge.id)}`)).json()
+      const key = firstList.sessions[0].key
+      assert.deepEqual(firstList.archivedKeys, [])
+      assert.equal(firstList.sessions[0].archived, false)
+
+      const archived = await (await call(routes, 'archive', post({ key, archived: true }))).json()
+      assert.equal(archived.ok, true)
+      assert.deepEqual(archived.archivedKeys, [key])
+
+      const afterArchive = await (await call(routes, 'sessions?bridge=pi-local')).json()
+      assert.deepEqual(afterArchive.archivedKeys, [key])
+      assert.equal(afterArchive.sessions[0].archived, true)
+      assert.equal(afterArchive.sessions.length, 1)
+
+      // Archive membership is bridge-scoped: the other bridge sees nothing.
+      const otherList = await (await call(routes, `sessions?bridge=${encodeURIComponent(secondBridge.id)}`)).json()
+      assert.deepEqual(otherList.archivedKeys, [])
+      assert.equal(otherList.sessions[0].archived, false)
+
+      const blocked = await call(routes, 'attach', post({ key }))
+      assert.equal(blocked.status, 409)
+      assert.match((await blocked.json()).error, /archived/)
+
+      const store = readArchiveStore({ ...process.env, DSH_HOME: home })
+      assert.deepEqual(store.bridges['pi-local'].sessionKeys, [decodeNativeKey(key, 'pi-local')])
+
+      const restored = await (await call(routes, 'archive', post({ key, archived: false }))).json()
+      assert.deepEqual(restored.archivedKeys, [])
+      const attached = await (await call(routes, 'attach', post({ key }))).json()
+      assert.equal(attached.ok, true)
+      await call(routes, 'detach', post({ key }))
+
+      // Deleting a bridge prunes its archive set but leaves other bridges alone.
+      await call(routes, 'bridges', del({ id: secondBridge.id }))
+      const finalStore = readArchiveStore({ ...process.env, DSH_HOME: home })
+      assert.equal(finalStore.bridges[secondBridge.id], undefined)
+    } finally {
+      for (const dispose of disposers.reverse()) await dispose?.()
+    }
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+  }
+})
+
+function decodeNativeKey(key, bridgeId) {
+  const separator = key.lastIndexOf('.')
+  assert.equal(key.slice(0, separator), bridgeId)
+  return Buffer.from(key.slice(separator + 1), 'base64url').toString('utf8')
+}
 
 test('supports multiple Pi bridges with independent session roots', async () => {
   const first = await fixtureSession()

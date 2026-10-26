@@ -82,7 +82,8 @@ A browser-facing session key is:
 | --- | --- |
 | `GET /api/bridge/settings` | Modes, engines, and redacted bridges |
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | Manage bridge instances |
-| `GET /api/bridge/sessions?bridge=<id>` | One bridge's workspace/session summaries |
+| `GET/POST /api/bridge/sessions` | List one bridge's sessions/workspaces; create a session |
+| `GET/POST/PUT/DELETE /api/bridge/workspaces` | List, add, rename, soft-delete workspaces |
 | `GET /api/bridge/session?key=…` | Full normalized history |
 | `GET /api/bridge/capabilities` | Protocol and live attachment table |
 | `POST /api/bridge/attach` | Start an engine attachment |
@@ -94,6 +95,24 @@ A browser-facing session key is:
 | `POST /api/bridge/ui-response` | Answer an extension dialog |
 
 Bridge edits/deletes are rejected while that bridge has a live attachment.
+
+## Workspace metadata
+
+Pi session headers supply a `cwd` but no user-editable workspace title and no
+delete state. The host therefore keeps `$DSH_HOME/bridge-workspaces.json`
+(versioned, 0600, atomic writes) as a per-bridge mapping from workspace path to
+an id, display name, timestamps, and an optional `deletedAt` tombstone.
+
+- Listing sessions merges every engine-discovered `cwd` into this store, but
+  never overwrites an existing name or revives a tombstone.
+- Rename changes only the stored display name.
+- Delete is a soft delete. The folder, Pi JSONL, and every message remain; the
+  path is reported as `removedWorkspacePaths` so the browser files those sessions
+  under Ungrouped instead of deriving the group again from `cwd`.
+- The browser refreshes the Pi session list on panel load, explicit Refresh,
+  window focus/visibility, an agent settling, a session-name event, and every
+  workspace mutation. A filesystem watcher is deliberately unnecessary: Pi's
+  JSONL remains the source of truth for sessions and titles.
 
 ## Connection lifecycle and status
 

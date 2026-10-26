@@ -25,7 +25,10 @@ the add-bridge form but are marked as pending until their adapters are connected
 - [x] dsh-identical workspace browser: workspace / workspace-tree / flat grouping, manual / last-updated ordering, session filter
 - [x] dsh-style search button and result list
 - [x] dsh-style Select Workspace Directory dialog with New folder
+- [x] Per-workspace New Session action plus workspace rename / soft delete
+- [x] Durable workspace mapping in `bridge-workspaces.json`; delete marks only, never touches Pi JSONL
 - [x] dsh-styled transcript and composer
+- [x] Draggable left/right content-width handles, sharing dsh Web's width preference
 - [x] Composer model picker and a dsh-style statusline (turns/steps, tokens, cache hit)
 - [ ] Codex engine adapter
 - [ ] OpenCode engine adapter

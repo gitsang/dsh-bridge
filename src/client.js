@@ -43,6 +43,7 @@ window.__ModuleLoader__.load({
       IconFolderCloseRegular,
       IconFolderOpenRegular,
       IconGaugeOutlineRegular,
+      IconNewChatOutlineRegular,
       IconPauseOutlineRegular,
       IconPlusOutlineRegular,
       IconProjectAddOutlineRegular,
@@ -79,6 +80,7 @@ window.__ModuleLoader__.load({
         bridge: null,
         sessions: [],
         workspaces: [],
+        removedWorkspacePaths: [],
         loading: false,
         loadError: null,
         selectedKey: null,
@@ -91,6 +93,7 @@ window.__ModuleLoader__.load({
         sessionOrderByAccount: {},
         archivedKeys: [],
         extraWorkspaces: [],
+        pendingAttachKey: null,
       },
       listeners: new Set(),
       selectHandler: null,
@@ -133,7 +136,6 @@ window.__ModuleLoader__.load({
           archivedFilter: state.archivedFilter,
           groupExpansion: state.groupExpansion,
           sessionOrderByAccount: state.sessionOrderByAccount,
-          archivedKeys: state.archivedKeys,
           extraWorkspaces: state.extraWorkspaces,
         })
       },
@@ -183,6 +185,48 @@ window.__ModuleLoader__.load({
     const WORKSPACE_VIEW_STORAGE = 'dsh.bridge.workspace.view.v1'
     const FLAT_ORDER_KEY = '__flat_session_order__'
     const SEARCH_SLIDE_MS = 300
+    /** Match dsh-web conversations: both surfaces share one persisted width. */
+    const CONTENT_WIDTH_STORAGE = 'dsh.conversation.contentWidth'
+    const CONTENT_MIN = 640
+    const CONTENT_EDGE_BUDGET = 176
+    const WHEEL_DELTA_LINE = 1
+    const WHEEL_DELTA_PAGE = 2
+    const FALLBACK_WHEEL_LINE_PX = 16
+
+    function readContentWidthPreference() {
+      try {
+        const raw = window?.localStorage?.getItem(CONTENT_WIDTH_STORAGE)
+        if (raw === null || raw === undefined || raw === '') return null
+        const value = Number(raw)
+        return Number.isFinite(value) && value > 0 ? value : null
+      } catch {
+        return null
+      }
+    }
+
+    function writeContentWidthPreference(width) {
+      try {
+        window?.localStorage?.setItem(CONTENT_WIDTH_STORAGE, `${width}`)
+      } catch {
+        // Private browsing/storage pressure must not break resizing.
+      }
+    }
+
+    /** Resolve a stored/dragged preference against the current panel width. */
+    function resolveContentWidth(columnWidth, preference) {
+      const max = Math.max(CONTENT_MIN, columnWidth - CONTENT_EDGE_BUDGET)
+      if (preference !== null) return Math.min(Math.max(preference, CONTENT_MIN), max)
+      return Math.max(680, Math.min(columnWidth * .64, 920))
+    }
+
+    function wheelDeltaY(event, scrollport) {
+      if (event.deltaMode === WHEEL_DELTA_LINE) {
+        const lineHeight = Number.parseFloat(getComputedStyle(scrollport).lineHeight)
+        return event.deltaY * (Number.isFinite(lineHeight) ? lineHeight : FALLBACK_WHEEL_LINE_PX)
+      }
+      if (event.deltaMode === WHEEL_DELTA_PAGE) return event.deltaY * scrollport.clientHeight
+      return event.deltaY
+    }
 
     function readStoredView(bridgeId) {
       const fallback = {
@@ -207,7 +251,9 @@ window.__ModuleLoader__.load({
           archivedFilter: ['default', 'show', 'only'].includes(stored.archivedFilter) ? stored.archivedFilter : fallback.archivedFilter,
           groupExpansion: stored.groupExpansion && typeof stored.groupExpansion === 'object' ? stored.groupExpansion : {},
           sessionOrderByAccount: stored.sessionOrderByAccount && typeof stored.sessionOrderByAccount === 'object' ? stored.sessionOrderByAccount : {},
-          archivedKeys: Array.isArray(stored.archivedKeys) ? stored.archivedKeys.filter((key) => typeof key === 'string') : [],
+          // Archive state is host-owned now. Ignore legacy browser-local keys
+          // so a stale tab cannot resurrect an old archive decision.
+          archivedKeys: [],
           extraWorkspaces: Array.isArray(stored.extraWorkspaces)
             ? stored.extraWorkspaces.filter((workspace) => workspace && typeof workspace.path === 'string' && workspace.path !== '')
             : [],
@@ -682,8 +728,57 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function BridgeWorkspaceRow({ group, expanded, active, onToggle, t }) {
+    function BridgeWorkspaceRow({ group, expanded, active, onToggle, onCreate, onRename, onDelete, t }) {
+      const [menuOpen, setMenuOpen] = useState(false)
       const label = group.workspaceId === undefined ? t('groupUngrouped') : group.label
+      const actions = group.workspaceId === undefined
+        ? null
+        : h(
+            'span',
+            {
+              className: 'dshBridge_row_rowActions',
+              onClick: (event) => event.stopPropagation(),
+            },
+            h(Menu, {
+              open: menuOpen,
+              onClose: () => setMenuOpen(false),
+              items: [
+                { id: 'rename', label: t('renameWorkspace'), icon: h(IconEditOutlineRegular, {}) },
+                { id: 'delete', label: t('deleteWorkspace'), icon: h(IconTrashOutlineRegular, {}), danger: true },
+              ],
+              portal: true,
+              closeOnPointerLeave: true,
+              onSelect: (id) => {
+                setMenuOpen(false)
+                if (id === 'rename') onRename()
+                else if (id === 'delete') onDelete()
+              },
+              anchor: h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dshBridge_row_iconButton',
+                  'aria-label': t('workspaceActions').replace('{name}', label),
+                  onClick: () => setMenuOpen((value) => !value),
+                },
+                h(IconEllipsisOutlineRegular, {}),
+              ),
+            }),
+            h(
+              Tooltip,
+              { label: t('newSession'), side: 'bottom', delayMs: 500 },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dshBridge_row_iconButton',
+                  'aria-label': t('newSessionIn').replace('{name}', label),
+                  onClick: onCreate,
+                },
+                h(IconNewChatOutlineRegular, {}),
+              ),
+            ),
+          )
       return h(
         HoverCard,
         {
@@ -691,6 +786,7 @@ window.__ModuleLoader__.load({
           copyText: group.cwd ?? undefined,
           copyLabel: t('copy'),
           copiedLabel: t('hoverCopied'),
+          disabled: menuOpen,
           content: h(
             'div',
             { className: 'dshBridge_row_hoverContent' },
@@ -701,7 +797,7 @@ window.__ModuleLoader__.load({
           anchor: h(
             'div',
             {
-              className: 'dshBridge_row_projectRow',
+              className: `dshBridge_row_projectRow${menuOpen ? ' dshBridge_row_menuOpen' : ''}`,
               'data-row-key': `workspace:${group.key}`,
               role: 'treeitem',
               'aria-expanded': expanded,
@@ -722,8 +818,79 @@ window.__ModuleLoader__.load({
               { className: 'dshBridge_row_projectText' },
               h('span', { className: 'dshBridge_row_title', title: group.cwd ?? label }, label),
             ),
+            actions,
           ),
         },
+      )
+    }
+
+    function BridgeWorkspaceActionDialog({ action, target, busy, error, t, onClose, onRename, onDelete }) {
+      const [name, setName] = useState(target?.name ?? target?.label ?? '')
+      useEffect(() => {
+        setName(target?.name ?? target?.label ?? '')
+      }, [target])
+      if (target === null) return null
+      const renaming = action === 'rename'
+      const title = renaming ? t('renameWorkspace') : t('deleteWorkspace')
+      const body = renaming
+        ? h(
+            'div',
+            { className: 'dshBridge_form' },
+            h('div', { className: 'dshBridge_label' }, t('workspaceName')),
+            h('input', {
+              className: 'dshBridge_input',
+              value: name,
+              maxLength: 200,
+              'data-modal-autofocus': true,
+              placeholder: t('workspaceRenamePlaceholder'),
+              onChange: (event) => setName(event.target.value),
+              onKeyDown: (event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  if (name.trim() !== '' && !busy) onRename(name.trim())
+                }
+                if (event.key === 'Escape') {
+                  event.stopPropagation()
+                  if (!busy) onClose()
+                }
+              },
+            }),
+            h('div', { className: 'dshBridge_desc' }, target.cwd ?? target.path ?? ''),
+            error !== null ? h('div', { className: 'dshBridge_error', role: 'alert' }, error) : null,
+          )
+        : h(
+            'div',
+            { className: 'dshBridge_form' },
+            h('div', { className: 'dshBridge_desc' }, t('deleteWorkspaceDesc').replace('{name}', target.label)),
+            error !== null ? h('div', { className: 'dshBridge_error', role: 'alert' }, error) : null,
+          )
+      const footer = h(
+        React.Fragment,
+        null,
+        h(Button, { variant: 'ghost', size: 'sm', disabled: busy, onClick: onClose }, t('dialogCancel')),
+        h(
+          Button,
+          {
+            variant: renaming ? 'primary' : 'outline',
+            size: 'sm',
+            className: renaming ? undefined : 'dshBridge_dangerButton',
+            disabled: busy || (renaming && name.trim() === ''),
+            onClick: () => renaming ? onRename(name.trim()) : onDelete(),
+          },
+          busy ? t('savingBridge') : renaming ? t('saveBridge') : t('deleteWorkspace'),
+        ),
+      )
+      return h(
+        Modal,
+        {
+          open: true,
+          onClose,
+          title,
+          closeLabel: t('dialogCancel'),
+          className: 'dshBridge_workspaceActionModal',
+          footer,
+        },
+        body,
       )
     }
 
@@ -932,6 +1099,15 @@ window.__ModuleLoader__.load({
       emptyArchived: '暂无已归档会话',
       emptyViewOthers: '查看其他会话',
       addWorkspace: '添加工作区',
+      newSession: '新建会话',
+      newSessionIn: '在“{name}”中新建会话',
+      newSessionPickWorkspace: '请点击某个工作区右侧的新建会话按钮。',
+      newSessionFailed: '无法新建会话',
+      workspaceAddFailed: '无法添加工作区',
+      workspaceRenamed: '工作区已重命名',
+      workspaceDeleted: '工作区已删除（会话和文件夹均保留）',
+      workspaceName: '工作区名称',
+      workspaceRenamePlaceholder: '输入工作区显示名称',
       searchClear: '清除搜索',
       searchResults: '搜索结果',
       archiveSession: '归档会话',
@@ -1113,6 +1289,15 @@ window.__ModuleLoader__.load({
       emptyArchived: 'No archived sessions yet',
       emptyViewOthers: 'View other sessions',
       addWorkspace: 'Add workspace',
+      newSession: 'New session',
+      newSessionIn: 'New session in {name}',
+      newSessionPickWorkspace: 'Choose the new-session button on a workspace row.',
+      newSessionFailed: 'Could not create a session',
+      workspaceAddFailed: 'Could not add workspace',
+      workspaceRenamed: 'Workspace renamed',
+      workspaceDeleted: 'Workspace removed; sessions and folders were kept',
+      workspaceName: 'Workspace name',
+      workspaceRenamePlaceholder: 'Enter a workspace display name',
       searchClear: 'Clear search',
       searchResults: 'Search results',
       archiveSession: 'Archive session',
@@ -1215,10 +1400,19 @@ window.__ModuleLoader__.load({
       '.dshBridge_headTitleText{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.dshBridge_headMeta{display:flex;align-items:center;gap:8px;min-width:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,currentColor);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.dshBridge_headSpacer{flex:1;min-width:8px}',
-      '.dshBridge_body{display:flex;flex:1;min-height:0}',
+      '.dshBridge_body{position:relative;display:flex;flex:1;min-height:0;--dsh-chat-content-width:var(--dsh-chat-user-width,clamp(680px, calc(var(--dsh-conversation-column-width,0px) * .64), 920px));--dsh-composer-card-max-width:calc(var(--dsh-chat-content-width) + 32px);--dsh-composer-side-clearance:16px;--dsh-composer-dock-inset:8px}',
       '.dshBridge_centre{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}',
       '.dshBridge_scroll{flex:1;min-height:0;overflow:auto;scroll-behavior:auto}',
-      '.dshBridge_column{box-sizing:border-box;max-width:712px;margin:0 auto;padding:20px 24px 8px}',
+      '.dshBridge_column{box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width,712px);margin:0 auto;padding:20px 24px 8px}',
+      '.wSkVaW_widthHandle{z-index:0;width:min(10px, calc((100% - var(--dsh-chat-content-width)) / 2 - 24px - 24px));cursor:col-resize;position:absolute;top:0;bottom:0}',
+      '.wSkVaW_widthHandle[data-side=left]{right:calc(50% + var(--dsh-chat-content-width) / 2 + 24px)}',
+      '.wSkVaW_widthHandle[data-side=right]{left:calc(50% + var(--dsh-chat-content-width) / 2 + 24px)}',
+      '.wSkVaW_widthHandle:after{content:"";background:linear-gradient(to bottom, transparent calc(var(--dsh-width-handle-pointer-y,50%) - 36px), var(--dsw-alias-scrollbar-bg-l1) calc(var(--dsh-width-handle-pointer-y,50%) - 8px), var(--dsw-alias-scrollbar-bg-l1) calc(var(--dsh-width-handle-pointer-y,50%) + 8px), transparent calc(var(--dsh-width-handle-pointer-y,50%) + 36px));opacity:0;pointer-events:none;border-radius:2px;width:2px;position:absolute;top:0;bottom:0}',
+      '.wSkVaW_widthHandle[data-side=left]:after{right:4px}',
+      '.wSkVaW_widthHandle[data-side=right]:after{left:4px}',
+      '.wSkVaW_widthHandle:hover:after,.wSkVaW_widthHandle[data-dragging]:after{opacity:1}',
+      '.wSkVaW_widthHandle[data-dragging]{z-index:8}',
+      '.dshBridge_body:has([data-conversation-composer-overlay]) .wSkVaW_widthHandle{display:none}',
       '.dshBridge_turn{display:flex;flex-direction:column;gap:6px;margin-bottom:20px}',
       '.dshBridge_turnHead{display:flex;align-items:center;gap:8px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor)}',
       '.dshBridge_turnRole{font-weight:600;color:var(--dsw-alias-label-secondary,currentColor)}',
@@ -1233,7 +1427,7 @@ window.__ModuleLoader__.load({
       '.dshBridge_blank{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;height:100%;padding:24px;text-align:center;color:var(--dsw-alias-label-tertiary,currentColor)}',
       '.dshBridge_blankTitle{font-size:15px;line-height:22px;font-weight:600;color:var(--dsw-alias-label-primary,currentColor)}',
       '.dshBridge_blankHint{font-size:12px;line-height:20px;max-width:420px}',
-      '.dshBridge_notice{margin:0 auto;max-width:712px;padding:0 24px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,currentColor)}',
+      '.dshBridge_notice{margin:0 auto;max-width:var(--dsh-chat-content-width,712px);padding:0 24px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,currentColor)}',
       '.dshBridge_notice[data-error="true"]{color:var(--dsw-alias-state-error-primary,#d33)}',
       '.dshBridge_composerSeat{flex:none;padding:0 var(--dsh-composer-side-clearance,16px) 4px}',
       '.dshBridge_composerStack{box-sizing:border-box;display:flex;flex-direction:column;gap:4px;width:100%;max-width:var(--dsh-composer-card-max-width,calc(clamp(680px,calc(64% + 20.48px),920px) + 32px));margin:0 auto}',
@@ -1567,6 +1761,142 @@ window.__ModuleLoader__.load({
     function modelNameOf(model, fallback) {
       if (model === null || typeof model !== 'object') return fallback
       return model.name || model.id || model.model || fallback
+    }
+
+    /** One pointer-captured transcript width handle, matching dsh Web. */
+    function BridgeWidthHandle({ side, onStart, onDrag, onCommit, onEnd }) {
+      const dragging = useRef(false)
+      const base = useRef(0)
+      const origin = useRef(0)
+      const latest = useRef(0)
+      const frame = useRef(null)
+      const callbacks = useRef({ side, onStart, onDrag, onCommit, onEnd })
+      callbacks.current = { side, onStart, onDrag, onCommit, onEnd }
+
+      const outwardWidth = () => {
+        const dx = latest.current - origin.current
+        const outward = callbacks.current.side === 'right' ? dx : -dx
+        return base.current + outward * 2
+      }
+      const cancelFrame = () => {
+        if (frame.current !== null) {
+          cancelAnimationFrame(frame.current)
+          frame.current = null
+        }
+      }
+      const onPointerDown = useCallback((event) => {
+        if (event.button !== 0) return
+        event.preventDefault()
+        event.currentTarget.setPointerCapture(event.pointerId)
+        origin.current = event.clientX
+        latest.current = event.clientX
+        base.current = callbacks.current.onStart()
+        dragging.current = true
+        event.currentTarget.toggleAttribute('data-dragging', true)
+      }, [])
+      const onPointerMove = useCallback((event) => {
+        if (!dragging.current) return
+        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+        const box = event.currentTarget.getBoundingClientRect()
+        event.currentTarget.style.setProperty('--dsh-width-handle-pointer-y', `${event.clientY - box.top}px`)
+        latest.current = event.clientX
+        frame.current ??= requestAnimationFrame(() => {
+          frame.current = null
+          callbacks.current.onDrag(outwardWidth())
+        })
+      }, [])
+      const onPointerUp = useCallback((event) => {
+        if (!dragging.current) return
+        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return
+        dragging.current = false
+        event.currentTarget.toggleAttribute('data-dragging', false)
+        event.currentTarget.releasePointerCapture(event.pointerId)
+        cancelFrame()
+        latest.current = event.clientX
+        if (latest.current !== origin.current) callbacks.current.onCommit(outwardWidth())
+        callbacks.current.onEnd()
+      }, [])
+      const onPointerCancel = useCallback(() => {
+        if (!dragging.current) return
+        dragging.current = false
+        cancelFrame()
+        callbacks.current.onEnd()
+      }, [])
+      const onWheel = useCallback((event) => {
+        const body = event.currentTarget.parentElement
+        if (body === null) return
+        const scrollport = body.querySelector('.dshBridge_scroll')
+        if (scrollport === null) return
+        if (event.ctrlKey || event.deltaY === 0) return
+        scrollport.scrollBy({ top: wheelDeltaY(event, scrollport) })
+      }, [])
+      return h('div', {
+        className: 'wSkVaW_widthHandle',
+        'data-side': side,
+        'data-width-handle': side,
+        onPointerDown,
+        onPointerMove,
+        onPointerUp,
+        onPointerCancel,
+        onLostPointerCapture: onPointerCancel,
+        onWheel,
+      })
+    }
+
+    /**
+     * Install the same content-width axis dsh Web uses and render its two
+     * pointer handles. The stored preference is shared with dsh conversations.
+     */
+    function useBridgeWidthControls(containerRef, enabled) {
+      const publishWidths = useCallback(() => {
+        const container = containerRef.current
+        if (container === null) return
+        const column = container.offsetWidth
+        container.style.setProperty('--dsh-conversation-column-width', `${column}px`)
+        const preference = readContentWidthPreference()
+        if (preference === null) container.style.removeProperty('--dsh-chat-user-width')
+        else container.style.setProperty('--dsh-chat-user-width', `${resolveContentWidth(column, preference)}px`)
+      }, [containerRef])
+
+      useEffect(() => {
+        const container = containerRef.current
+        if (!enabled || container === null) return undefined
+        const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(publishWidths) : null
+        observer?.observe(container)
+        publishWidths()
+        return () => observer?.disconnect()
+      }, [containerRef, enabled, publishWidths])
+
+      const onStart = useCallback(() => {
+        const container = containerRef.current
+        if (container === null) return 680
+        return resolveContentWidth(container.offsetWidth, readContentWidthPreference())
+      }, [containerRef])
+      const onDrag = useCallback((width) => {
+        const container = containerRef.current
+        if (container === null) return
+        container.style.setProperty(
+          '--dsh-chat-user-width',
+          `${resolveContentWidth(container.offsetWidth, width)}px`,
+        )
+      }, [containerRef])
+      const onCommit = useCallback((width) => {
+        const container = containerRef.current
+        if (container === null) return
+        writeContentWidthPreference(resolveContentWidth(container.offsetWidth, width))
+      }, [containerRef])
+      const onEnd = useCallback(() => publishWidths(), [publishWidths])
+
+      return enabled
+        ? ['left', 'right'].map((side) => h(BridgeWidthHandle, {
+            key: side,
+            side,
+            onStart,
+            onDrag,
+            onCommit,
+            onEnd,
+          }))
+        : null
     }
 
     /**
@@ -2477,7 +2807,7 @@ window.__ModuleLoader__.load({
         }
         const bridge = bridges.find((entry) => entry.id === id)
         if (bridge === undefined || bridge.available === false) return
-        bridgeUi.set({ bridge, sessions: [], workspaces: [], selectedKey: null, search: '', loadError: null, loading: true })
+        bridgeUi.set({ bridge, sessions: [], workspaces: [], removedWorkspacePaths: [], selectedKey: null, search: '', loadError: null, loading: true })
         onSelectBridge(bridge)
       }
 
@@ -2577,18 +2907,31 @@ window.__ModuleLoader__.load({
         return () => document.removeEventListener('click', onClick)
       }, [ui.search, ui.searchExpanded, wide, searchOnExpand])
 
+      /**
+       * Workspaces come from the host's durable metadata, merged with any
+       * session cwd that has no record yet. The host reconciles new cwds on
+       * every session query; the extraWorkspaces list is only the legacy
+       * browser-local fallback and is intentionally lower priority.
+       */
+      const removedWorkspaces = useMemo(
+        () => new Set(Array.isArray(ui.removedWorkspacePaths) ? ui.removedWorkspacePaths : []),
+        [ui.removedWorkspacePaths],
+      )
+
       const workspaceEntities = useMemo(() => {
         const byPath = new Map()
         const add = (workspace) => {
           const path = workspace.path ?? workspace.id ?? ''
-          if (path === '' || byPath.has(path)) return
+          if (path === '' || byPath.has(path) || removedWorkspaces.has(path)) return
           byPath.set(path, {
             key: path,
-            workspaceId: path,
+            workspaceId: workspace.id ?? path,
             path,
-            name: workspaceLabel(path),
-            label: workspaceLabel(path),
+            name: workspace.name ?? workspaceLabel(path),
+            label: workspace.name ?? workspaceLabel(path),
             createdAt: workspace.createdAt,
+            sessionCount: workspace.sessionCount,
+            deleted: workspace.deleted === true,
           })
         }
         for (const workspace of ui.workspaces) add(workspace)
@@ -2597,8 +2940,14 @@ window.__ModuleLoader__.load({
           if (typeof session.cwd === 'string' && session.cwd !== '') add({ path: session.cwd, name: workspaceLabel(session.cwd) })
         }
         return [...byPath.values()]
-      }, [ui.sessions, ui.workspaces, ui.extraWorkspaces])
+      }, [ui.sessions, ui.workspaces, ui.extraWorkspaces, removedWorkspaces])
 
+      /**
+       * A session belongs to a persisted workspace record only. Leftover
+       * browser-only paths still group by cwd so existing users lose no view,
+       * but a soft-deleted path is deliberately absent from workspaceEntities
+       * and its sessions fall through to Ungrouped.
+       */
       const workspaceBySession = useMemo(() => {
         const map = new Map()
         for (const workspace of workspaceEntities) {
@@ -2743,20 +3092,153 @@ window.__ModuleLoader__.load({
         })
       }
 
-      const updateArchived = (sessionKey, shouldArchive) => {
-        const next = shouldArchive
+      /**
+       * Archive state lives on the bridge host. Optimistically mirror the
+       * result for instant feedback, then install the authoritative complete
+       * key set returned by the host. On failure, re-query so a rejected
+       * archive (for example, while the session is running) cannot leave the
+       * sidebar hiding a session that the host still considers active.
+       */
+      const updateArchived = async (sessionKey, shouldArchive) => {
+        const optimistic = shouldArchive
           ? [...ui.archivedKeys.filter((key) => key !== sessionKey), sessionKey]
           : ui.archivedKeys.filter((key) => key !== sessionKey)
-        bridgeUi.setView({ archivedKeys: next })
+        bridgeUi.set({ archivedKeys: optimistic })
+        try {
+          const body = await api('archive', {
+            method: 'POST',
+            body: JSON.stringify({ key: sessionKey, archived: shouldArchive }),
+          })
+          bridgeUi.set({
+            archivedKeys: Array.isArray(body.archivedKeys) ? body.archivedKeys : optimistic,
+          })
+        } catch (error) {
+          bridgeUi.refresh()
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('bridge:notice', {
+              detail: {
+                text: `${shouldArchive ? t('archiveFailed') : t('unarchiveFailed')}: ${error instanceof Error ? error.message : String(error)}`,
+                error: true,
+              },
+            }))
+          }
+        }
       }
 
-      const addWorkspace = (path) => {
-        const exists = ui.extraWorkspaces.some((workspace) => workspace.path === path)
-        const next = exists ? ui.extraWorkspaces : [...ui.extraWorkspaces, { path, name: workspaceLabel(path) }]
-        bridgeUi.setView({ extraWorkspaces: next })
-        setDirectoryOpen(false)
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('bridge:notice', { detail: { text: t('workspaceAdded') } }))
+      const addWorkspace = async (path) => {
+        try {
+          const body = await api('workspaces', {
+            method: 'POST',
+            body: JSON.stringify({ bridge: ui.bridge?.id, path }),
+          })
+          bridgeUi.set({
+            workspaces: Array.isArray(body.workspaces) ? body.workspaces : ui.workspaces,
+            removedWorkspacePaths: Array.isArray(body.removedWorkspacePaths) ? body.removedWorkspacePaths : ui.removedWorkspacePaths,
+          })
+          setDirectoryOpen(false)
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('bridge:notice', { detail: { text: t('workspaceAdded') } }))
+          }
+          bridgeUi.refresh()
+        } catch (error) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('bridge:notice', {
+              detail: { text: `${t('workspaceAddFailed')}: ${error instanceof Error ? error.message : String(error)}`, error: true },
+            }))
+          }
+        }
+      }
+
+      const [workspaceAction, setWorkspaceAction] = useState(null)
+      const [workspaceActionBusy, setWorkspaceActionBusy] = useState(false)
+      const [workspaceActionError, setWorkspaceActionError] = useState(null)
+
+      const beginWorkspaceAction = (action, group) => {
+        if (group.workspaceId === undefined) return
+        setWorkspaceActionError(null)
+        setWorkspaceAction({ action, target: group })
+      }
+
+      const closeWorkspaceAction = () => {
+        if (workspaceActionBusy) return
+        setWorkspaceAction(null)
+        setWorkspaceActionError(null)
+      }
+
+      const renameWorkspace = async (name) => {
+        if (workspaceAction === null || workspaceActionBusy) return
+        setWorkspaceActionBusy(true)
+        setWorkspaceActionError(null)
+        try {
+          await api('workspaces', {
+            method: 'PUT',
+            body: JSON.stringify({ bridge: ui.bridge?.id, id: workspaceAction.target.workspaceId, name }),
+          })
+          await loadSessions()
+          setWorkspaceAction(null)
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('bridge:notice', { detail: { text: t('workspaceRenamed') } }))
+          }
+        } catch (error) {
+          setWorkspaceActionError(error instanceof Error ? error.message : String(error))
+        } finally {
+          setWorkspaceActionBusy(false)
+        }
+      }
+
+      const removeWorkspace = async () => {
+        if (workspaceAction === null || workspaceActionBusy) return
+        setWorkspaceActionBusy(true)
+        setWorkspaceActionError(null)
+        try {
+          const body = await api('workspaces', {
+            method: 'DELETE',
+            body: JSON.stringify({ bridge: ui.bridge?.id, id: workspaceAction.target.workspaceId }),
+          })
+          bridgeUi.set({
+            workspaces: Array.isArray(body.workspaces) ? body.workspaces : ui.workspaces,
+            removedWorkspacePaths: Array.isArray(body.removedWorkspacePaths) ? body.removedWorkspacePaths : ui.removedWorkspacePaths,
+          })
+          setWorkspaceAction(null)
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('bridge:notice', { detail: { text: t('workspaceDeleted') } }))
+          }
+          await loadSessions()
+        } catch (error) {
+          setWorkspaceActionError(error instanceof Error ? error.message : String(error))
+        } finally {
+          setWorkspaceActionBusy(false)
+        }
+      }
+
+      const createSession = async (group) => {
+        let workspace = group
+        if (workspace === null || workspace === undefined) {
+          const candidates = workspaceEntities.filter((entry) => entry.workspaceId !== undefined)
+          if (candidates.length !== 1) {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('bridge:notice', { detail: { text: t('newSessionPickWorkspace'), error: true } }))
+            }
+            return
+          }
+          workspace = candidates[0]
+        }
+        try {
+          const body = await api('sessions', {
+            method: 'POST',
+            body: JSON.stringify({ bridge: ui.bridge?.id, cwd: workspace.path ?? workspace.cwd }),
+          })
+          await loadSessions()
+          if (body.session?.key) {
+            bridgeUi.set({ pendingAttachKey: body.session.key })
+            bridgeUi.selectSession(body.session.key)
+          }
+        } catch (error) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('bridge:notice', {
+              detail: { text: `${t('newSessionFailed')}: ${error instanceof Error ? error.message : String(error)}`, error: true },
+            }))
+          }
         }
       }
 
@@ -2769,7 +3251,15 @@ window.__ModuleLoader__.load({
           archived: archived.has(session.key),
           now,
           t,
-          onOpen: (key) => bridgeUi.selectSession(key),
+          onOpen: (key) => {
+            if (archived.has(key)) {
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('bridge:notice', { detail: { text: t('archivedNotOpenable'), error: true } }))
+              }
+              return
+            }
+            bridgeUi.selectSession(key)
+          },
           onArchive: updateArchived,
           drag: {
             active: compatible,
@@ -2816,6 +3306,9 @@ window.__ModuleLoader__.load({
             active: group.sessions.some((session) => session.key === ui.selectedKey),
             t,
             onToggle: () => setGroupExpanded(group.key, !expanded),
+            onCreate: () => createSession(group),
+            onRename: () => beginWorkspaceAction('rename', group),
+            onDelete: () => beginWorkspaceAction('delete', group),
           }),
           expanded && children.length > 0 ? h('div', { role: 'group' }, ...children.map((child) => renderGroup(child, depth + 1))) : null,
           expanded ? visible.map((session) => renderSession(session, group.key)) : null,
@@ -2892,6 +3385,12 @@ window.__ModuleLoader__.load({
                   now,
                   t,
                   onOpen: (key) => {
+                    if (archived.has(key)) {
+                      if (typeof window !== 'undefined') {
+                        window.dispatchEvent(new CustomEvent('bridge:notice', { detail: { text: t('archivedNotOpenable'), error: true } }))
+                      }
+                      return
+                    }
                     bridgeUi.selectSession(key)
                     bridgeUi.set({ search: '', searchExpanded: false })
                   },
@@ -2926,6 +3425,17 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dshBridge_browser_fade' }),
         )
       }
+
+      const workspaceActionDialog = h(BridgeWorkspaceActionDialog, {
+        action: workspaceAction?.action ?? null,
+        target: workspaceAction?.target ?? null,
+        busy: workspaceActionBusy,
+        error: workspaceActionError,
+        t,
+        onClose: closeWorkspaceAction,
+        onRename: renameWorkspace,
+        onDelete: removeWorkspace,
+      })
 
       if (!wide) {
         return h(
@@ -2972,6 +3482,21 @@ window.__ModuleLoader__.load({
                 h(IconProjectAddOutlineRegular, { size: 18 }),
               ),
             ),
+            h(
+              Tooltip,
+              { label: t('newSession'), side: 'bottom', delayMs: 500 },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dshBridge_browser_iconButton',
+                  'aria-label': t('newSession'),
+                  disabled: workspaceEntities.length === 0,
+                  onClick: () => createSession(null),
+                },
+                h(IconNewChatOutlineRegular, { size: 18 }),
+              ),
+            ),
           ),
           h(BridgeDirectoryDialog, {
             open: directoryOpen,
@@ -2979,6 +3504,7 @@ window.__ModuleLoader__.load({
             onClose: () => setDirectoryOpen(false),
             onPick: addWorkspace,
           }),
+          workspaceActionDialog,
         )
       }
 
@@ -3083,6 +3609,21 @@ window.__ModuleLoader__.load({
                 h(IconProjectAddOutlineRegular, { size: 16 }),
               ),
             ),
+            h(
+              Tooltip,
+              { label: t('newSession'), side: 'bottom', delayMs: 500 },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dshBridge_browser_iconButton',
+                  'aria-label': t('newSession'),
+                  disabled: workspaceEntities.length === 0,
+                  onClick: () => createSession(null),
+                },
+                h(IconNewChatOutlineRegular, { size: 16 }),
+              ),
+            ),
           ),
         ),
         h('div', { className: 'dshBridge_browser_listArea' }, body),
@@ -3092,6 +3633,7 @@ window.__ModuleLoader__.load({
           onClose: () => setDirectoryOpen(false),
           onPick: addWorkspace,
         }),
+        workspaceActionDialog,
       )
     }
 
@@ -3124,8 +3666,10 @@ window.__ModuleLoader__.load({
       const lastSeqRef = useRef(0)
       const selectedKeyRef = useRef(null)
       const scrollRef = useRef(null)
+      const bodyRef = useRef(null)
       const textareaRef = useRef(null)
       const stickToBottomRef = useRef(true)
+      const widthHandles = useBridgeWidthControls(bodyRef, selectedKey !== null)
 
       const showNotice = useCallback((text, error = false) => {
         setNotice(text)
@@ -3141,7 +3685,7 @@ window.__ModuleLoader__.load({
       const bridgeId = bridge?.id ?? null
       const loadSessions = useCallback(async () => {
         if (bridgeId === null) {
-          bridgeUi.set({ sessions: [], workspaces: [], loading: false, loadError: null })
+          bridgeUi.set({ sessions: [], workspaces: [], removedWorkspacePaths: [], loading: false, loadError: null })
           return
         }
         bridgeUi.set({ loading: true, loadError: null })
@@ -3151,11 +3695,14 @@ window.__ModuleLoader__.load({
             bridge: body.bridge ?? bridgeUi.state.bridge,
             sessions: Array.isArray(body.sessions) ? body.sessions : [],
             workspaces: Array.isArray(body.workspaces) ? body.workspaces : [],
+            removedWorkspacePaths: Array.isArray(body.removedWorkspacePaths) ? body.removedWorkspacePaths : [],
+            archivedKeys: Array.isArray(body.archivedKeys) ? body.archivedKeys : [],
           })
         } catch (error) {
           bridgeUi.set({
             sessions: [],
             workspaces: [],
+            removedWorkspacePaths: [],
             loadError: error instanceof Error ? error.message : String(error),
           })
         } finally {
@@ -3169,6 +3716,22 @@ window.__ModuleLoader__.load({
 
       useEffect(() => {
         loadSessions()
+      }, [loadSessions])
+
+      // Sessions created by the Pi CLI outside this browser become visible as
+      // soon as the tab regains focus. The host also re-queries on every
+      // sessions request, so no filesystem watcher is required.
+      useEffect(() => {
+        const refresh = () => {
+          if (document?.visibilityState === 'hidden') return
+          loadSessions()
+        }
+        window.addEventListener('focus', refresh)
+        document?.addEventListener?.('visibilitychange', refresh)
+        return () => {
+          window.removeEventListener('focus', refresh)
+          document?.removeEventListener?.('visibilitychange', refresh)
+        }
       }, [loadSessions])
 
       // Model catalog and session statistics are attachment-scoped. Both are
@@ -3225,7 +3788,7 @@ window.__ModuleLoader__.load({
             ? event.detail.bridges.find((entry) => entry.id === current.id)
             : undefined
           if (next === undefined) {
-            bridgeUi.set({ bridge: null, sessions: [], workspaces: [], selectedKey: null, search: '' })
+            bridgeUi.set({ bridge: null, sessions: [], workspaces: [], removedWorkspacePaths: [], selectedKey: null, search: '' })
             selectedKeyRef.current = null
             setDetail(null)
             setTranscript([])
@@ -3326,6 +3889,9 @@ window.__ModuleLoader__.load({
         } else if (event === 'agent-end') {
           setState((current) => (current === null ? current : { ...current, isStreaming: false }))
           setStatsVersion((value) => value + 1)
+          // Pi may have written a new last-message timestamp or title in this
+          // turn; refresh the sidebar summaries after it settles.
+          void loadSessions()
         } else if (event === 'message-start') {
           if (record.message?.role === 'assistant') setStreamingMessage({ ...record.message })
         } else if (event === 'message-update') {
@@ -3376,8 +3942,9 @@ window.__ModuleLoader__.load({
           )
         } else if (event === 'session-name') {
           setState((current) => (current === null ? current : { ...current, sessionName: record.name }))
+          void loadSessions()
         }
-      }, [])
+      }, [loadSessions])
 
       const connectEvents = useCallback(
         (key) => {
@@ -3461,6 +4028,14 @@ window.__ModuleLoader__.load({
           setAttaching(false)
         }
       }, [connectEvents, detail, historyItems, selectedKey, showNotice, t])
+
+      useEffect(() => {
+        const pending = ui.pendingAttachKey
+        if (pending === null || pending !== selectedKey || attached || attaching) return
+        if (detail === null || detailError !== null) return
+        bridgeUi.set({ pendingAttachKey: null })
+        void attach()
+      }, [attach, attached, attaching, detail, detailError, selectedKey, ui.pendingAttachKey])
 
       const detach = useCallback(async () => {
         if (selectedKey === null) return
@@ -3615,7 +4190,8 @@ window.__ModuleLoader__.load({
         streamState === 'disconnected' ? h('div', { className: 'dshBridge_notice' }, t('eventsDisconnected')) : null,
         h(
           'div',
-          { className: 'dshBridge_body' },
+          { className: 'dshBridge_body', ref: bodyRef },
+          widthHandles,
           h(
             'div',
             { className: 'dshBridge_centre' },
@@ -3893,6 +4469,8 @@ window.__ModuleLoader__.load({
       normalizeModelCatalog,
       modelIdOf,
       statsVisible,
+      readContentWidthPreference,
+      resolveContentWidth,
     }
     return module.exports
   },

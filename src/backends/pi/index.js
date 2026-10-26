@@ -7,9 +7,10 @@
  */
 import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, isAbsolute, join, resolve } from 'node:path'
+import { basename, delimiter, isAbsolute, join, resolve } from 'node:path'
 import { PiAttachment, resolvePiCommand } from './attachment.js'
 import {
+  createPiSession,
   listPiSessions,
   pathFromSessionKey,
   readPiSession,
@@ -86,7 +87,7 @@ export const piEngine = {
   description: 'Connect to Pi Coding Agent sessions through its RPC mode.',
   kind: 'cli',
   available: true,
-  capabilities: ['sessions', 'attach', 'stream', 'prompt', 'abort', 'models', 'extension-ui'],
+  capabilities: ['sessions', 'session-create', 'workspace-write', 'attach', 'stream', 'prompt', 'abort', 'models', 'extension-ui'],
   configFields: [
     {
       key: 'sessionsRoot',
@@ -121,7 +122,10 @@ export const piEngine = {
     const byCwd = new Map()
     for (const session of sessions) {
       const id = typeof session.cwd === 'string' && session.cwd !== '' ? session.cwd : ''
-      if (!byCwd.has(id)) byCwd.set(id, { id, name: id, path: id || null, sessionCount: 0 })
+      if (!byCwd.has(id)) {
+        const name = id === '' ? '' : (basename(id) || id)
+        byCwd.set(id, { id, name, path: id || null, sessionCount: 0 })
+      }
       byCwd.get(id).sessionCount += 1
     }
     return { root, sessions, workspaces: [...byCwd.values()] }
@@ -131,6 +135,15 @@ export const piEngine = {
     const root = resolvePiSessionsRoot(config, env)
     const file = fileFromNativeKey(nativeKey, root)
     return decorateSession(await readPiSession(file))
+  },
+
+  /**
+   * Create a fresh, empty Pi session in a workspace. The file is owned by Pi
+   * once attached; the bridge only writes the standard session header here.
+   */
+  async createSession({ cwd, config, env }) {
+    const root = resolvePiSessionsRoot(config, env)
+    return decorateSession(await createPiSession(cwd, root))
   },
 
   async createAttachment({ session, config, env, logger }) {

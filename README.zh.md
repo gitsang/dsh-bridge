@@ -24,7 +24,10 @@ Pi 是第一个完整支持的引擎。Codex、OpenCode、远程 DSH 会出现�
 - [x] 与 dsh Web 一致的侧边栏浏览器：按工作区 / 工作区树 / 单列表分组、手动 / 最近更新排序、会话筛选
 - [x] dsh 风格搜索按钮与结果列表
 - [x] dsh 风格“选择工作区目录”弹窗，可新建文件夹并加入工作区
+- [x] 每个工作区右侧的新建会话按钮，以及工作区重命名 / 软删除
+- [x] 工作区映射持久化到 `bridge-workspaces.json`，删除只做标记，不碰 Pi JSONL
 - [x] dsh 风格对话界面与 composer
+- [x] 与 dsh Web 一致的左右内容宽度拖拽手柄，共用宽度偏好
 - [x] composer 模型选择器与 dsh 风格 statusline（轮次/步数、Token、缓存命中）
 - [ ] Codex 引擎适配器
 - [ ] OpenCode 引擎适配器
@@ -153,7 +156,8 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 | `GET /api/bridge/settings` | 模式、引擎和脱敏后的桥接列表 |
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | 管理桥接 |
 | `GET/POST /api/bridge/status` | 读取或刷新每个桥接的连接状态 |
-| `GET /api/bridge/sessions?bridge=<id>` | 某个桥接的会话/工作区 |
+| `GET/POST /api/bridge/sessions` | 列出某个桥接的会话/工作区；在指定工作区新建 Pi 会话 |
+| `GET/POST/PUT/DELETE /api/bridge/workspaces` | 工作区列表、添加、重命名、软删除 |
 | `GET/POST /api/bridge/directories` | 浏览 / 新建本地工作区目录 |
 | `GET /api/bridge/session?key=…` | 单个会话历史 |
 | `GET /api/bridge/capabilities` | 协议版本与 attachment 表 |
@@ -176,6 +180,14 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 
 桥接保存在 `$DSH_HOME/bridge.json`（0600，原子写入）。旧的
 `$DSH_HOME/pi-bridge.json` 和更早的按引擎 `backends` 结构会自动迁移。
+
+工作区显示名与删除标记保存在 `$DSH_HOME/bridge-workspaces.json`（0600，
+原子写入）。默认显示名取路径最后一段文件夹名（例如 `/work/demo` 显示为
+`demo`），旧版本曾把完整路径写成默认名的记录会自动纠正。它是“工作区路径 →
+显示名 / 删除标记”的持久映射：重命名只改这里，
+删除只写入 `deletedAt`，不会删除 Pi 目录、JSONL 或其中的消息。Pi 侧新增会话
+后，在下一次会话查询时（打开面板、点刷新、窗口重新聚焦、回合结束、新建/重命名/
+删除工作区）会重新读取会话列表的 `cwd`，自动并入已有工作区或补建新工作区。
 
 ```json
 {

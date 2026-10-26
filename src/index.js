@@ -28,6 +28,26 @@ import {
   updateBridge,
   writeSettings,
 } from './settings.js'
+import {
+  archiveSession as archiveNativeSession,
+  deleteBridgeArchives,
+  isSessionArchived,
+  listArchivedSessionKeys,
+  readArchiveStore,
+  unarchiveSession as unarchiveNativeSession,
+  writeArchiveStore,
+} from './archives.js'
+import {
+  createWorkspace,
+  deleteWorkspace,
+  listWorkspaces,
+  publicWorkspace,
+  readWorkspaceStore,
+  reconcileWorkspaces,
+  removedWorkspacePaths,
+  renameWorkspace,
+  writeWorkspaceStore,
+} from './workspaces.js'
 
 export const name = 'bridge'
 export const inject = ['connection']
@@ -289,6 +309,8 @@ export function apply(ctx) {
   const pendingAttachments = new Map()
   const logger = ctx.logger
   let settings = readSettings(process.env, logger)
+  let workspaceStore = readWorkspaceStore(process.env, logger)
+  let archiveStore = readArchiveStore(process.env, logger)
 
   /**
    * Per-bridge connection state for the startup auto-connect and the status
@@ -375,7 +397,22 @@ export function apply(ctx) {
         })
         return
       }
-      const newest = [...sessions].sort((left, right) => String(right.modified ?? '').localeCompare(String(left.modified ?? '')))[0]
+      const openSessions = sessions.filter((session) => {
+        const nativeKey = session.nativeKey ?? session.key
+        return !isArchivedKey(nativeKey, bridge.id)
+      })
+      if (openSessions.length === 0) {
+        if (probeTokens.get(bridge.id) !== token) return
+        setConnection(bridge.id, {
+          state: 'connected',
+          error: null,
+          checkedAt: Date.now(),
+          latencyMs: Date.now() - startedAt,
+          detail: wireSafe({ ...detail, warmSession: null }),
+        })
+        return
+      }
+      const newest = [...openSessions].sort((left, right) => String(right.modified ?? '').localeCompare(String(left.modified ?? '')))[0]
       const nativeKey = newest.nativeKey ?? newest.key
       const key = encodeSessionKey(bridge.id, nativeKey)
       const live = await attach(key)
@@ -442,6 +479,54 @@ export function apply(ctx) {
     return { bridge, engine, nativeKey, session: publicSession(bridge, engine, session) }
   }
 
+  /**
+   * Browser-facing archive state for one bridge. Native keys are encoded with
+   * the same bridge-id prefix as session keys, so the sidebar can keep its
+   * existing Set<session.key> filtering while the durable authority stays on
+   * the host.
+   */
+  const archivedKeysFor = (bridgeId) =>
+    listArchivedSessionKeys(archiveStore, bridgeId)
+      .map((nativeKey) => encodeSessionKey(bridgeId, nativeKey))
+
+  const isArchivedKey = (nativeKey, bridgeId) =>
+    isSessionArchived(archiveStore, bridgeId, nativeKey)
+
+  const assertNotArchived = (nativeKey, bridgeId) => {
+    if (!isArchivedKey(nativeKey, bridgeId)) return
+    throw Object.assign(new Error('session is archived; unarchive it before opening'), { status: 409 })
+  }
+
+  const saveArchiveStore = (result) => {
+    if (result.changed) archiveStore = writeArchiveStore(result.store, process.env)
+    return result
+  }
+
+  /**
+   * Reconcile the durable workspace metadata with the engine's current session
+   * list, then attach live session counts. This runs on every session query so
+   * sessions created outside dsh (for example with the Pi CLI) are discovered
+   * without a separate watcher. Existing names and tombstones are preserved.
+   */
+  const workspaceSnapshot = (bridgeId, sessions = []) => {
+    const counts = new Map()
+    for (const session of sessions) {
+      if (typeof session.cwd !== 'string' || session.cwd === '') continue
+      counts.set(session.cwd, (counts.get(session.cwd) ?? 0) + 1)
+    }
+    return {
+      workspaces: listWorkspaces(workspaceStore, bridgeId)
+        .map((workspace) => publicWorkspace(workspace, counts.get(workspace.path) ?? 0)),
+      removedWorkspacePaths: removedWorkspacePaths(workspaceStore, bridgeId),
+    }
+  }
+
+  const synchronizeWorkspaces = (bridge, discovered, sessions) => {
+    const synced = reconcileWorkspaces(workspaceStore, bridge.id, discovered)
+    if (synced.changed) workspaceStore = writeWorkspaceStore(synced.store, process.env)
+    return workspaceSnapshot(bridge.id, sessions)
+  }
+
   const settingsView = () => ({
     settings: {
       version: settings.version,
@@ -472,6 +557,7 @@ export function apply(ctx) {
 
     const job = (async () => {
       const { bridge, engine, nativeKey, session } = await sessionFor(key)
+      assertNotArchived(nativeKey, bridge.id)
       const config = configFor(bridge, engine)
       const attachment = await engine.createAttachment({
         session: { ...session, nativeKey },
@@ -526,10 +612,33 @@ export function apply(ctx) {
   const routes = [
     {
       path: `${ROUTE}/sessions`,
-      methods: ['GET'],
+      methods: ['GET', 'POST'],
       requestBody: 'buffered',
       fetch: async (request) => {
         try {
+          if (request.method === 'POST') {
+            const body = await readJson(request)
+            const bridge = bridgeFor(requireString(body.bridge, 'bridge'))
+            const engine = engineFor(bridge)
+            if (!engineAvailable(engine)) {
+              throw Object.assign(new Error(`${engine.label} is not available yet: ${engine.unavailableReason}`), { status: 409 })
+            }
+            if (typeof engine.createSession !== 'function') {
+              throw Object.assign(new Error(`${engine.label} does not support creating sessions`), { status: 409 })
+            }
+            const cwd = await resolveDirectoryPath(body.cwd)
+            const session = await engine.createSession({
+              cwd,
+              config: configFor(bridge, engine),
+              env: process.env,
+            })
+            return json(201, {
+              ok: true,
+              bridge: bridgeView(bridge),
+              engine: engine.id,
+              session: publicSession(bridge, engine, session),
+            })
+          }
           const id = requireString(new URL(request.url).searchParams.get('bridge'), 'bridge')
           const bridge = bridgeFor(id)
           const engine = engineFor(bridge)
@@ -542,6 +651,7 @@ export function apply(ctx) {
               unavailableReason: engine.unavailableReason,
               sessions: [],
               workspaces: [],
+              archivedKeys: archivedKeysFor(bridge.id),
             })
           }
           const config = configFor(bridge, engine)
@@ -549,15 +659,80 @@ export function apply(ctx) {
           const sessions = Array.isArray(result.sessions)
             ? result.sessions.map((session) => publicSession(bridge, engine, session))
             : []
-          const workspaces = Array.isArray(result.workspaces) ? result.workspaces : []
+          const discovered = Array.isArray(result.workspaces) ? result.workspaces : []
+          const workspaceState = synchronizeWorkspaces(bridge, discovered, sessions)
+          const archivedKeys = archivedKeysFor(bridge.id)
+          const archivedSet = new Set(archivedKeys)
           return json(200, {
             ok: true,
             bridge: bridgeView(bridge),
             engine: engine.id,
             available: true,
             root: result.root,
-            workspaces,
-            sessions,
+            ...workspaceState,
+            archivedKeys,
+            sessions: sessions.map((session) => ({ ...session, archived: archivedSet.has(session.key) })),
+          })
+        } catch (error) {
+          return failure(error, error.status ?? 500)
+        }
+      },
+    },
+    {
+      path: `${ROUTE}/workspaces`,
+      methods: ['GET', 'POST', 'PUT', 'DELETE'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        try {
+          const body = request.method === 'GET'
+            ? { bridge: new URL(request.url).searchParams.get('bridge') }
+            : await readJson(request)
+          const bridge = bridgeFor(requireString(body.bridge, 'bridge'))
+          if (request.method === 'GET') {
+            const engine = engineFor(bridge)
+            if (!engineAvailable(engine)) {
+              return json(200, { ok: true, bridge: bridgeView(bridge), available: false, workspaces: [] })
+            }
+            const result = await engine.listSessions(configFor(bridge, engine), process.env)
+            const sessions = Array.isArray(result.sessions) ? result.sessions : []
+            return json(200, {
+              ok: true,
+              bridge: bridgeView(bridge),
+              available: true,
+              ...synchronizeWorkspaces(
+                bridge,
+                Array.isArray(result.workspaces) ? result.workspaces : [],
+                sessions,
+              ),
+            })
+          }
+          if (request.method === 'POST') {
+            const path = await resolveDirectoryPath(body.path)
+            const result = createWorkspace(workspaceStore, bridge.id, { path, name: body.name })
+            workspaceStore = writeWorkspaceStore(result.store, process.env)
+            return json(201, {
+              ok: true,
+              workspace: publicWorkspace(result.workspace),
+              ...workspaceSnapshot(bridge.id),
+            })
+          }
+          if (request.method === 'PUT') {
+            const result = renameWorkspace(workspaceStore, bridge.id, body.id, body.name)
+            workspaceStore = writeWorkspaceStore(result.store, process.env)
+            return json(200, {
+              ok: true,
+              workspace: publicWorkspace(result.workspace),
+              ...workspaceSnapshot(bridge.id),
+            })
+          }
+          const result = deleteWorkspace(workspaceStore, bridge.id, body.id)
+          workspaceStore = writeWorkspaceStore(result.store, process.env)
+          logger?.info?.(`bridge: soft-deleted workspace ${result.workspace.path} (${bridge.id})`)
+          return json(200, {
+            ok: true,
+            deleted: true,
+            workspace: publicWorkspace(result.workspace),
+            ...workspaceSnapshot(bridge.id),
           })
         } catch (error) {
           return failure(error, error.status ?? 500)
@@ -675,6 +850,8 @@ export function apply(ctx) {
           const body = await readJson(request)
           const key = requireString(body.key, 'key')
           const message = requireString(body.message, 'message')
+          const { bridge, nativeKey } = resolveSessionKey(key)
+          assertNotArchived(nativeKey, bridge.id)
           const live = attachmentFor(key)
           const mode = body.mode ?? 'auto'
           const state = await live.attachment.getState()
@@ -789,8 +966,52 @@ export function apply(ctx) {
           settings = writeSettings(result.settings, process.env)
           connections.delete(id)
           probeTokens.delete(id)
+          const pruned = deleteBridgeArchives(archiveStore, id)
+          if (pruned.changed) archiveStore = writeArchiveStore(pruned.store, process.env)
           logger?.info?.(`bridge: deleted ${id}`)
           return json(200, { ok: true, ...settingsView() })
+        } catch (error) {
+          return failure(error, error.status ?? 500)
+        }
+      },
+    },
+    {
+      path: `${ROUTE}/archive`,
+      methods: ['POST'],
+      requestBody: 'buffered',
+      fetch: async (request) => {
+        try {
+          const body = await readJson(request)
+          const key = requireString(body.key, 'key')
+          const { bridge, nativeKey } = resolveSessionKey(key)
+          if (typeof body.archived !== 'boolean') {
+            throw Object.assign(new Error('archived must be a boolean'), { status: 400 })
+          }
+          if (body.archived) {
+            const live = attachments.get(key)
+            if (live !== undefined) {
+              const state = await live.attachment.getState()
+              if (state.isStreaming === true) {
+                throw Object.assign(new Error('session is running; abort it before archiving'), { status: 409 })
+              }
+            }
+            const result = saveArchiveStore(archiveNativeSession(archiveStore, bridge.id, nativeKey))
+            logger?.info?.(`bridge: archived session ${nativeKey} (${bridge.id})`)
+            return json(200, {
+              ok: true,
+              key,
+              archived: true,
+              archivedKeys: result.archivedKeys.map((value) => encodeSessionKey(bridge.id, value)),
+            })
+          }
+          const result = saveArchiveStore(unarchiveNativeSession(archiveStore, bridge.id, nativeKey))
+          logger?.info?.(`bridge: unarchived session ${nativeKey} (${bridge.id})`)
+          return json(200, {
+            ok: true,
+            key,
+            archived: false,
+            archivedKeys: result.archivedKeys.map((value) => encodeSessionKey(bridge.id, value)),
+          })
         } catch (error) {
           return failure(error, error.status ?? 500)
         }
