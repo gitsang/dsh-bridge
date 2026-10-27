@@ -1,13 +1,13 @@
 {
   "name": "@gitsang/dsh-bridge",
-  "version": "0.4.0",
-  "description": "Bridge multiple external coding agents (Pi, Codex, OpenCode, remote DSH) into the DeepSeek Harness web UI.",
+  "version": "2.0.0",
+  "description": "Put multiple complete DeepSeek Harness hosts behind one authenticated path-prefix gateway.",
   "license": "MIT",
   "type": "module",
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
-    "./client": "./src/client.js",
+    "./gateway": "./src/gateway.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -19,41 +19,22 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test --test-concurrency=1 test/*.test.js",
-    "test:secrets": "./tests/check-secrets.sh",
-    "test:live": "node tests/live-smoke.mjs",
-    "test:live:attach": "DSH_SMOKE_ATTACH=1 node tests/live-smoke.mjs",
-    "setup:live": "node tests/live-setup.mjs"
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "keywords": [
     "dsh",
     "deepseek-harness",
     "bridge",
-    "agent",
+    "gateway",
+    "reverse-proxy",
     "pi",
     "codex",
-    "opencode",
-    "web"
+    "opencode"
   ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "platform": "web",
-      "inject": [
-        "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-layout",
-        "@deepseek-ai/dsh-client-ui-primitives",
-        "@deepseek-ai/dsh-client-ui-sidebar",
-        "@deepseek-ai/dsh-client-ui-slots"
-      ]
     }
-  },
-  "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.4",
-    "@deepseek-ai/dsh-client-ui-primitives": "0.2.0-rc.2",
-    "react": "^18.2.0"
   },
   "repository": {
     "type": "git",

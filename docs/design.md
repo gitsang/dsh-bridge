@@ -79,7 +79,7 @@ Gateway 是唯一 origin。每个 backend 是独立进程或独立 Host，只监
 - backend 自己拥有 Agent 生命周期、writer lock、队列和持久化。
 - gateway 只做路由、认证和进程监督，不翻译业务事件。
 
-启动时做版本握手；版本或 plugin build 不一致的 backend 标记为 `incompatible`，不挂载 iframe。
+启动时 GET 后端 `/`，读取 `x-dsh-version` 做可选版本握手。配置了 `health.version` 且不匹配时，backend 标记为 `incompatible` 并拒绝挂载 iframe。dsh 当前不发送该响应头；未配置版本时记为 `unknown`，不阻止挂载。
 
 ## Engine 接入
 
@@ -127,7 +127,7 @@ adapter 不存在时，对应 engine 只有 `unavailable` 状态，不提供假 
       "engine": "pi",
       "autostart": true,
       "upstream": { "command": "dsh", "args": ["web", "--profile", "pi"], "cwd": "/work" },
-      "health": { "path": "/b/pi/", "timeoutMs": 15000 }
+      "health": { "timeoutMs": 15000, "version": "2.0.0" }
     },
     {
       "id": "native",
@@ -181,3 +181,43 @@ stopped -> starting -> ready -> stopping -> stopped
 - 同一 backend 多标签页互不干扰。
 - backend 崩溃只影响自己的 iframe。
 - 直接访问 `/b/<id>/`、刷新、深层 API 路径都保持 mount 前缀。
+
+## 已实现范围
+
+| 文件 | 职责 |
+| --- | --- |
+| `src/gateway.js` | HTTP 服务、认证、shell、管理 API、mount 调度 |
+| `src/proxy.js` | path-prefix HTTP 代理、WebSocket 隧道、header/cookie/redirect 改写 |
+| `src/auth.js` | scrypt 密码、滚动 session、cookie 过滤、登录页 |
+| `src/upstream-auth.js` | 兑换后端 dsh launch token 并托管 `dsh-auth-*` |
+| `src/backends.js` | URL/command/self 三类 upstream、健康检查、版本检查、进程监督、自动重启 |
+| `src/config.js` | `bridge-v2.json` 校验、原子写入、增删改 |
+| `src/shell.js` | bridge 列表、管理面板、常驻 iframe |
+| `src/index.js` | Cordis bundle 入口 |
+
+管理 API（均经过 gateway 登录）：
+
+```text
+GET    /__bridge/state
+POST   /__bridge/bridges
+PUT    /__bridge/bridges/<id>
+DELETE /__bridge/bridges/<id>
+POST   /__bridge/bridges/<id>/restart
+```
+
+`GET /__bridge/state` 不返回 upstream token；URL 中的 `token` 查询参数改写为
+`***`。
+
+认证重试：
+
+- HTTP：上游 401 + `dsh web authentication required` 时刷新 cookie 并重放请求体一次。
+- WebSocket：握手返回 401 时刷新 cookie 并重新握手一次。
+- 大于 2 MiB 的请求体直接流式转发，不做重放。
+
+测试：
+
+```bash
+npm test
+```
+
+覆盖配置、认证、代理、WebSocket、cookie 托管、版本检查、进程监督和管理 API。

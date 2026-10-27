@@ -1,9 +1,9 @@
-# dsh-bridge bundle patch.
+# dsh-bridge v2 bundle patch.
 #
-# Adds one Host row. The row registers the authenticated /api/bridge
-# routes and owns live backend attachments. The browser half is
-# discovered from package.json dsh.client and registers a sidebar panel.
+# One Host row starts the multi-Host path-prefix gateway beside dsh web.
+# The browser shell is served by that gateway; no dsh client plugin is
+# registered, because each bridge renders a complete native dsh web app.
 - insert:
     - id: bridge
       name: '@gitsang/dsh-bridge'
-      inject: [connection]
+      inject: [webServer]
