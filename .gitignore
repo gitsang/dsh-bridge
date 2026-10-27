@@ -9,3 +9,6 @@ node_modules/
 .smoke/
 tests/.artifacts/
 *.har
+
+# Local worktrees.
+.worktrees/
