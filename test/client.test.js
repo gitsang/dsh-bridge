@@ -315,12 +315,19 @@ test('Bridge settings stay a standalone overlay, not a native Settings section',
   assert.match(source, /className: 'dshBridge_settingsPanel'/)
 })
 
-test('Bridge menu and page header open the standalone settings page', async () => {
+test('the brand menu is the only entry to the standalone settings page', async () => {
   const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
   assert.match(source, /window\.dispatchEvent\(new CustomEvent\(SETTINGS_EVENT\)\)/)
   assert.match(source, /window\.addEventListener\(SETTINGS_EVENT, onOpen\)/)
-  assert.match(source, /onClick: openBridgeSettings/)
+  assert.match(source, /openBridgeSettings\(\)/)
   assert.doesNotMatch(source, /button\[aria-haspopup="dialog"\]/)
+  // The page header carries the refresh action only; settings moved out of it.
+  const header = source.slice(
+    source.indexOf("className: 'dshBridge_head'"),
+    source.indexOf("streamState === 'disconnected'"),
+  )
+  assert.match(header, /t\('refresh'\)/)
+  assert.doesNotMatch(header, /t\('settings'\)/)
 })
 
 test('Bridge settings rows and editors follow the dsh Models section rhythm', async () => {
