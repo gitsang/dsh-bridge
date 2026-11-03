@@ -3883,6 +3883,11 @@ window.__ModuleLoader__.load({
         if (bridge === undefined || bridge.available === false) return
         bridgeUi.set({ bridge, sessions: [], workspaces: [], removedWorkspacePaths: [], selectedKey: null, search: '', loadError: null, loading: true })
         onSelectBridge(bridge)
+        // Re-picking the bridge that is already open leaves the panel mounted,
+        // so its bridge-id effect never fires again. Ask the panel to reload
+        // explicitly; with no mounted panel this is a no-op and mounting loads
+        // the list itself. Without it the sidebar would stay on "Loading…".
+        bridgeUi.refresh()
       }
 
       const anchor = h(
