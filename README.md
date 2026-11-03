@@ -179,7 +179,10 @@ right-aligned and contains:
 
 - a **model picker** backed by the attached engine's model catalog, grouped by
   provider and switched through the engine's native `set_model` RPC;
-- a circular **send** button, which becomes **stop** while the agent runs.
+- the same circular **send** button dsh's own composer paints: a 34px
+  info-blue circle on a static white up-arrow glyph. While the agent runs it
+  keeps the circle and swaps only the glyph for the rounded-square stop, so
+  the control never changes shape or colour mid-turn.
 
 Below the card, the statusline mirrors dsh's shipped composer dock: a gauge
 pill for turns/steps, a database pill for total tokens plus cache-hit rate, and

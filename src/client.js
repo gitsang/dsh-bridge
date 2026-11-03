@@ -47,13 +47,11 @@ window.__ModuleLoader__.load({
       IconFolderOpenRegular,
       IconGaugeOutlineRegular,
       IconNewChatOutlineRegular,
-      IconPauseOutlineRegular,
       IconPlusOutlineRegular,
       IconProjectAddOutlineRegular,
       IconQueueOutlineRegular,
       IconRefreshOutlineRegular,
       IconSearchOutlineRegular,
-      IconSendOutlineRegular,
       IconSettingsOutlineRegular,
       IconSlidersTwoOutlineRegular,
       IconSparkleRegular,
@@ -1962,10 +1960,14 @@ window.__ModuleLoader__.load({
       '.dshBridge_iconButton{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-secondary,currentColor);cursor:pointer;font:inherit}',
       '.dshBridge_iconButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
       '.dshBridge_iconButton:disabled{opacity:.4;cursor:default}',
-      '.dshBridge_send{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;flex:none;width:34px;height:34px;padding:0;border:0;border-radius:999px;background:var(--dsw-alias-button-info-fill,#3964fe);color:#fff;cursor:pointer;transition:background-color .1s ease;transform:translateY(-2px)}',
+      /* The shell paints a global superellipse corner-shape; the send circle opts back
+       * out to a true round corner, exactly as dsh's own InputBar primary does. */
+      '.dshBridge_send{box-sizing:border-box;display:grid;place-items:center;flex:none;width:34px;height:34px;padding:0;border:0;border-radius:999px;corner-shape:round;background:var(--dsw-alias-button-info-fill,#3964fe);color:#fff;cursor:pointer;transition:background-color .1s ease;transform:translateY(-2px)}',
       '.dshBridge_send:hover:not(:disabled){background:var(--dsw-alias-button-info-hover,#2f55d8)}',
       '.dshBridge_send:disabled{opacity:.4;cursor:default}',
-      '.dshBridge_send[data-stop="true"]{background:var(--dsw-alias-state-error-primary,#d33)}',
+      /* Stop keeps the send circle: the shell swaps only the glyph, never the fill. */
+      '.dshBridge_send[data-stop="true"]{background:var(--dsw-alias-button-info-fill,#3964fe)}',
+      '.dshBridge_send[data-stop="true"]:hover:not(:disabled){background:var(--dsw-alias-button-info-hover,#2f55d8)}',
       '.dshBridge_statusline{box-sizing:border-box;display:flex;align-items:center;justify-content:center;gap:12px;min-height:22px;padding-top:4px;font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px))}',
       '.dshBridge_statusline:empty{display:none}',
       '.dshBridge_statusPillWrap{position:relative;display:inline-flex;min-width:0}',
@@ -2768,6 +2770,27 @@ window.__ModuleLoader__.load({
     function IconCheckSmall() {
       return h('svg', { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
         h('path', { d: 'm3.5 8.5 3 3 6-6.5', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+      )
+    }
+
+    /**
+     * Composer action glyphs, copied from dsh's own input bar so the Bridge
+     * send control is literally the same button: a filled up arrow at rest and
+     * a rounded square while the agent runs (the shell never shows a pause
+     * bar). Both are 16px glyphs on the 34px info-blue circle.
+     */
+    function SendGlyph() {
+      return h('svg', { viewBox: '0 0 16 16', width: 16, height: 16, 'aria-hidden': true },
+        h('path', {
+          d: 'M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z',
+          fill: 'currentColor',
+        }),
+      )
+    }
+
+    function StopGlyph() {
+      return h('svg', { viewBox: '0 0 16 16', width: 16, height: 16, 'aria-hidden': true },
+        h('rect', { x: 3, y: 3, width: 10, height: 10, rx: 3, fill: 'currentColor' }),
       )
     }
 
@@ -5475,7 +5498,7 @@ window.__ModuleLoader__.load({
                                 h(
                                   'button',
                                   { type: 'button', className: 'dshBridge_send', 'data-stop': 'true', 'aria-label': t('stop'), onClick: abort },
-                                  h(IconPauseOutlineRegular, { size: 16 }),
+                                  h(StopGlyph),
                                 ),
                               )
                             : h(
@@ -5490,7 +5513,7 @@ window.__ModuleLoader__.load({
                                     disabled: sending || attaching || draft.trim() === '',
                                     onClick: send,
                                   },
-                                  h(IconSendOutlineRegular, { size: 16 }),
+                                  h(SendGlyph),
                                 ),
                               ),
                         ),

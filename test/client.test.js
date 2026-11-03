@@ -304,6 +304,27 @@ test('browser bundle wires the model seat and statusline into the composer', asy
   assert.match(source, /dshBridge_contextRing/)
 })
 
+test('the composer send control is dsh web\'s own blue circle button', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  // Same 34px info-blue circle, static white glyph, -2px seat.
+  assert.match(source, /\.dshBridge_send\{[^}]*width:34px;height:34px[^}]*border-radius:999px/)
+  assert.match(source, /\.dshBridge_send\{[^}]*background:var\(--dsw-alias-button-info-fill/)
+  assert.match(source, /\.dshBridge_send\{[^}]*color:#fff/)
+  assert.match(source, /\.dshBridge_send\{[^}]*transform:translateY\(-2px\)/)
+  // The shell's global superellipse corner-shape must not square the circle off.
+  assert.match(source, /\.dshBridge_send\{[^}]*corner-shape:round/)
+  // Glyphs are the shell's own: filled up arrow, rounded-square stop.
+  assert.match(source, /function SendGlyph/)
+  assert.match(source, /function StopGlyph/)
+  assert.match(source, /M8\.3125 0\.980183/)
+  assert.match(source, /x: 3, y: 3, width: 10, height: 10, rx: 3/)
+  // Stop swaps the glyph only; the fill stays the send blue.
+  assert.match(source, /\.dshBridge_send\[data-stop="true"\]\{background:var\(--dsw-alias-button-info-fill/)
+  assert.doesNotMatch(source, /\.dshBridge_send\[data-stop="true"\]\{background:var\(--dsw-alias-state-error-primary/)
+  assert.doesNotMatch(source, /IconPauseOutlineRegular/)
+  assert.doesNotMatch(source, /IconSendOutlineRegular/)
+})
+
 test('Bridge settings stay a standalone overlay, not a native Settings section', async () => {
   const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
   assert.match(source, /ctx\.slots\.inject\('shell\.overlay'/)
