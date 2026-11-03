@@ -33,7 +33,7 @@ the add-bridge form but are marked as pending until their adapters are connected
 - [x] Durable workspace mapping in `bridge-workspaces.json`; delete marks only, never touches Pi JSONL
 - [x] Durable per-bridge import membership in `bridge-imports.json`
 - [x] Host-owned, per-bridge session archive in `bridge-archives.json` with attach/prompt admission checks
-- [x] dsh-styled transcript and composer
+- [x] dsh-styled transcript: native process rows, tool cards, and composer
 - [x] Draggable left/right content-width handles, sharing dsh Web's width preference
 - [x] Composer model picker and a dsh-style statusline (turns/steps, tokens, cache hit)
 - [ ] Codex engine adapter
@@ -163,6 +163,15 @@ Selecting a saved bridge:
    button, and the directory-picker dialog;
 3. loads session history into the main transcript;
 4. keeps the composer and live streaming attached to that bridge.
+
+The transcript mirrors dsh's own chat surface rather than a bespoke log view:
+each tool call and reasoning block is a 24px disclosure row with a per-variant
+icon, a localized verb (`Read`, `Search`, `Run command`, `Write`, `Edit`, …), a
+dot separator, and a one-line argument summary; consecutive steps fold into one
+process group at dsh's 6px rhythm, above a right-aligned user bubble and a
+headerless assistant answer. Expanding a row shows the shipped result cards —
+`TerminalBlock` for shell calls, `DiffBlock` for edits and writes, and an IN/OUT
+card for everything else.
 
 The composer follows dsh's docked card geometry (`--dsh-composer-*` sizing,
 panel radius, input surface, and elevation). Its trailing control row is

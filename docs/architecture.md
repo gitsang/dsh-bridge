@@ -267,6 +267,23 @@ session-name, backend-event
 Messages use the normalized shape `{ role, content, timestamp, … }`, with
 `text`, `thinking`, `image`, and `toolCall` blocks.
 
+The transcript copies dsh's own chat vocabulary instead of inventing one:
+
+- **Process rows.** Every tool call and reasoning block is one 24px
+  `DisclosureRow`: a per-variant 14px leading icon (`read`, `search`, `bash`,
+  `write`/`edit`, `code`, `others`) or the thinking icon, a localized verb title,
+  a 2x2 dot separator, and a one-line argument-derived summary in the secondary
+  type tier. Shell rows summarize the command, search rows the query, and file
+  rows a workspace-relative path with a dotted underline.
+- **Process grouping.** Consecutive process rows fold into one group at a 6px
+  gap, so a turn reads as: user bubble → steps → answer. State is carried by
+  colour and shimmer only; the visible title never states `running`/`done`.
+- **Expanded bodies.** Shell calls expand into the `TerminalBlock` prompt card,
+  edits and writes into `DiffBlock`, and remaining tools into an IN/OUT card.
+  Single-file tools never repeat their arguments as JSON.
+- **Turn chrome.** A user message is a right-aligned bubble; an assistant answer
+  has no role header and keeps only a hover-revealed copy action.
+
 ## Security and persistence
 
 - `bridge.json` is written atomically with mode `0600` under `$DSH_HOME`.

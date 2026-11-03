@@ -404,3 +404,80 @@ test('Bridge sidebar imports sessions through a tree/list dialog', async () => {
   assert.equal(dictionaries[0].zh.importList, '列表视图')
   assert.equal(dictionaries[0].en.importConfirm, 'Import')
 })
+
+test('transcript process rows copy the shipped chat row vocabulary', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+
+  // One row per call/reasoning block: variant icon, localized title, dot, summary.
+  assert.match(source, /function bridgeToolVariant/)
+  assert.match(source, /function deriveToolSummary/)
+  assert.match(source, /h\(DisclosureRow, \{\s*icon: bridgeToolIcon\(variant\)/)
+  assert.match(source, /dshBridge_processSep/)
+  assert.match(source, /dshBridge_processSummary/)
+  for (const icon of [
+    'IconBrowseOutlineRegular',
+    'IconSearchOutlineRegular',
+    'IconApiOutlineRegular',
+    'IconEditOutlineRegular',
+    'IconCodeOutlineRegular',
+    'IconSparkleRegular',
+    'IconThinkOutlineRegular',
+  ]) {
+    assert.match(source, new RegExp(icon))
+  }
+
+  // Status words belong to the row state, never to the visible title.
+  assert.doesNotMatch(source, /title: `\$\{item\.name/)
+  assert.doesNotMatch(source, /t\('toolDone'\)/)
+
+  // Per-variant expanded bodies: terminal for shell calls, diff for edits.
+  assert.match(source, /h\(TerminalBlock, \{/)
+  assert.match(source, /h\(DiffBlock, \{/)
+  assert.match(source, /function toolDiffEntries/)
+  assert.match(source, /dshBridge_diffAdded/)
+  assert.match(source, /dshBridge_diffRemoved/)
+
+  // The user turn is a right-aligned bubble; answers have no role header.
+  assert.match(source, /\.dshBridge_userRow\{display:flex;flex-direction:column;align-items:flex-end/)
+  assert.match(source, /\.dshBridge_bubble\{[^}]*background:var\(--dsw-specific-bubble/)
+  assert.match(source, /className: 'dshBridge_answer'/)
+  assert.doesNotMatch(source, /dshBridge_turnHead/)
+  assert.doesNotMatch(source, /dshBridge_turnRole/)
+
+  // Consecutive process items fold into one block with dsh's 6px rhythm.
+  assert.match(source, /function renderTranscriptFlow/)
+  assert.match(source, /\.dshBridge_processGroup\{display:flex;flex-direction:column;gap:6px/)
+
+  const exports = moduleExports()
+  const { bridgeToolVariant, deriveToolSummary, toolDiffTotals } = exports.__test
+  assert.equal(bridgeToolVariant('read'), 'read')
+  assert.equal(bridgeToolVariant('grep'), 'search')
+  assert.equal(bridgeToolVariant('pwsh'), 'bash')
+  assert.equal(bridgeToolVariant('TaskCreate'), 'others')
+  assert.equal(
+    deriveToolSummary('read', { file_path: '/w/src/client.js' }, '/w'),
+    'src/client.js',
+  )
+  assert.equal(deriveToolSummary('bash', { command: 'ls -la\ngit status' }, '/w'), 'ls -la')
+  assert.equal(deriveToolSummary('grep', { pattern: 'openBridgeSettings' }, '/w'), 'openBridgeSettings')
+  assert.equal(deriveToolSummary('read', { file_path: '/home/me/src/a.js' }, '/w', '/home/me'), '~/src/a.js')
+  assert.equal(exports.__test.abbreviateHomePath('/home/me', '/home/me'), '~')
+  assert.equal(exports.__test.abbreviateHomePath('/home/memo/a', '/home/me'), '/home/memo/a')
+  // Totals come from a minimal line-edit script, not from both whole sides.
+  assert.deepEqual(
+    toolDiffTotals('edit', { edits: [{ oldText: 'a\nb\nc', newText: 'a\nb' }] }),
+    { added: 0, removed: 1 },
+  )
+  assert.deepEqual(
+    toolDiffTotals('edit', { edits: [{ oldText: 'a\nb', newText: 'a\nc' }] }),
+    { added: 1, removed: 1 },
+  )
+  assert.equal(
+    toolDiffTotals('edit', { edits: [{ oldText: 'a\nb', newText: 'a\nb' }] }),
+    null,
+  )
+  assert.deepEqual(toolDiffTotals('write', { content: 'a\nb' }), { added: 2, removed: 0 })
+  assert.equal(toolDiffTotals('read', { file_path: 'x' }), null)
+  // An unclassified tool keeps its raw name as the summary's lead.
+  assert.match(source, /variant === 'others' && typeof item\.name === 'string'/)
+})

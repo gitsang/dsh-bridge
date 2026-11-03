@@ -23,12 +23,14 @@ window.__ModuleLoader__.load({
 
     const {
       Button,
+      DiffBlock,
       DisclosureRow,
       HoverCard,
       IconApiOutlineRegular,
       IconArchiveOutlineRegular,
       IconArchiveOffOutlineRegular,
       IconArchiveCheckOutlineRegular,
+      IconBrowseOutlineRegular,
       IconCheckOutlineRegular,
       IconChevronDownOutlineRegular,
       IconChevronRightOutlineRegular,
@@ -54,6 +56,8 @@ window.__ModuleLoader__.load({
       IconSendOutlineRegular,
       IconSettingsOutlineRegular,
       IconSlidersTwoOutlineRegular,
+      IconSparkleRegular,
+      IconThinkOutlineRegular,
       IconTrashOutlineRegular,
       IconTriangleRightFillRegular,
       IconWorkspaceTreeOutlineRegular,
@@ -62,6 +66,7 @@ window.__ModuleLoader__.load({
       Menu,
       Modal,
       Switch,
+      TerminalBlock,
       TextShimmer,
       Tooltip,
       writeClipboard,
@@ -97,6 +102,7 @@ window.__ModuleLoader__.load({
         extraWorkspaces: [],
         activityByKey: {},
         activityLoaded: false,
+        home: null,
       },
       listeners: new Set(),
       selectHandler: null,
@@ -1604,20 +1610,38 @@ window.__ModuleLoader__.load({
       dialogCancel: '取消',
       dialogSubmit: '提交',
       dialogConfirm: '确认',
+      /* Process rows: one localized verb per tool variant, plus the chrome the
+       * shared TerminalBlock/DiffBlock primitives take as label props. */
+      toolTitleRead: '读取',
+      toolTitleSearch: '搜索',
+      toolTitleBash: '运行命令',
+      toolTitleWrite: '写入',
+      toolTitleEdit: '编辑',
+      toolTitleCode: '代码',
+      toolTitleGeneric: '工具调用',
       toolRunning: '运行中',
-      toolDone: '完成',
       toolFailed: '失败',
+      toolNoOutput: '无输出',
       toolArguments: '参数',
       toolResult: '结果',
-      emptyMessage: '（空消息）',
+      terminalCommandLine: '命令第 {n} 行',
+      terminalSignal: '信号 {signal}',
+      terminalExitCode: '退出码 {code}',
+      terminalNoExitCode: '未正常退出',
+      terminalExpandAria: '展开其余 {n} 行输出',
+      terminalExpandRest: '… 其余 {n} 行',
+      collapse: '收起',
+      collapseOutput: '收起输出',
+      codeBlockTitle: '代码',
+      codeBlockWrap: '自动换行',
+      codeBlockUnwrap: '取消换行',
       attachNotice: '已连接会话。',
       detachedNotice: '已断开；会话文件保持不变。',
-      turnCompleted: '已完成',
       thinking: '思考',
+      turnCompleted: '已完成',
       metrics: '{size} · {time}',
       notification: 'Bridge 通知',
       userRole: '我',
-      assistantRole: 'Agent',
     }
 
     const en = {
@@ -1818,20 +1842,38 @@ window.__ModuleLoader__.load({
       dialogCancel: 'Cancel',
       dialogSubmit: 'Submit',
       dialogConfirm: 'Confirm',
+      /* Process rows: one localized verb per tool variant, plus the chrome the
+       * shared TerminalBlock/DiffBlock primitives take as label props. */
+      toolTitleRead: 'Read',
+      toolTitleSearch: 'Search',
+      toolTitleBash: 'Run command',
+      toolTitleWrite: 'Write',
+      toolTitleEdit: 'Edit',
+      toolTitleCode: 'Code',
+      toolTitleGeneric: 'Tool call',
       toolRunning: 'running',
-      toolDone: 'done',
       toolFailed: 'failed',
+      toolNoOutput: 'No output',
       toolArguments: 'Arguments',
       toolResult: 'Result',
-      emptyMessage: '(empty message)',
+      terminalCommandLine: 'Command line {n}',
+      terminalSignal: 'signal {signal}',
+      terminalExitCode: 'exit code {code}',
+      terminalNoExitCode: 'no exit code',
+      terminalExpandAria: 'Expand {n} more output lines',
+      terminalExpandRest: '… {n} more lines',
+      collapse: 'Collapse',
+      collapseOutput: 'Collapse output',
+      codeBlockTitle: 'Code',
+      codeBlockWrap: 'Wrap',
+      codeBlockUnwrap: 'Unwrap',
       attachNotice: 'Session connected.',
       detachedNotice: 'Detached; the session file is unchanged.',
+      thinking: 'Think',
       turnCompleted: 'Completed',
-      thinking: 'Thinking',
       metrics: '{size} · {time}',
       notification: 'Bridge notification',
       userRole: 'You',
-      assistantRole: 'Agent',
     }
 
     const CSS_ID = '@gitsang/dsh-bridge/Bridge.css'
@@ -1845,8 +1887,8 @@ window.__ModuleLoader__.load({
       '.dshBridge_headSpacer{flex:1;min-width:8px}',
       '.dshBridge_body{position:relative;display:flex;flex:1;min-height:0;--dsh-chat-content-width:var(--dsh-chat-user-width,clamp(680px, calc(var(--dsh-conversation-column-width,0px) * .64), 920px));--dsh-composer-card-max-width:calc(var(--dsh-chat-content-width) + 32px);--dsh-composer-side-clearance:16px;--dsh-composer-dock-inset:8px}',
       '.dshBridge_centre{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}',
-      '.dshBridge_scroll{flex:1;min-height:0;overflow:auto;scroll-behavior:auto}',
-      '.dshBridge_column{box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width,712px);margin:0 auto;padding:20px 24px 8px}',
+      '.dshBridge_scroll{flex:1;min-height:0;overflow:auto;scroll-behavior:auto;padding:16px calc(var(--dsh-composer-side-clearance,16px) + 16px)}',
+      '.dshBridge_column{box-sizing:border-box;width:100%;max-width:var(--dsh-chat-content-width,712px);margin:0 auto}',
       '.wSkVaW_widthHandle{z-index:0;width:min(10px, calc((100% - var(--dsh-chat-content-width)) / 2 - 24px - 24px));cursor:col-resize;position:absolute;top:0;bottom:0}',
       '.wSkVaW_widthHandle[data-side=left]{right:calc(50% + var(--dsh-chat-content-width) / 2 + 24px)}',
       '.wSkVaW_widthHandle[data-side=right]{left:calc(50% + var(--dsh-chat-content-width) / 2 + 24px)}',
@@ -1856,21 +1898,49 @@ window.__ModuleLoader__.load({
       '.wSkVaW_widthHandle:hover:after,.wSkVaW_widthHandle[data-dragging]:after{opacity:1}',
       '.wSkVaW_widthHandle[data-dragging]{z-index:8}',
       '.dshBridge_body:has([data-conversation-composer-overlay]) .wSkVaW_widthHandle{display:none}',
-      '.dshBridge_turn{display:flex;flex-direction:column;gap:6px;margin-bottom:20px}',
-      '.dshBridge_turnHead{display:flex;align-items:center;gap:8px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor)}',
-      '.dshBridge_turnRole{font-weight:600;color:var(--dsw-alias-label-secondary,currentColor)}',
-      '.dshBridge_userText{font-size:14px;line-height:24px;color:var(--dsw-alias-label-primary,currentColor);white-space:pre-wrap;word-break:break-word}',
-      '.dshBridge_assistantBody{font-size:14px;line-height:24px;color:var(--dsw-alias-label-primary,currentColor);word-break:break-word}',
-      '.dshBridge_turnFoot{display:flex;align-items:center;gap:8px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor)}',
-      '.dshBridge_toolGroup{display:flex;flex-direction:column;gap:2px;margin:2px 0}',
-      '.dshBridge_toolBody{margin:2px 0 4px;padding-left:10px;border-left:2px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))}',
-      '.dshBridge_toolLabel{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary,currentColor);margin:4px 0 2px}',
-      '.dshBridge_pre{margin:0;padding:8px 10px;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-markdown-code-block,rgba(0,0,0,.04));font-family:var(--dsw-font-markdown-code-font-family,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:18px;white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto}',
+      /* Transcript flow. Column spacing, row geometry, and colour tiers are
+       * copied from dsh's own chat surface: process rows sit 6px apart inside
+       * one block, blocks and answers are separated by 12px, and the answer
+       * clears the process block it follows by 16px. */
+      '.dshBridge_flow{display:flex;flex-direction:column;gap:12px}',
+      '.dshBridge_flow>.dshBridge_userRow+.dshBridge_processGroup{margin-top:4px}',
+      '.dshBridge_flow>.dshBridge_processGroup+.dshBridge_answer{margin-top:4px}',
+      '.dshBridge_processGroup{display:flex;flex-direction:column;gap:6px;min-width:0}',
+      '.dshBridge_processRow{display:flex;flex-direction:column;min-width:0}',
+      '.dshBridge_processRow[data-variant="read"] [data-disclosure-header],.dshBridge_processRow[data-variant="search"] [data-disclosure-header]{min-width:0}',
+      '.dshBridge_processBody{display:flex;flex-direction:column;gap:6px;padding-left:calc(22px + var(--dsh-content-font-delta,0px))}',
+      '.dshBridge_processSep{flex:none;width:2px;height:2px;margin:0 8px;border-radius:1px;background:var(--dsw-alias-label-caption,rgba(0,0,0,.35))}',
+      '.dshBridge_processSummary{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--dsh-content-font-size-secondary,13px);line-height:calc(24px + var(--dsh-content-font-delta,0px))}',
+      '.dshBridge_processSummary[data-streaming="true"]{mask-image:linear-gradient(to right,black calc(100% - 48px),transparent)}',
+      '.dshBridge_processError{color:var(--dsw-alias-state-error-primary,#d33)}',
+      '.dshBridge_processFileLink{text-decoration:underline dotted;text-decoration-thickness:1px;text-underline-offset:3px;cursor:pointer}',
+      '.dshBridge_processDiff{flex:none;margin-left:10px;font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:calc(var(--dsh-content-font-size-secondary,13px) - 2px);line-height:calc(24px + var(--dsh-content-font-delta,0px));transform:translateY(.5px);white-space:nowrap}',
+      '.dshBridge_diffAdded,.dshBridge_diffRemoved{color:inherit}',
+      '.dshBridge_processRow:is(:hover,[data-expanded="true"]) .dshBridge_diffAdded{color:var(--dsw-alias-state-success-primary,#16a34a)}',
+      '.dshBridge_processRow:is(:hover,[data-expanded="true"]) .dshBridge_diffRemoved{color:var(--dsw-alias-state-error-primary,#dc2626)}',
+      '.dshBridge_thinkRow[data-expanded] [data-disclosure-header]{position:sticky;top:0;z-index:1;background:var(--dsw-alias-bg-base,Canvas)}',
+      /* Expanded tool body: dsh's input/output card, indented under the row. */
+      '.dshBridge_ioCard{display:flex;flex-direction:column;margin:4px 0 4px 4px;border:.5px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08));border-radius:var(--dsw-radius-lg,16px);background:var(--dsw-alias-markdown-code-block,rgba(0,0,0,.04));font-family:var(--dsw-font-markdown-code-block-small,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:18px}',
+      '.dshBridge_ioSection{display:grid;grid-template-columns:max-content minmax(0,1fr);align-items:baseline;column-gap:14px;max-height:150px;padding:12px 16px;overflow-y:auto}',
+      '.dshBridge_ioLabel{position:sticky;top:0;align-self:start;color:var(--dsw-alias-label-caption,var(--dsw-alias-label-tertiary,currentColor))}',
+      '.dshBridge_ioDivider{flex:none;height:.5px;background:var(--dsw-alias-border-l2,rgba(0,0,0,.1))}',
+      '.dshBridge_ioText{min-width:0;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-secondary,currentColor)}',
+      '.dshBridge_ioText[data-error="true"]{color:var(--dsw-alias-state-error-primary,#d33)}',
+      /* User input: one right-aligned bubble, as dsh renders submitted text. */
+      '.dshBridge_userRow{display:flex;flex-direction:column;align-items:flex-end;gap:6px}',
+      '.dshBridge_userStack{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:0;max-width:min(calc(var(--dsh-chat-content-width,748px) * .702),82%)}',
+      '.dshBridge_bubble{max-width:100%;padding:10px 16px;border-radius:var(--dsw-radius-xl,20px);background:var(--dsw-specific-bubble,var(--dsw-alias-bg-layer-2,rgba(0,0,0,.04)));color:var(--dsw-alias-label-primary,currentColor);font-size:var(--dsh-content-font-size,14px);line-height:calc(22px + var(--dsh-content-font-delta,0px));white-space:pre-wrap;word-break:break-word}',
+      /* Assistant answer: body only, no role header, copy action below. */
+      '.dshBridge_answer{display:flex;flex-direction:column;min-width:0}',
+      '.dshBridge_assistantBody{display:flex;flex-direction:column;gap:16px;font-size:var(--dsh-content-font-size,14px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-primary,currentColor);word-break:break-word}',
+      '.dshBridge_stopped{align-self:flex-start;padding:0 6px;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05));color:var(--dsw-alias-label-tertiary,currentColor);font-size:11px;line-height:18px}',
+      '.dshBridge_answerActions{margin-top:16px;margin-left:-6px;opacity:0;transition:opacity .1s ease}',
+      '.dshBridge_answer:hover .dshBridge_answerActions,.dshBridge_answerActions:focus-within{opacity:1}',
       '.dshBridge_streaming{min-height:24px}',
       '.dshBridge_blank{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;height:100%;padding:24px;text-align:center;color:var(--dsw-alias-label-tertiary,currentColor)}',
       '.dshBridge_blankTitle{font-size:15px;line-height:22px;font-weight:600;color:var(--dsw-alias-label-primary,currentColor)}',
       '.dshBridge_blankHint{font-size:12px;line-height:20px;max-width:420px}',
-      '.dshBridge_notice{margin:0 auto;max-width:var(--dsh-chat-content-width,712px);padding:0 24px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,currentColor)}',
+      '.dshBridge_notice{margin:0 auto;max-width:var(--dsh-chat-content-width,712px);padding:0 calc(var(--dsh-composer-side-clearance,16px) + 16px);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,currentColor)}',
       '.dshBridge_notice[data-error="true"]{color:var(--dsw-alias-state-error-primary,#d33)}',
       '.dshBridge_composerSeat{flex:none;padding:0 var(--dsh-composer-side-clearance,16px) 4px}',
       '.dshBridge_composerStack{box-sizing:border-box;display:flex;flex-direction:column;gap:4px;width:100%;max-width:var(--dsh-composer-card-max-width,calc(clamp(680px,calc(64% + 20.48px),920px) + 32px));margin:0 auto}',
@@ -2701,61 +2771,431 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** One tool call and its result, folded into dsh's shared disclosure row. */
-    function ToolRow({ item, t }) {
-      const [open, setOpen] = useState(false)
-      const status = item.status === 'running' ? t('toolRunning') : item.status === 'error' ? t('toolFailed') : t('toolDone')
-      const output = typeof item.output === 'string' && item.output !== '' ? item.output : null
+    /**
+     * Intermediate-process rows copy dsh Web's chat rows instead of inventing a
+     * second vocabulary: one 24px line per reasoning block or tool call shaped
+     * as `[16px variant icon] title · one-line summary`, where the summary is
+     * derived from the call arguments the same way the shipped tool renderer
+     * derives it (file tools show a workspace-relative path, shell tools show
+     * the command, search tools show the query).
+     */
+    const TOOL_VARIANT_BY_NAME = {
+      bash: 'bash',
+      pwsh: 'bash',
+      read: 'read',
+      read_image: 'read',
+      ls: 'read',
+      web_fetch: 'read',
+      grep: 'search',
+      glob: 'search',
+      web_search: 'search',
+      write: 'write',
+      edit: 'edit',
+      run_code: 'code',
+    }
+
+    /** Locale key per row variant, matching dsh's `tool.title.*` wording. */
+    const TOOL_VARIANT_TITLE_KEYS = {
+      bash: 'toolTitleBash',
+      read: 'toolTitleRead',
+      search: 'toolTitleSearch',
+      write: 'toolTitleWrite',
+      edit: 'toolTitleEdit',
+      code: 'toolTitleCode',
+      others: 'toolTitleGeneric',
+    }
+
+    /** Summary key preference per variant (args-derived, as dsh's tool model). */
+    const TOOL_SUMMARY_KEYS = {
+      bash: ['description', 'command'],
+      read: ['path', 'file_path', 'url'],
+      search: ['query', 'pattern', 'url'],
+      write: ['path', 'file_path'],
+      edit: ['path', 'file_path'],
+      code: ['description'],
+      others: [],
+    }
+
+    const TOOL_FILE_PATH_KEYS = ['path', 'file_path']
+    const TOOL_FILE_PATH_VARIANTS = new Set(['read', 'write', 'edit'])
+    const TOOL_DIFF_VARIANTS = new Set(['write', 'edit'])
+
+    function bridgeToolVariant(name) {
+      return TOOL_VARIANT_BY_NAME[name] ?? 'others'
+    }
+
+    function bridgeToolTitleKey(name) {
+      return TOOL_VARIANT_TITLE_KEYS[bridgeToolVariant(name)]
+    }
+
+    function bridgeToolState(status) {
+      if (status === 'running') return 'running'
+      if (status === 'error') return 'error'
+      return 'ok'
+    }
+
+    function bridgeToolIcon(variant) {
+      if (variant === 'read') return h(IconBrowseOutlineRegular, { size: 14 })
+      if (variant === 'search') return h(IconSearchOutlineRegular, { size: 14 })
+      if (variant === 'bash') return h(IconApiOutlineRegular, { size: 14 })
+      if (variant === 'write' || variant === 'edit') return h(IconEditOutlineRegular, { size: 14 })
+      if (variant === 'code') return h(IconCodeOutlineRegular, { size: 14 })
+      return h(IconSparkleRegular, { size: 14 })
+    }
+
+    function firstLineText(text) {
+      if (typeof text !== 'string') return ''
+      const newline = text.indexOf('\n')
+      return newline === -1 ? text : text.slice(0, newline)
+    }
+
+    /**
+     * While a reasoning block is still streaming, only completed paragraphs are
+     * eligible for the preview; the sentence being written would flicker.
+     */
+    function latestParagraphFirstLine(text) {
+      if (typeof text !== 'string') return ''
+      let summary = ''
+      let paragraphStart = 0
+      const separator = /\r?\n(?:[\t ]*\r?\n)+/g
+      for (;;) {
+        const next = separator.exec(text)
+        const paragraphEnd = next === null ? text.length : next.index + next[0].indexOf('\n')
+        const newline = text.indexOf('\n', paragraphStart)
+        if (newline !== -1 && newline <= paragraphEnd) {
+          const candidate = text.slice(paragraphStart, newline).trim()
+          if (candidate !== '') summary = candidate
+        }
+        if (next === null) return summary
+        paragraphStart = next.index + next[0].length
+      }
+    }
+
+    function parseToolArguments(value) {
+      if (value === null || value === undefined) return null
+      if (typeof value === 'object') return Array.isArray(value) ? null : value
+      if (typeof value !== 'string' || value === '') return null
+      try {
+        const parsed = JSON.parse(value)
+        return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+      } catch {
+        return null
+      }
+    }
+
+    /** Session-relative paths read the way the shipped chat surface shows them. */
+    function displayToolPath(value, cwd) {
+      if (typeof value !== 'string' || value === '') return ''
+      if (typeof cwd !== 'string' || cwd === '') return value
+      const base = cwd.endsWith('/') ? cwd : `${cwd}/`
+      return value.startsWith(base) ? value.slice(base.length) : value
+    }
+
+    /** A path under the host account home reads as `~/…`, matching dsh. */
+    function abbreviateHomePath(value, home) {
+      if (typeof value !== 'string' || value === '' || typeof home !== 'string' || home === '') return value
+      const base = home.endsWith('/') ? home.slice(0, -1) : home
+      if (base === '' || base === '/') return value
+      if (value === base) return '~'
+      return value.startsWith(`${base}/`) ? `~${value.slice(base.length)}` : value
+    }
+
+    function deriveToolSummary(name, args, cwd, home) {
+      if (args === null) return ''
+      const variant = bridgeToolVariant(name)
+      if (variant === 'search' && Array.isArray(args.queries)) {
+        const queries = args.queries.filter((query) => typeof query === 'string' && query !== '')
+        if (queries.length > 0) return queries.map(firstLineText).join(', ')
+      }
+      for (const key of TOOL_SUMMARY_KEYS[variant]) {
+        const value = args[key]
+        if (typeof value !== 'string' || value === '') continue
+        const line = firstLineText(value)
+        return TOOL_FILE_PATH_KEYS.includes(key) ? abbreviateHomePath(displayToolPath(line, cwd), home) : line
+      }
+      for (const value of Object.values(args)) {
+        if (typeof value === 'string' && value !== '') return firstLineText(value)
+      }
+      return ''
+    }
+
+    /**
+     * Text lines of one edit side, following dsh's rule: an absent side draws
+     * nothing and a single trailing newline terminates the last line rather
+     * than adding an empty one.
+     */
+    function diffSideLines(value) {
+      if (typeof value !== 'string' || value === '') return []
+      const text = value.endsWith('\n') ? value.slice(0, -1) : value
+      return text.split('\n')
+    }
+
+    /** `path` + both sides of every edit, in dsh's DiffBlock input shape. */
+    function toolDiffEdits(name, args) {
+      if (args === null) return []
+      const variant = bridgeToolVariant(name)
+      if (!TOOL_DIFF_VARIANTS.has(variant)) return []
+      const rawEdits = Array.isArray(args.edits) ? args.edits : null
+      const edits = rawEdits === null
+        ? [{ oldText: args.old_string ?? args.oldText ?? null, newText: args.new_string ?? args.newText ?? (variant === 'write' ? args.content : null) }]
+        : rawEdits.filter((edit) => edit !== null && typeof edit === 'object')
+          .map((edit) => ({ oldText: edit.oldText ?? edit.old_string ?? null, newText: edit.newText ?? edit.new_string ?? null }))
+      return edits.filter((edit) => (edit.oldText ?? '') !== '' || (edit.newText ?? '') !== '')
+    }
+
+    function toolDiffEntries(name, args, cwd) {
+      if (args === null) return null
+      const path = displayToolPath(args.file_path ?? args.path ?? '', cwd)
+      if (path === '') return null
+      const edits = toolDiffEdits(name, args)
+      return edits.length === 0 ? null : { path, edits }
+    }
+
+    /**
+     * Chrome copy for the primitives' TerminalBlock and DiffBlock. Those
+     * components take every label as data, so the same tables dsh ships are
+     * restated here against the Bridge locale namespace.
+     */
+    function toolBlockLabels(t) {
+      return {
+        commandLine: (n) => t('terminalCommandLine', { n }),
+        signal: (signal) => t('terminalSignal', { signal }),
+        exitCode: (code) => t('terminalExitCode', { code }),
+        noExitCode: t('terminalNoExitCode'),
+        running: t('toolRunning'),
+        failed: t('toolFailed'),
+        done: t('turnCompleted'),
+        copy: t('copy'),
+        copied: t('copied'),
+        noOutput: t('toolNoOutput'),
+        collapseAria: t('collapseOutput'),
+        collapse: t('collapse'),
+        expandAria: (hidden) => t('terminalExpandAria', { n: hidden }),
+        expand: (hidden) => t('terminalExpandRest', { n: hidden }),
+        codeLabel: t('codeBlockTitle'),
+        wrapLabel: t('codeBlockWrap'),
+        unwrapLabel: t('codeBlockUnwrap'),
+      }
+    }
+
+    /**
+     * Count the added and removed lines of one edit. The counts come from the
+     * same minimal line-edit script DiffBlock draws, so a `+N -N` summary and
+     * its expanded card can never disagree. Very large sides fall back to the
+     * coarse both-sides count rather than paying for the quadratic table.
+     */
+    function countDiffLines(oldText, newText) {
+      const before = diffSideLines(oldText)
+      const after = diffSideLines(newText)
+      if (before.length === 0) return { added: after.length, removed: 0 }
+      if (after.length === 0) return { added: 0, removed: before.length }
+      if (before.length * after.length > 250000) return { added: after.length, removed: before.length }
+      let previous = new Array(after.length + 1).fill(0)
+      for (let i = 1; i <= before.length; i += 1) {
+        const current = new Array(after.length + 1).fill(0)
+        for (let j = 1; j <= after.length; j += 1) {
+          current[j] = before[i - 1] === after[j - 1]
+            ? previous[j - 1] + 1
+            : Math.max(previous[j], current[j - 1])
+        }
+        previous = current
+      }
+      const kept = previous[after.length]
+      return { added: after.length - kept, removed: before.length - kept }
+    }
+
+    /** `+added −removed` for the file tools that rewrite content, as dsh shows it. */
+    function toolDiffTotals(name, args) {
+      if (args === null) return null
+      const edits = toolDiffEdits(name, args)
+      if (edits.length === 0) return null
+      let added = 0
+      let removed = 0
+      for (const edit of edits) {
+        const counts = countDiffLines(edit.oldText, edit.newText)
+        added += counts.added
+        removed += counts.removed
+      }
+      return added === 0 && removed === 0 ? null : { added, removed }
+    }
+
+    /** Expanded tool body: bash gets a terminal card, file edits a diff card. */
+    function toolExpandedBody(name, variant, args, output, state, cwd, t, labels) {
+      if (variant === 'bash' && args !== null && typeof args.command === 'string') {
+        return h(TerminalBlock, {
+          command: args.command,
+          cwd: typeof cwd === 'string' ? cwd : undefined,
+          output: output ?? '',
+          running: state === 'running',
+          maxLines: Infinity,
+          labels,
+        })
+      }
+      const diff = toolDiffEntries(name, args, cwd)
+      if (diff !== null) {
+        const diffs = diff.edits.map((edit) => ({
+          path: diff.path,
+          oldText: (edit.oldText ?? '') === '' ? null : diffSideLines(edit.oldText).join('\n'),
+          newText: diffSideLines(edit.newText).join('\n'),
+        }))
+        return h(DiffBlock, { diffs, maxLines: 9, labels })
+      }
+      // dsh shows a single-file tool's path as the only args interaction, so the
+      // expanded body carries the result alone rather than restating JSON args.
+      const singleFile = TOOL_FILE_PATH_VARIANTS.has(variant)
+      const rawArgs = singleFile || args === null ? '' : safeJson(args)
+      if (rawArgs === '' && output === null) return null
       return h(
         'div',
-        null,
+        { className: 'dshBridge_ioCard' },
+        rawArgs === '' ? null : h('div', { className: 'dshBridge_ioSection' },
+          h('span', { className: 'dshBridge_ioLabel' }, t('toolArguments')),
+          h('span', { className: 'dshBridge_ioText' }, rawArgs)),
+        rawArgs !== '' && output !== null ? h('span', { className: 'dshBridge_ioDivider', 'aria-hidden': true }) : null,
+        output === null ? null : h('div', { className: 'dshBridge_ioSection' },
+          h('span', { className: 'dshBridge_ioLabel' }, t('toolResult')),
+          h('span', { className: 'dshBridge_ioText', 'data-error': state === 'error' ? 'true' : undefined }, output)),
+      )
+    }
+
+    /** One tool call: dsh's 24px summary row plus its expanded result card. */
+    function ToolRow({ item, cwd, home, t }) {
+      const [open, setOpen] = useState(false)
+      const variant = bridgeToolVariant(item.name)
+      const state = bridgeToolState(item.status)
+      const args = parseToolArguments(item.arguments)
+      const output = typeof item.output === 'string' && item.output !== '' ? item.output : null
+      const summary = deriveToolSummary(item.name, args, cwd, home)
+      const errorSummary = state === 'error' && output !== null ? firstLineText(output) : ''
+      // An unclassified tool has no verb of its own, so the raw name leads the
+      // summary line: `Tool call · TaskGet · 1`, the same order dsh renders.
+      const named = variant === 'others' && typeof item.name === 'string' && item.name !== ''
+        ? [item.name, summary].filter(Boolean).join(' · ')
+        : summary
+      const summaryText = errorSummary !== '' ? errorSummary : named
+      const totals = toolDiffTotals(item.name, args)
+      const expandable = output !== null || args !== null || typeof item.arguments === 'string'
+      const collapsed = []
+      if (summaryText !== '') {
+        collapsed.push(h('span', { key: 'sep', className: 'dshBridge_processSep', 'data-shimmer-decoration': true, 'aria-hidden': true }))
+        const summaryClass = [
+          'dshBridge_processSummary',
+          state === 'error' ? 'dshBridge_processError' : '',
+          TOOL_FILE_PATH_VARIANTS.has(variant) ? 'dshBridge_processFileLink' : '',
+        ].filter(Boolean).join(' ')
+        collapsed.push(h('span', {
+          key: 'summary',
+          className: summaryClass,
+          'data-streaming': state === 'running' ? 'true' : undefined,
+        }, summaryText))
+      }
+      if (totals !== null) {
+        collapsed.push(h('span', {
+          key: 'diff',
+          className: 'dshBridge_processDiff',
+        },
+          h('span', { className: 'dshBridge_diffAdded' }, `+${totals.added}`),
+          ' ',
+          h('span', { className: 'dshBridge_diffRemoved' }, `-${totals.removed}`)))
+      }
+      const labels = toolBlockLabels(t)
+      const body = open ? toolExpandedBody(item.name, variant, args, output, state, cwd, t, labels) : null
+      return h(
+        'div',
+        {
+          className: 'dshBridge_processRow',
+          'data-variant': variant,
+          'data-tool': item.name ?? 'tool',
+          'data-state': state,
+          'data-expanded': open ? 'true' : undefined,
+        },
         h(DisclosureRow, {
-          icon: h(IconCodeOutlineRegular, { size: 16 }),
-          title: `${item.name ?? 'tool'} · ${status}`,
+          icon: bridgeToolIcon(variant),
+          title: t(bridgeToolTitleKey(item.name)),
+          open,
+          expandable,
+          onToggle: () => setOpen(!open),
+          expandOnRowClick: true,
+          running: state === 'running',
+          collapsedContent: collapsed.length === 0 ? null : h(React.Fragment, null, ...collapsed),
+        }, body === null
+          ? null
+          : h('div', { className: 'dshBridge_processBody' }, body)),
+      )
+    }
+
+    /** One assistant reasoning block: dsh's thinking row with a rolling preview. */
+    function ThinkingRow({ text, running, t }) {
+      const [open, setOpen] = useState(false)
+      const preview = (running ? latestParagraphFirstLine(text) : firstLineText(text)).replaceAll('**', '')
+      const collapsed = preview === ''
+        ? null
+        : h(React.Fragment, null,
+            h('span', { className: 'dshBridge_processSep', 'data-shimmer-decoration': true, 'aria-hidden': true }),
+            h('span', { className: 'dshBridge_processSummary', 'data-streaming': running ? 'true' : undefined }, preview))
+      return h(
+        'div',
+        {
+          className: 'dshBridge_processRow dshBridge_thinkRow',
+          'data-variant': 'think',
+          'data-state': running ? 'running' : 'ok',
+          'data-expanded': open ? 'true' : undefined,
+          'data-preview': preview === '' ? undefined : 'true',
+        },
+        h(DisclosureRow, {
+          icon: h(IconThinkOutlineRegular, { size: 14 }),
+          title: t('thinking'),
           open,
           expandable: true,
           onToggle: () => setOpen(!open),
           expandOnRowClick: true,
-          running: item.status === 'running',
+          running,
+          collapsedContent: collapsed,
         }, open
-          ? h(
-              'div',
-              { className: 'dshBridge_toolBody' },
-              item.arguments !== undefined ? h('div', { className: 'dshBridge_toolLabel' }, t('toolArguments')) : null,
-              item.arguments !== undefined ? h('pre', { className: 'dshBridge_pre' }, safeJson(item.arguments)) : null,
-              output !== null ? h('div', { className: 'dshBridge_toolLabel' }, t('toolResult')) : null,
-              output !== null ? h('pre', { className: 'dshBridge_pre' }, output) : null,
-            )
+          ? h('div', { className: 'dshBridge_processBody' }, h(Markdown, { text, streaming: running, t, variant: 'compact' }))
           : null),
       )
     }
 
-    function ThinkingRow({ text, running, t }) {
-      const [open, setOpen] = useState(false)
-      return h(DisclosureRow, {
-        icon: h(IconApiOutlineRegular, { size: 14 }),
-        title: running ? h(TextShimmer, { active: true }, t('thinking')) : t('thinking'),
-        open,
-        expandable: true,
-        onToggle: () => setOpen(!open),
-        expandOnRowClick: true,
-        running,
-      }, open ? h('div', { className: 'dshBridge_toolBody' }, h(Markdown, { text, streaming: running, t, variant: 'compact' })) : null)
+    /**
+     * Split one assistant message into the two things dsh renders separately:
+     * reasoning rows that belong to the intermediate process, and text/image
+     * blocks that form the answer. Tool calls are already separate items.
+     */
+    function assistantParts(message) {
+      const content = message?.content
+      if (typeof content === 'string') {
+        return { reasoning: [], answer: content.trim() === '' ? null : { ...message, content } }
+      }
+      if (!Array.isArray(content)) return { reasoning: [], answer: null }
+      const reasoning = []
+      const answer = []
+      for (const block of content) {
+        if (block === null || typeof block !== 'object') continue
+        if (block.type === 'thinking') reasoning.push(block)
+        // A blank text block is protocol punctuation, not an answer.
+        else if (block.type === 'text' && typeof block.text === 'string' && block.text.trim() === '') continue
+        else if (block.type === 'text' || block.type === 'image') answer.push(block)
+      }
+      return {
+        reasoning,
+        answer: answer.length === 0 ? null : { ...message, content: answer },
+      }
     }
 
-    /** Render one durable or streaming assistant message body. */
-    function AssistantContent({ message, streaming, t }) {
-      const blocks = Array.isArray(message?.content) ? message.content : []
-      if (blocks.length === 0 && typeof message?.content === 'string') {
-        return message.content === '' ? null : h(Markdown, { text: message.content, streaming, t })
-      }
+    /** Reasoning rows for one message, shaped like dsh's thinking disclosures. */
+    function reasoningRows(message, running, t, keyPrefix) {
+      return (message === null ? [] : assistantParts(message).reasoning).map((block, index) =>
+        h(ThinkingRow, { key: `${keyPrefix}-think-${index}`, text: block.thinking ?? '', running, t }))
+    }
+
+    /** Render one answer body: Markdown text and inline images only. */
+    function AssistantContent({ blocks, streaming, t }) {
       const nodes = []
       blocks.forEach((block, index) => {
-        if (!block || typeof block !== 'object') return
+        if (block === null || typeof block !== 'object') return
         if (block.type === 'text') {
           nodes.push(h('div', { key: `t${index}`, className: 'dshBridge_assistantBody' }, h(Markdown, { text: block.text ?? '', streaming, t })))
-        } else if (block.type === 'thinking') {
-          nodes.push(h(ThinkingRow, { key: `k${index}`, text: block.thinking ?? '', running: streaming, t }))
         } else if (block.type === 'image') {
           const source = block.source ?? {}
           const src = typeof source.data === 'string' ? `data:${source.mediaType ?? 'image/png'};base64,${source.data}` : block.data
@@ -2767,63 +3207,99 @@ window.__ModuleLoader__.load({
       return nodes.length === 0 ? null : h(React.Fragment, null, ...nodes)
     }
 
+    /** A user message reads as one right-aligned bubble, as in dsh Web. */
     function UserTurn({ message, t }) {
       const text = textOf(message.content)
       const images = Array.isArray(message.content) ? message.content.filter((block) => block && block.type === 'image') : []
+      const stack = []
+      if (text !== '') stack.push(h('div', { key: 'text', className: 'dshBridge_bubble' }, text))
+      images.forEach((block, index) => {
+        const source = block.source ?? {}
+        const src = typeof source.data === 'string' ? `data:${source.mediaType ?? 'image/png'};base64,${source.data}` : block.data
+        if (typeof src === 'string') stack.push(h('img', { key: `img${index}`, src, alt: '', style: { maxWidth: '100%', borderRadius: 12 } }))
+      })
+      if (stack.length === 0) return null
       return h(
         'div',
-        { className: 'dshBridge_turn', 'data-role': 'user' },
-        h(
-          'div',
-          { className: 'dshBridge_turnHead' },
-          h('span', { className: 'dshBridge_turnRole' }, t('userRole')),
-          message.timestamp ? h('span', null, formatTime(message.timestamp)) : null,
-        ),
-        text !== '' ? h('div', { className: 'dshBridge_userText' }, text) : null,
-        ...images.map((block, index) => {
-          const source = block.source ?? {}
-          const src = typeof source.data === 'string' ? `data:${source.mediaType ?? 'image/png'};base64,${source.data}` : block.data
-          return typeof src === 'string' ? h('img', { key: `img${index}`, src, alt: '', style: { maxWidth: '100%', borderRadius: 12 } }) : null
-        }),
+        {
+          className: 'dshBridge_userRow',
+          'data-role': 'user',
+          'aria-label': t('userRole'),
+          title: message.timestamp ? formatTime(message.timestamp) : undefined,
+        },
+        h('div', { className: 'dshBridge_userStack' }, ...stack),
       )
     }
 
-    function hasRenderableContent(message) {
-      const content = message?.content
-      if (typeof content === 'string') return content.trim() !== ''
-      if (!Array.isArray(content)) return false
-      return content.some((block) => block && (block.type === 'text' || block.type === 'thinking' || block.type === 'image'))
-    }
-
+    /** The assistant answer: built-in body, stop badge, and dsh's copy action below it. */
     function AssistantTurn({ message, streaming, t }) {
-      // An assistant message that only carries tool calls is presented by the
-      // tool rows, not as an empty agent turn.
-      if (!streaming && !hasRenderableContent(message)) return null
-      const body = h(AssistantContent, { message, streaming, t })
+      if (!streaming && message === null) return null
+      const blocks = Array.isArray(message?.content) ? message.content : []
+      const body = message === null ? null : h(AssistantContent, { blocks, streaming, t })
       const text = textOf(message?.content)
       return h(
         'div',
-        { className: 'dshBridge_turn', 'data-role': 'assistant' },
-        h(
-          'div',
-          { className: 'dshBridge_turnHead' },
-          h('span', { className: 'dshBridge_turnRole' }, t('assistantRole')),
-          message?.model ? h('span', null, message.model) : null,
-        ),
-        body === null && streaming ? h('div', { className: 'dshBridge_assistantBody dshBridge_streaming' }, h(TextShimmer, { active: true }, '…')) : body,
+        { className: 'dshBridge_answer', 'data-role': 'assistant' },
+        body === null && streaming
+          ? h('div', { className: 'dshBridge_assistantBody dshBridge_streaming' }, h(TextShimmer, { active: true }, '…'))
+          : body,
         !streaming && message?.stopReason === 'aborted'
-          ? h('div', { className: 'dshBridge_turnFoot' }, t('stopped'))
+          ? h('div', { className: 'dshBridge_stopped' }, t('stopped'))
           : null,
         !streaming && text !== ''
-          ? h('div', { className: 'dshBridge_turnFoot' },
-              h('span', null, t('turnCompleted')),
-              h(CopyButton, { text, t }))
+          ? h('div', { className: 'dshBridge_answerActions' }, h(CopyButton, { text, t }))
           : null,
       )
     }
 
-    function ToolItem({ item, t }) {
-      return h('div', { className: 'dshBridge_toolGroup' }, h(ToolRow, { item, t }))
+    /**
+     * Build the transcript flow: consecutive reasoning rows, tool rows, and
+     * process-only assistant messages collapse into one process block, so the
+     * session reads as user bubble → steps → answer, which is how dsh groups a
+     * turn. `streamingMessage` contributes its reasoning rows and, once text
+     * exists, its answer tail.
+     */
+    function renderTranscriptFlow(items, cwd, t, streamingMessage, home) {
+      const nodes = []
+      let process = null
+      const flush = () => {
+        if (process !== null && process.children.length > 0) {
+          nodes.push(h('div', { key: `process-${process.key}`, className: 'dshBridge_processGroup' }, ...process.children))
+        }
+        process = null
+      }
+      const pushProcess = (key, children) => {
+        if (children.length === 0) return
+        if (process === null) process = { key, children: [] }
+        process.children.push(...children)
+      }
+      for (const item of items) {
+        if (item.kind === 'tool') {
+          pushProcess(item.id, [h(ToolRow, { key: item.id, item, cwd, home, t })])
+          continue
+        }
+        const message = item.message
+        if (message?.role === 'user') {
+          flush()
+          nodes.push(h(UserTurn, { key: item.id, message, t }))
+          continue
+        }
+        if (message?.role !== 'assistant') continue
+        const parts = assistantParts(message)
+        pushProcess(item.id, reasoningRows(message, false, t, item.id))
+        if (parts.answer !== null) {
+          flush()
+          nodes.push(h(AssistantTurn, { key: item.id, message: parts.answer, t }))
+        }
+      }
+      if (streamingMessage !== null && streamingMessage !== undefined) {
+        pushProcess('streaming', reasoningRows(streamingMessage, true, t, 'streaming'))
+        const parts = assistantParts(streamingMessage)
+        flush()
+        nodes.push(h(AssistantTurn, { key: 'streaming', message: parts.answer, streaming: true, t }))
+      }
+      flush()
+      return nodes
     }
 
     function ConfigField({ field, value, configured, disabled, onChange, t }) {
@@ -4395,6 +4871,7 @@ window.__ModuleLoader__.load({
             workspaces: Array.isArray(body.workspaces) ? body.workspaces : [],
             removedWorkspacePaths: Array.isArray(body.removedWorkspacePaths) ? body.removedWorkspacePaths : [],
             archivedKeys: Array.isArray(body.archivedKeys) ? body.archivedKeys : [],
+            home: typeof body.home === 'string' ? body.home : bridgeUi.state.home,
           })
         } catch (error) {
           bridgeUi.set({
@@ -4927,13 +5404,11 @@ window.__ModuleLoader__.load({
                     : h(
                         'div',
                         { className: 'dshBridge_column' },
-                        ...transcript.map((item) => {
-                          if (item.kind === 'tool') return h(ToolItem, { key: item.id, item, t })
-                          if (item.message?.role === 'user') return h(UserTurn, { key: item.id, message: item.message, t })
-                          if (item.message?.role === 'assistant') return h(AssistantTurn, { key: item.id, message: item.message, t })
-                          return null
-                        }),
-                        streamingMessage !== null ? h(AssistantTurn, { key: 'streaming', message: streamingMessage, streaming: true, t }) : null,
+                        h(
+                          'div',
+                          { className: 'dshBridge_flow' },
+                          ...renderTranscriptFlow(transcript, selectedSession?.cwd ?? detail?.cwd ?? null, t, streamingMessage, ui.home),
+                        ),
                       ),
             ),
             selectedKey !== null && detail !== null && detailError === null
@@ -5184,6 +5659,11 @@ window.__ModuleLoader__.load({
       statsVisible,
       readContentWidthPreference,
       resolveContentWidth,
+      bridgeToolVariant,
+      deriveToolSummary,
+      abbreviateHomePath,
+      toolDiffTotals,
+      assistantParts,
     }
     return module.exports
   },

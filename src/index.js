@@ -783,6 +783,9 @@ export function apply(ctx) {
             engine: engine.id,
             available: true,
             root: result.root,
+            // The browser abbreviates host-home paths to `~/…`; the account
+            // home is not otherwise visible to it.
+            home: homedir(),
             ...workspaceSnapshot(bridge.id, sessions),
             importedKeys: importedKeysFor(bridge.id),
             archivedKeys,
