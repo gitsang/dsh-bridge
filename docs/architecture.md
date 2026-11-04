@@ -283,6 +283,14 @@ The transcript copies dsh's own chat vocabulary instead of inventing one:
   Single-file tools never repeat their arguments as JSON.
 - **Turn chrome.** A user message is a right-aligned bubble; an assistant answer
   has no role header and keeps only a hover-revealed copy action.
+- **New Session hero.** With no session open, the panel is dsh's own empty state:
+  the fish, the `探索未至之境` headline with its preview badge, then the composer
+  card with a workspace chip above its top-left corner. That chip lists every
+  workspace the bridge knows plus an add-workspace item that opens the same
+  directory picker the sidebar uses. Submitting from the hero creates the session
+  in the selected workspace (`POST /sessions`), opens it, and hands the text to
+  the ordinary submit path, so the echo, the clock, and the failure rollback are
+  shared with the transcript composer rather than duplicated.
 - **Submit and the live turn.** Sending is local-first. The click appends a user
   bubble from local state, clears the card, and starts a running row below the
   transcript; the durable `message-end(user)` retires that bubble by text match

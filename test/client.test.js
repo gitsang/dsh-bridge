@@ -565,3 +565,54 @@ test('a submit echoes immediately and the turn clock owns the wait', async () =>
   assert.equal(formatRunDuration(60_000, en), '1m 0s')
   assert.equal(formatRunDuration(3_930_000, en), '1h 5m 30s')
 })
+
+test('the empty Bridge panel is dsh web\'s New Session hero', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+
+  // Headline + superscript preview badge, on the shell's own type scale.
+  assert.match(source, /function BridgeComposer/)
+  assert.match(source, /function BridgeWorkspaceChip/)
+  assert.match(source, /className: 'dshBridge_heroHeadline'/)
+  assert.match(source, /t\('heroHeadline'\)/)
+  assert.match(source, /className: 'dshBridge_heroBadge'/)
+  assert.match(source, /\.dshBridge_heroHeadline\{[^}]*font-size:26px;line-height:32px;font-weight:500/)
+  assert.match(source, /\.dshBridge_heroBadge\{[^}]*font-family:var\(--ds-font-family-code/)
+
+  // The workspace chip rides above the card's top-left corner, as in the shell.
+  const heroStart = source.indexOf("className: 'dshBridge_heroBody'")
+  const hero = source.slice(heroStart, source.indexOf('open: heroDirectoryOpen'))
+  assert.ok(hero.indexOf('dshBridge_heroWorkspaceRow') < hero.indexOf('BridgeComposer'))
+  assert.match(source, /\.dshBridge_heroWorkspaceRow\{[^}]*padding-left:8px/)
+
+  // Both surfaces share one composer, so the hero cannot drift from the transcript.
+  const composerUses = source.match(/h\(BridgeComposer, \{/g) ?? []
+  assert.equal(composerUses.length, 2)
+
+  // Sending from the hero creates the session, then hands the text to `send`.
+  assert.match(source, /const heroSend = useCallback/)
+  assert.match(source, /api\('sessions', \{\s*method: 'POST'/)
+  assert.match(source, /heroPendingDraftRef\.current = message/)
+  assert.match(source, /bridgeUi\.selectSession\(key\)/)
+  assert.match(source, /void send\(pending\)/)
+  // The draft survives a failed create, and a missing workspace is refused up front.
+  assert.match(source, /t\('heroPickWorkspaceFirst'\)/)
+  assert.match(source, /const send = useCallback\(async \(overrideText\) =>/)
+
+  // dsh's exact wording.
+  const exports = moduleExports()
+  const dictionaries = []
+  exports.apply({
+    effect: (factory) => factory(),
+    layout: {
+      selectPanel() {},
+      panelInfo: { getSnapshot: () => ({ activePanelId: null }), subscribe: () => () => {} },
+    },
+    locale: { register: (namespace, dict) => dictionaries.push(dict), bind: () => (key) => key },
+    slots: { inject: () => {}, register: () => () => {} },
+  })
+  assert.equal(dictionaries[0].zh.heroHeadline, '探索未至之境')
+  assert.equal(dictionaries[0].zh.heroPreview, '预览版')
+  assert.equal(dictionaries[0].zh.heroChooseWorkspace, '选择工作区')
+  assert.equal(dictionaries[0].en.heroHeadline, 'Into the Unknown')
+  assert.equal(dictionaries[0].en.heroPlaceholder, 'Choose a workspace to start')
+})

@@ -171,6 +171,12 @@ and while the model is working — and its clock starts when the host accepts th
 prompt, so connecting a cold agent never inflates the reported time. A failed
 submit takes the bubble back and returns the text to the card.
 
+With no session open the panel is dsh's New Session hero: the fish, the
+`探索未至之境 / Into the Unknown` headline with its preview badge, and the composer
+card with a **workspace chip** above its top-left corner. The chip lists the
+bridge's workspaces and opens the same directory picker the sidebar uses; sending
+creates the session in the selected workspace and submits the text there.
+
 The transcript mirrors dsh's own chat surface rather than a bespoke log view:
 each tool call and reasoning block is a 24px disclosure row with a per-variant
 icon, a localized verb (`Read`, `Search`, `Run command`, `Write`, `Edit`, …), a

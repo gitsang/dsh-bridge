@@ -1559,6 +1559,13 @@ window.__ModuleLoader__.load({
       hoverCreated: '创建于 {time}',
       hoverCopied: '已复制',
       selectHint: '从左侧选择一个会话',
+      heroHeadline: '探索未至之境',
+      heroPreview: '预览版',
+      heroChooseWorkspace: '选择工作区',
+      heroAddWorkspace: '添加工作区…',
+      heroPickWorkspaceFirst: '先选择一个工作区再发送。',
+      heroPlaceholder: '选择一个工作区开始',
+      heroPlaceholderReady: '描述你想要构建的内容，/ 调用指令，@ 文件或对话',
       attach: '连接会话',
       attaching: '正在连接…',
       deepDiving: '深度求索中',
@@ -1795,6 +1802,13 @@ window.__ModuleLoader__.load({
       hoverCreated: 'Created {time}',
       hoverCopied: 'Copied',
       selectHint: 'Select a session on the left',
+      heroHeadline: 'Into the Unknown',
+      heroPreview: 'Preview',
+      heroChooseWorkspace: 'Choose workspace',
+      heroAddWorkspace: 'Add workspace…',
+      heroPickWorkspaceFirst: 'Choose a workspace before sending.',
+      heroPlaceholder: 'Choose a workspace to start',
+      heroPlaceholderReady: 'Describe what you want to build, / for commands, @ for files or chats',
       attach: 'Connect session',
       attaching: 'Connecting…',
       deepDiving: 'Deep diving',
@@ -1952,7 +1966,21 @@ window.__ModuleLoader__.load({
       '.dshBridge_blank{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;height:100%;padding:24px;text-align:center;color:var(--dsw-alias-label-tertiary,currentColor)}',
       '.dshBridge_blankTitle{font-size:15px;line-height:22px;font-weight:600;color:var(--dsw-alias-label-primary,currentColor)}',
       '.dshBridge_blankHint{font-size:12px;line-height:20px;max-width:420px}',
-      '.dshBridge_notice{margin:0 auto;max-width:var(--dsh-chat-content-width,712px);padding:0 calc(var(--dsh-composer-side-clearance,16px) + 16px);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,currentColor)}',
+      /* New Session hero, on dsh's own geometry: centred fish + 26/32 headline with a
+       * superscript preview badge, then the workspace chip and the input card. */
+      '.dshBridge_hero{display:flex;align-items:center;justify-content:center;height:100%;min-width:0;padding:0 24px}',
+      '.dshBridge_heroStack{display:flex;flex-direction:column;align-items:stretch;gap:12px;width:100%;max-width:var(--dsh-composer-card-max-width,calc(var(--dsh-chat-content-width,712px) + 32px))}',
+      '.dshBridge_heroHeadline{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;column-gap:10px;row-gap:12px;font-size:26px;line-height:32px;font-weight:500;color:var(--dsw-alias-label-primary,currentColor)}',
+      '.dshBridge_heroFish{display:inline-flex;flex:none;align-items:center;justify-content:center;color:var(--dsw-alias-label-primary,currentColor)}',
+      '.dshBridge_heroTitleGroup{display:inline-flex;flex-wrap:wrap;align-items:center;justify-content:center;column-gap:7px;row-gap:4px;min-width:0}',
+      '.dshBridge_heroBadge{align-self:flex-start;margin-top:2px;padding:1px 7px 0;border:.5px solid var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));border-radius:999px;corner-shape:round;background:var(--dsw-alias-state-business-tertiary,rgba(57,100,254,.08));color:var(--dsw-alias-label-primary-bluish,var(--dsw-alias-state-business-primary,#3964fe));font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:18px;font-weight:500;white-space:nowrap}',
+      '.dshBridge_heroBody{display:flex;flex-direction:column;gap:12px;min-width:0}',
+      '.dshBridge_heroWorkspaceRow{display:flex;align-items:center;min-width:0;padding-left:8px}',
+      '.dshBridge_heroWorkspace{display:inline-flex;align-items:center;gap:4px;max-width:min(100%,360px);min-height:28px;padding:0 8px;border:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-primary,currentColor);font:inherit;font-size:13px;line-height:20px;font-weight:500;cursor:pointer}',
+      '.dshBridge_heroWorkspace:hover,.dshBridge_heroWorkspace[aria-expanded="true"]{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
+      '.dshBridge_heroWorkspaceLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.dshBridge_heroWorkspaceIcon{flex:none;color:var(--dsw-alias-label-primary,currentColor)}',
+      '.dshBridge_heroWorkspaceChevron{flex:none;color:var(--dsw-alias-label-caption,currentColor)}',      '.dshBridge_notice{margin:0 auto;max-width:var(--dsh-chat-content-width,712px);padding:0 calc(var(--dsh-composer-side-clearance,16px) + 16px);font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,currentColor)}',
       '.dshBridge_notice[data-error="true"]{color:var(--dsw-alias-state-error-primary,#d33)}',
       '.dshBridge_composerSeat{flex:none;padding:0 var(--dsh-composer-side-clearance,16px) 4px}',
       '.dshBridge_composerStack{box-sizing:border-box;display:flex;flex-direction:column;gap:4px;width:100%;max-width:var(--dsh-composer-card-max-width,calc(clamp(680px,calc(64% + 20.48px),920px) + 32px));margin:0 auto}',
@@ -2785,6 +2813,145 @@ window.__ModuleLoader__.load({
       return h('svg', { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
         h('path', { d: 'm3.5 8.5 3 3 6-6.5', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' }),
       )
+    }
+
+    /**
+     * The composer card shared by the transcript view and the New Session
+     * hero, so both carry dsh's input geometry, model seat, and send control.
+     */
+    function BridgeComposer({
+      t, draft, onDraft, onSend, onAbort, sending, attaching, isStreaming,
+      models, currentModel, modelsLoading, modelsError, modelSwitching, onSelectModel,
+      stats, textareaRef, canSend = true, placeholder,
+    }) {
+      const disabled = sending || attaching || draft.trim() === '' || !canSend
+      const resize = (node) => {
+        node.style.height = 'auto'
+        node.style.height = `${Math.min(node.scrollHeight, 336)}px`
+      }
+      return h(
+        'div',
+        { className: 'dshBridge_composerStack' },
+        h(
+          'div',
+          { className: 'dshBridge_card' },
+          h('textarea', {
+            ref: textareaRef,
+            className: 'dshBridge_textarea',
+            rows: 1,
+            value: draft,
+            placeholder: placeholder ?? t('placeholder'),
+            'aria-label': placeholder ?? t('placeholder'),
+            onChange: (event) => {
+              onDraft(event.target.value)
+              resize(event.target)
+            },
+            onKeyDown: (event) => {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                if (!disabled) onSend()
+              }
+            },
+          }),
+          h(
+            'div',
+            { className: 'dshBridge_toolbar' },
+            h(
+              'div',
+              { className: 'dshBridge_trailing' },
+              h(
+                'div',
+                { className: 'dshBridge_modelSeat' },
+                h(BridgeModelSelect, {
+                  models,
+                  current: currentModel,
+                  loading: modelsLoading,
+                  error: modelsError,
+                  disabled: modelSwitching,
+                  onSelect: onSelectModel,
+                  t,
+                }),
+              ),
+              isStreaming
+                ? h(
+                    Tooltip,
+                    { label: t('stop') },
+                    h(
+                      'button',
+                      { type: 'button', className: 'dshBridge_send', 'data-stop': 'true', 'aria-label': t('stop'), onClick: onAbort },
+                      h(StopGlyph),
+                    ),
+                  )
+                : h(
+                    Tooltip,
+                    { label: t('send') },
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dshBridge_send',
+                        'aria-label': t('send'),
+                        disabled,
+                        onClick: onSend,
+                      },
+                      h(SendGlyph),
+                    ),
+                  ),
+            ),
+          ),
+        ),
+        h(BridgeStatusline, { stats, t }),
+      )
+    }
+
+    /**
+     * The New Session hero: dsh's headline, then the composer with a workspace
+     * chip above its top-left corner. Picking a workspace is what turns the
+     * hero into a real session, so the chip sits with the input rather than in
+     * the panel header.
+     */
+    function BridgeWorkspaceChip({ workspaces, path, onPick, onAddWorkspace, t }) {
+      const [open, setOpen] = useState(false)
+      const current = workspaces.find((workspace) => workspace.path === path) ?? null
+      const items = [
+        ...workspaces.map((workspace) => ({
+          id: workspace.path,
+          label: workspace.name ?? workspace.path,
+          icon: h(IconFolderOpenRegular, { size: 14 }),
+        })),
+        ...(workspaces.length === 0 ? [] : [{ type: 'separator', id: 'add-separator' }]),
+        { id: '__add__', label: t('heroAddWorkspace'), icon: h(IconFolderCloseRegular, { size: 14 }) },
+      ]
+      return h(Menu, {
+        open,
+        onClose: () => setOpen(false),
+        items,
+        selectedIds: current === null ? [] : [current.path],
+        onSelect: (id) => {
+          setOpen(false)
+          if (id === '__add__') onAddWorkspace()
+          else onPick(id)
+        },
+        align: 'start',
+        dense: true,
+        portal: true,
+        anchor: h(
+          'button',
+          {
+            type: 'button',
+            className: 'dshBridge_heroWorkspace',
+            'aria-label': t('heroChooseWorkspace'),
+            'aria-haspopup': 'menu',
+            'aria-expanded': open,
+            onClick: () => setOpen((value) => !value),
+          },
+          current === null
+            ? h(IconFolderCloseRegular, { size: 16, className: 'dshBridge_heroWorkspaceIcon' })
+            : h(IconFolderOpenRegular, { size: 16, className: 'dshBridge_heroWorkspaceIcon' }),
+          h('span', { className: 'dshBridge_heroWorkspaceLabel' }, current === null ? t('heroChooseWorkspace') : (current.name ?? current.path)),
+          h(IconChevronDownOutlineRegular, { size: 12, className: 'dshBridge_heroWorkspaceChevron' }),
+        ),
+      })
     }
 
     /**
@@ -4960,6 +5127,14 @@ window.__ModuleLoader__.load({
       const [pendingModel, setPendingModel] = useState(null)
       const [sessionStats, setSessionStats] = useState(null)
       const [statsVersion, setStatsVersion] = useState(0)
+      // New Session hero: the workspace the first message will land in, the
+      // directory picker opened from its chip, and the message waiting for the
+      // session it is about to create.
+      const [heroWorkspacePath, setHeroWorkspacePath] = useState(null)
+      const [heroDirectoryOpen, setHeroDirectoryOpen] = useState(false)
+      const [heroSending, setHeroSending] = useState(false)
+      const heroPendingDraftRef = useRef(null)
+      const heroPendingKeyRef = useRef(null)
       const sourceRef = useRef(null)
       const connectEventsRef = useRef(null)
       const firstSnapshotRef = useRef(true)
@@ -5417,8 +5592,8 @@ window.__ModuleLoader__.load({
        * clock deliberately starts when the Host accepts the prompt, not on the
        * click, so connecting a fresh agent never inflates the reported time.
        */
-      const send = useCallback(async () => {
-        const message = draft.trim()
+      const send = useCallback(async (overrideText) => {
+        const message = (typeof overrideText === 'string' ? overrideText : draft).trim()
         if (message === '' || selectedKey === null || sending) return
         const echo = { id: `echo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, text: message, timestamp: new Date().toISOString() }
         sendingRef.current = true
@@ -5452,6 +5627,72 @@ window.__ModuleLoader__.load({
           setSending(false)
         }
       }, [attached, draft, ensureAttached, rollbackTurn, selectedKey, sending, setLivePhase, showNotice, t])
+
+      /**
+       * Add a workspace from the hero chip. The sidebar owns its own dialog; the
+       * page owns this one, so the POST lives here with the shared store update.
+       */
+      const addWorkspaceToBridge = useCallback(async (bridgeId, path) => {
+        if (bridgeId === null) return
+        try {
+          const body = await api('workspaces', {
+            method: 'POST',
+            body: JSON.stringify({ bridge: bridgeId, path }),
+          })
+          bridgeUi.set({
+            workspaces: Array.isArray(body.workspaces) ? body.workspaces : bridgeUi.state.workspaces,
+            removedWorkspacePaths: Array.isArray(body.removedWorkspacePaths)
+              ? body.removedWorkspacePaths
+              : bridgeUi.state.removedWorkspacePaths,
+          })
+          await loadSessions()
+        } catch (error) {
+          showNotice(`${t('workspaceAddFailed')}: ${error instanceof Error ? error.message : String(error)}`, true)
+        }
+      }, [loadSessions, showNotice, t])
+
+      // A fresh hero has no workspace yet; default to the first one so the chip
+      // reads a name and Enter works without an extra pick.
+      useEffect(() => {
+        if (heroWorkspacePath !== null || selectedKey !== null) return
+        const first = (ui.workspaces ?? []).find((workspace) => typeof workspace.path === 'string' && workspace.path !== '')
+        if (first !== undefined) setHeroWorkspacePath(first.path)
+      }, [heroWorkspacePath, selectedKey, ui.workspaces])
+
+      /**
+       * The New Session send: dsh creates the session, then submits the text.
+       * The draft stays in the hero card until the session exists, so a failed
+       * create leaves the message where the reader left it.
+       */
+      const heroSend = useCallback(async () => {
+        const message = draft.trim()
+        if (message === '' || bridge === null || bridge.available === false || heroSending) return
+        const path = heroWorkspacePath ?? (ui.workspaces ?? []).find((workspace) => workspace.path)?.path ?? null
+        if (path === null) {
+          showNotice(t('heroPickWorkspaceFirst'), true)
+          return
+        }
+        setHeroSending(true)
+        try {
+          const body = await api('sessions', {
+            method: 'POST',
+            body: JSON.stringify({ bridge: bridge.id, cwd: path }),
+          })
+          const key = body.session?.key
+          if (typeof key !== 'string') throw new Error(t('newSessionFailed'))
+          // Hand the text to the session the create just produced; `send` owns
+          // the echo, the clock, and the failure rollback from here.
+          heroPendingDraftRef.current = message
+          heroPendingKeyRef.current = key
+          setDraft('')
+          await loadSessions()
+          bridgeUi.selectSession(key)
+        } catch (error) {
+          showNotice(`${t('newSessionFailed')}: ${error instanceof Error ? error.message : String(error)}`, true)
+        } finally {
+          setHeroSending(false)
+        }
+      }, [bridge, draft, heroSending, heroWorkspacePath, loadSessions, showNotice, t, ui.workspaces])
 
       const chooseModel = useCallback(async (model) => {
         if (selectedKey === null || modelSwitching) return
@@ -5551,6 +5792,18 @@ window.__ModuleLoader__.load({
         }
       }, [turnPhase, selectedKey, bridgeId, finishTurn])
 
+      /**
+       * Finish a New Session submit: once the created session is the open one,
+       * hand its text to `send`, which owns the echo and the clock.
+       */
+      useEffect(() => {
+        const pending = heroPendingDraftRef.current
+        if (pending === null || selectedKey === null || selectedKey !== heroPendingKeyRef.current) return
+        if (detailLoading || detailError !== null) return
+        heroPendingDraftRef.current = null
+        void send(pending)
+      }, [selectedKey, detailLoading, detailError, send])
+
       const onScroll = useCallback(() => {
         const node = scrollRef.current
         if (node === null) return
@@ -5619,17 +5872,52 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'dshBridge_scroll', ref: scrollRef, onScroll },
               selectedKey === null
-                ? h('div', { className: 'dshBridge_blank' },
-                    h('div', { className: 'dshBridge_blankTitle' },
-                      bridge === null
-                        ? t('bridgeMenu')
-                        : bridge.available === false
-                          ? `${bridge.name} · ${t('bridgeUnavailable')}`
-                          : sessions.length === 0 ? t('empty') : t('selectHint')),
-                    h('div', { className: 'dshBridge_blankHint' },
-                      bridge === null
-                        ? t('bridgeSettingsHint')
-                        : bridge.available === false ? (bridge.unavailableReason ?? t('bridgeUnavailableHint')) : t('emptyHint')))
+                ? bridge === null || bridge.available === false
+                  // Nothing usable to start a session on: keep dsh's plain notice.
+                  ? h('div', { className: 'dshBridge_blank' },
+                      h('div', { className: 'dshBridge_blankTitle' },
+                        bridge === null ? t('bridgeMenu') : `${bridge.name} · ${t('bridgeUnavailable')}`),
+                      h('div', { className: 'dshBridge_blankHint' },
+                        bridge === null
+                          ? t('bridgeSettingsHint')
+                          : (bridge.unavailableReason ?? t('bridgeUnavailableHint'))))
+                  // New Session: the shipped hero, its workspace chip, and the
+                  // composer share one centred column above the fold.
+                  : h('div', { className: 'dshBridge_hero' },
+                      h('div', { className: 'dshBridge_heroStack' },
+                        h('div', { className: 'dshBridge_heroHeadline' },
+                          h('span', { className: 'dshBridge_heroFish' }, h(FishLogo, { size: 34 })),
+                          h('span', { className: 'dshBridge_heroTitleGroup' },
+                            h('span', null, t('heroHeadline')),
+                            h('span', { className: 'dshBridge_heroBadge' }, t('heroPreview')))),
+                        h('div', { className: 'dshBridge_heroBody' },
+                          h('div', { className: 'dshBridge_heroWorkspaceRow' },
+                            h(BridgeWorkspaceChip, {
+                              workspaces: ui.workspaces ?? [],
+                              path: heroWorkspacePath,
+                              onPick: (path) => setHeroWorkspacePath(path),
+                              onAddWorkspace: () => setHeroDirectoryOpen(true),
+                              t,
+                            })),
+                          h(BridgeComposer, {
+                            t,
+                            draft,
+                            onDraft: setDraft,
+                            onSend: heroSend,
+                            onAbort: abort,
+                            sending: heroSending,
+                            attaching: false,
+                            isStreaming: false,
+                            models,
+                            currentModel,
+                            modelsLoading,
+                            modelsError,
+                            modelSwitching,
+                            onSelectModel: chooseModel,
+                            stats: null,
+                            textareaRef,
+                            placeholder: heroWorkspacePath === null ? t('heroPlaceholder') : t('heroPlaceholderReady'),
+                          }))))
                 : detailLoading
                   ? h('div', { className: 'dshBridge_blank' }, t('loading'))
                   : detailError !== null
@@ -5658,85 +5946,40 @@ window.__ModuleLoader__.load({
               ? h(
                   'div',
                   { className: 'dshBridge_composerSeat' },
-                  h(
-                    'div',
-                    { className: 'dshBridge_composerStack' },
-                    h(
-                      'div',
-                      { className: 'dshBridge_card' },
-                      h('textarea', {
-                        ref: textareaRef,
-                        className: 'dshBridge_textarea',
-                        rows: 1,
-                        value: draft,
-                        placeholder: t('placeholder'),
-                        'aria-label': t('placeholder'),
-                        onChange: (event) => {
-                          setDraft(event.target.value)
-                          const node = event.target
-                          node.style.height = 'auto'
-                          node.style.height = `${Math.min(node.scrollHeight, 336)}px`
-                        },
-                        onKeyDown: (event) => {
-                          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                            event.preventDefault()
-                            send()
-                          }
-                        },
-                      }),
-                      h(
-                        'div',
-                        { className: 'dshBridge_toolbar' },
-                        h(
-                          'div',
-                          { className: 'dshBridge_trailing' },
-                          h(
-                            'div',
-                            { className: 'dshBridge_modelSeat' },
-                            h(BridgeModelSelect, {
-                              models,
-                              current: currentModel,
-                              loading: modelsLoading,
-                              error: modelsError,
-                              disabled: modelSwitching,
-                              onSelect: chooseModel,
-                              t,
-                            }),
-                          ),
-                          isStreaming
-                            ? h(
-                                Tooltip,
-                                { label: t('stop') },
-                                h(
-                                  'button',
-                                  { type: 'button', className: 'dshBridge_send', 'data-stop': 'true', 'aria-label': t('stop'), onClick: abort },
-                                  h(StopGlyph),
-                                ),
-                              )
-                            : h(
-                                Tooltip,
-                                { label: t('send') },
-                                h(
-                                  'button',
-                                  {
-                                    type: 'button',
-                                    className: 'dshBridge_send',
-                                    'aria-label': t('send'),
-                                    disabled: sending || attaching || draft.trim() === '',
-                                    onClick: send,
-                                  },
-                                  h(SendGlyph),
-                                ),
-                              ),
-                        ),
-                      ),
-                    ),
-                    h(BridgeStatusline, { stats: statusStats, t }),
-                  ),
+                  h(BridgeComposer, {
+                    t,
+                    draft,
+                    onDraft: setDraft,
+                    onSend: send,
+                    onAbort: abort,
+                    sending,
+                    attaching,
+                    isStreaming,
+                    models,
+                    currentModel,
+                    modelsLoading,
+                    modelsError,
+                    modelSwitching,
+                    onSelectModel: chooseModel,
+                    stats: statusStats,
+                    textareaRef,
+                  }),
                 )
               : null,
           ),
         ),
+        h(BridgeDirectoryDialog, {
+          open: heroDirectoryOpen,
+          t,
+          onClose: () => setHeroDirectoryOpen(false),
+          onPick: async (path) => {
+            // Adding from the hero selects it at once: the reader's next Enter
+            // should land there, not in a workspace they still have to pick.
+            await addWorkspaceToBridge(bridge?.id ?? null, path)
+            setHeroWorkspacePath(path)
+            setHeroDirectoryOpen(false)
+          },
+        }),
         h(ExtensionDialog, { request: dialog, t, onRespond: respondDialog }),
       )
     }
