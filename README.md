@@ -164,6 +164,13 @@ Selecting a saved bridge:
 3. loads session history into the main transcript;
 4. keeps the composer and live streaming attached to that bridge.
 
+Submitting is local-first: the user bubble appears on the click, the card clears
+immediately, and a `深度求索中，用时 …` line with a whale tail waits below the
+transcript. That line covers the whole turn — while the agent is being connected
+and while the model is working — and its clock starts when the host accepts the
+prompt, so connecting a cold agent never inflates the reported time. A failed
+submit takes the bubble back and returns the text to the card.
+
 The transcript mirrors dsh's own chat surface rather than a bespoke log view:
 each tool call and reasoning block is a 24px disclosure row with a per-variant
 icon, a localized verb (`Read`, `Search`, `Run command`, `Write`, `Edit`, …), a

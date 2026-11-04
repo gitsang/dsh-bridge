@@ -502,3 +502,66 @@ test('transcript process rows copy the shipped chat row vocabulary', async () =>
   // An unclassified tool keeps its raw name as the summary's lead.
   assert.match(source, /variant === 'others' && typeof item\.name === 'string'/)
 })
+
+test('a submit echoes immediately and the turn clock owns the wait', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+
+  // The bubble appears on the click; the draft clears at the same moment.
+  assert.match(source, /const echo = \{ id: `echo-\$\{Date\.now\(\)\}/)
+  assert.match(source, /setEchoes\(\(current\) => \[\.\.\.current, echo\]\)/)
+  assert.match(source, /setLivePhase\('connecting'\)/)
+  assert.match(source, /setDraft\(''\)/)
+
+  // The clock starts when the Host accepts the prompt, not on the click.
+  const send = source.slice(source.indexOf("const send = useCallback"), source.indexOf('const chooseModel = useCallback'))
+  const promptAt = send.indexOf("api('prompt'")
+  assert.ok(send.indexOf("setLivePhase('connecting')") < promptAt)
+  assert.ok(promptAt !== -1 && send.indexOf('setRunStartedAt(Date.now())') > promptAt)
+
+  // A failed submit takes the bubble back and restores the text.
+  assert.match(send, /rollbackTurn\(echo\.id\)\s*\n\s*setDraft\(message\)/)
+
+  // The running row reconciles with the Host, so a turn that died elsewhere clears:
+  // once from the SSE snapshot, and once from a bounded poll that also survives a
+  // dropped event stream.
+  assert.match(source, /turnPhaseRef\.current === 'running'/)
+  assert.match(source, /payload\?\.activity\?\.state !== 'running'/)
+  assert.match(source, /const timer = setInterval\(check, 5000\)/)
+  assert.match(source, /entry\.state === 'running' \|\| entry\.state === 'connecting'/)
+  assert.match(source, /if \(!live\) finishTurn\(\)/)
+
+  // dsh's connect floor: the label never reads under one second.
+  assert.match(source, /Math\.max\(1000, now - startTime\)/)
+  assert.match(source, /deepDivingFor/)
+  assert.match(source, /durationSecond/)
+  assert.match(source, /function BridgeRunningStatus/)
+  // The whale tail is the shell's resting outline, drawn as a static stroked glyph.
+  assert.match(source, /function WhaleTailGlyph/)
+  assert.match(source, /M8\.844 13\.742C8\.967 12\.328/)
+  assert.match(source, /strokeWidth: 1/)
+
+  // The connecting hint is gone: the transcript owns that state now.
+  assert.doesNotMatch(source, /sendConnecting/)
+  assert.doesNotMatch(source, /dshBridge_attachingHint/)
+  // The header meta says the same thing as the running row.
+  assert.match(source, /isTurnLive \? turnLabel/)
+  assert.match(source, /const turnLabel = t\('deepDiving'\)/)
+
+  const exports = moduleExports()
+  const { formatRunDuration, dropEchoFor } = exports.__test
+
+  // The durable user message retires exactly its own echo.
+  const echoes = [
+    { id: 'a', text: 'first' },
+    { id: 'b', text: 'second' },
+  ]
+  assert.deepEqual(dropEchoFor(echoes, 'second').map((e) => e.id), ['a'])
+  assert.deepEqual(dropEchoFor(echoes, 'unknown').map((e) => e.id), ['b'])
+  assert.deepEqual(dropEchoFor([], 'x'), [])
+  // A locale lookup, matching the `t` seat the component receives.
+  const en = (key) => ({ durationSecond: 's', durationMinute: 'm ', durationHour: 'h ' }[key])
+  assert.equal(formatRunDuration(1000, en), '1s')
+  assert.equal(formatRunDuration(59_999, en), '59s')
+  assert.equal(formatRunDuration(60_000, en), '1m 0s')
+  assert.equal(formatRunDuration(3_930_000, en), '1h 5m 30s')
+})

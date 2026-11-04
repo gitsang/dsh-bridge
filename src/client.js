@@ -1561,6 +1561,11 @@ window.__ModuleLoader__.load({
       selectHint: '从左侧选择一个会话',
       attach: '连接会话',
       attaching: '正在连接…',
+      deepDiving: '深度求索中',
+      deepDivingFor: '深度求索中，用时 {duration} ···',
+      durationHour: '小时',
+      durationMinute: '分',
+      durationSecond: '秒',
       attached: '已连接',
       notAttached: '未连接',
       running: '运行中',
@@ -1569,7 +1574,6 @@ window.__ModuleLoader__.load({
       sessionFailed: '运行失败',
       sessionConnecting: '正在连接',
       sessionIdle: '空闲',
-      sendConnecting: '正在连接 agent…',
       ensureFailed: '无法连接 agent',
       idle: '空闲',
       send: '发送',
@@ -1793,6 +1797,11 @@ window.__ModuleLoader__.load({
       selectHint: 'Select a session on the left',
       attach: 'Connect session',
       attaching: 'Connecting…',
+      deepDiving: 'Deep diving',
+      deepDivingFor: 'Deep diving for {duration} ···',
+      durationHour: 'h ',
+      durationMinute: 'm ',
+      durationSecond: 's',
       attached: 'Connected',
       notAttached: 'Not connected',
       running: 'Running',
@@ -1801,7 +1810,6 @@ window.__ModuleLoader__.load({
       sessionFailed: 'Failed',
       sessionConnecting: 'Connecting',
       sessionIdle: 'Idle',
-      sendConnecting: 'Connecting to agent…',
       ensureFailed: 'Could not connect to the agent',
       idle: 'Idle',
       send: 'Send',
@@ -1904,6 +1912,12 @@ window.__ModuleLoader__.load({
       '.dshBridge_flow>.dshBridge_userRow+.dshBridge_processGroup{margin-top:4px}',
       '.dshBridge_flow>.dshBridge_processGroup+.dshBridge_answer{margin-top:4px}',
       '.dshBridge_processGroup{display:flex;flex-direction:column;gap:6px;min-width:0}',
+      /* Running turn: dsh's deep-diving ink, 12px type, whale tail + shimmering clock. */
+      '.dshBridge_running{display:flex;flex-direction:column;align-items:flex-start;margin-top:4px;--dsw-alias-label-shimmer:var(--dsw-alias-label-deep-diving-shimmer,var(--dsw-alias-state-business-primary,#3964fe));color:var(--dsw-alias-label-deep-diving,var(--dsw-alias-state-business-primary,#3964fe));font-size:calc(var(--dsh-content-font-size,14px) - 2px);line-height:calc(22px + var(--dsh-content-font-delta,0px))}',
+      '.dshBridge_runningContent{display:inline-flex;align-items:center;min-width:0;gap:6px}',
+      '.dshBridge_runningText{min-width:0;font-variant-numeric:tabular-nums}',
+      '.dshBridge_runningIcon{display:inline-flex;flex:none;width:calc(14px + var(--dsh-content-font-delta,0px));height:calc(14px + var(--dsh-content-font-delta,0px))}',
+      '.dshBridge_visuallyHidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}',
       '.dshBridge_processRow{display:flex;flex-direction:column;min-width:0}',
       '.dshBridge_processRow[data-variant="read"] [data-disclosure-header],.dshBridge_processRow[data-variant="search"] [data-disclosure-header]{min-width:0}',
       '.dshBridge_processBody{display:flex;flex-direction:column;gap:6px;padding-left:calc(22px + var(--dsh-content-font-delta,0px))}',
@@ -2771,6 +2785,83 @@ window.__ModuleLoader__.load({
       return h('svg', { width: 14, height: 14, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': true },
         h('path', { d: 'm3.5 8.5 3 3 6-6.5', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' }),
       )
+    }
+
+    /**
+     * The running-turn indicator dsh paints after the last row: a whale tail and
+     * the `深度求索中，用时 …` label in the deep-diving ink. The clock is isolated
+     * from the transcript, so a tick re-renders this line alone; an absent
+     * `startTime` is the connecting phase, which shows the bare label because
+     * the agent has not started its turn yet.
+     */
+    function BridgeRunningStatus({ startTime, t }) {
+      const [now, setNow] = useState(Date.now)
+      useEffect(() => {
+        if (startTime === undefined || startTime === null) return undefined
+        setNow(Date.now())
+        const timer = setInterval(() => setNow(Date.now()), 1000)
+        return () => clearInterval(timer)
+      }, [startTime])
+      const label = startTime === undefined || startTime === null
+        ? t('deepDiving')
+        // dsh's own floor: a turn never reads as taking under one second.
+        : t('deepDivingFor', { duration: formatRunDuration(Math.max(1000, now - startTime), t) })
+      return h(
+        'div',
+        { className: 'dshBridge_running', 'data-chat-running': 'true' },
+        h('span', { className: 'dshBridge_visuallyHidden', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, t('deepDiving')),
+        h(
+          'span',
+          { className: 'dshBridge_runningContent' },
+          h(WhaleTailGlyph),
+          h(TextShimmer, { active: true, className: 'dshBridge_runningText' }, label),
+        ),
+      )
+    }
+
+    /**
+     * The resting whale tail from dsh's running indicator, as a static stroked
+     * glyph: the shell animates an APNG mask, the Bridge keeps the same outline
+     * and lets the shimmering label carry the motion.
+     */
+    function WhaleTailGlyph() {
+      return h('span', { className: 'dshBridge_runningIcon', 'aria-hidden': 'true' },
+        h('svg', { width: '100%', height: '100%', viewBox: '0 0 16 16', fill: 'none' },
+          h('path', {
+            d: 'M8.844 13.742C8.967 12.328 8.45 10.4 8.45 9.65C8.45 8.94 8.88 8.43 9.6 8.43C11.285 8.43 12.106 8.281 12.685 8.104C13.71 7.791 14.585 6.768 15.055 5.945C15.137 5.803 14.99 5.641 14.829 5.671C13.829 5.86 12.828 5.376 11.827 4.978C10.659 4.514 9.491 4.707 8.935 4.876C8.805 4.915 8.658 4.819 8.636 4.686C8.468 3.643 7.405 2.615 5.498 2.238C4.54 2.048 3.748 1.574 3.347 1.202C3.252 1.113 3.088 1.125 3.03 1.242C2.628 2.059 2.168 3.82 5.248 6.115C5.82 6.494 6.31 6.785 6.574 7.637C6.72 8.104 6.157 9.168 6.061 9.368C5.157 11.27 5.089 12.19 4.926 13.742',
+            stroke: 'currentColor',
+            strokeWidth: 1,
+          }),
+        ),
+      )
+    }
+
+    /**
+     * Turn duration in dsh's wording: whole seconds, with minutes joining at
+     * 60 and hours at 60 minutes, each number followed by its localized unit.
+     */
+    function formatRunDuration(ms, t) {
+      const total = Math.max(0, Math.floor(ms / 1000))
+      const hours = Math.floor(total / 3600)
+      const minutes = Math.floor(total / 60) % 60
+      const seconds = total % 60
+      const parts = []
+      if (hours > 0) parts.push(`${hours}${t('durationHour')}`)
+      if (total >= 60) parts.push(`${minutes}${t('durationMinute')}`)
+      parts.push(`${seconds}${t('durationSecond')}`)
+      return parts.join('')
+    }
+
+    /**
+     * Drop the echo the Host just made durable. Matching on text is the honest
+     * signal; an agent that rewrites the user turn leaves no match, and the
+     * oldest echo is retired so nothing can stick on screen forever.
+     */
+    function dropEchoFor(echoes, text) {
+      if (!Array.isArray(echoes) || echoes.length === 0) return echoes ?? []
+      const index = echoes.findIndex((entry) => entry.text === text)
+      const drop = index === -1 ? 0 : index
+      return echoes.filter((_, position) => position !== drop)
     }
 
     /**
@@ -4849,6 +4940,13 @@ window.__ModuleLoader__.load({
       const [state, setState] = useState(null)
       const [transcript, setTranscript] = useState([])
       const [streamingMessage, setStreamingMessage] = useState(null)
+      // Submitted-but-not-yet-durable user text. dsh echoes the bubble locally
+      // and swaps it for the Host occurrence; the clock starts at the same click.
+      const [echoes, setEchoes] = useState([])
+      const [turnPhase, setTurnPhase] = useState(null)
+      const [runStartedAt, setRunStartedAt] = useState(null)
+      const turnPhaseRef = useRef(null)
+      const sendingRef = useRef(false)
       const [draft, setDraft] = useState('')
       const [sending, setSending] = useState(false)
       const [notice, setNotice] = useState(null)
@@ -5070,6 +5168,11 @@ window.__ModuleLoader__.load({
           setStreamingMessage(null)
           setDialog(null)
           setTranscript([])
+          // A half-submitted turn belongs to the session being left behind.
+          setEchoes([])
+          turnPhaseRef.current = null
+          setTurnPhase(null)
+          setRunStartedAt(null)
           setDetail(null)
           setDetailError(null)
           setDetailLoading(true)
@@ -5105,6 +5208,35 @@ window.__ModuleLoader__.load({
         }
       }, [loadSessions, openSession])
 
+      /**
+       * Drop one submitted echo once the Host owns that text. Text matching is
+       * the honest signal: whichever echo carries the same body is the one the
+       * durable message replaces. Unknown text (an agent that rewrites the user
+       * turn) falls back to the oldest echo so nothing is left stuck on screen.
+       */
+      const settleEcho = useCallback((text) => {
+        setEchoes((current) => dropEchoFor(current, text))
+      }, [])
+
+      /** The turn is over: drop the clock so the running row unmounts. */
+      const finishTurn = useCallback(() => {
+        turnPhaseRef.current = null
+        setTurnPhase(null)
+        setRunStartedAt(null)
+      }, [])
+
+      /** Publish the live phase to both the render tree and the SSE closure. */
+      const setLivePhase = useCallback((phase) => {
+        turnPhaseRef.current = phase
+        setTurnPhase(phase)
+      }, [])
+
+      /** Abandon one in-flight submission: the echo goes away and the text returns. */
+      const rollbackTurn = useCallback((echoId) => {
+        setEchoes((current) => current.filter((entry) => entry.id !== echoId))
+        finishTurn()
+      }, [finishTurn])
+
       const applyBridgeEvent = useCallback((record) => {
         const event = record?.type
         if (event === 'agent-start') {
@@ -5115,6 +5247,7 @@ window.__ModuleLoader__.load({
         } else if (event === 'agent-settled') {
           setState((current) => (current === null ? current : { ...current, isStreaming: false }))
           setStreamingMessage(null)
+          finishTurn()
           // The host closes the per-turn agent shortly after this event.
           void loadSessions()
         } else if (event === 'message-start') {
@@ -5138,6 +5271,7 @@ window.__ModuleLoader__.load({
             )
             return
           }
+          if (message.role === 'user') settleEcho(textOf(message.content))
           setTranscript((current) => [
             ...current,
             { kind: 'message', id: `${message.role}-${message.timestamp ?? Date.now()}-${current.length}`, message },
@@ -5169,7 +5303,7 @@ window.__ModuleLoader__.load({
           setState((current) => (current === null ? current : { ...current, sessionName: record.name }))
           void loadSessions()
         }
-      }, [loadSessions])
+      }, [loadSessions, settleEcho, finishTurn])
 
       const connectEvents = useCallback(
         (key) => {
@@ -5190,6 +5324,14 @@ window.__ModuleLoader__.load({
             }
             if (payload?.running === false) setAttached(false)
             if (payload?.activity?.state === 'running') setPendingModel(null)
+            // Reconcile against the Host: a turn this tab still paints but the
+            // Host reports neither running nor attached has ended some other way
+            // (a crash, a close from another tab) and its row must not linger.
+            if (turnPhaseRef.current === 'running'
+              && payload?.activity?.state !== 'running'
+              && payload?.running !== true) {
+              finishTurn()
+            }
             if (firstSnapshotRef.current) {
               firstSnapshotRef.current = false
               lastSeqRef.current = payload?.sequence ?? 0
@@ -5230,15 +5372,17 @@ window.__ModuleLoader__.load({
           source.addEventListener('bridge-exit', () => {
             setAttached(false)
             setStreamingMessage(null)
+            finishTurn()
             void loadSessions()
           })
           source.addEventListener('bridge-session-closed', () => {
             setAttached(false)
             setStreamingMessage(null)
+            finishTurn()
             void loadSessions()
           })
         },
-        [applyBridgeEvent, showNotice, t],
+        [applyBridgeEvent, finishTurn, showNotice, t],
       )
 
       useEffect(() => {
@@ -5267,25 +5411,47 @@ window.__ModuleLoader__.load({
         }
       }, [connectEvents, showNotice, t])
 
+      /**
+       * Submit the draft the way dsh does: the bubble appears immediately, the
+       * card is free at once, and the spinner waits below the transcript. The
+       * clock deliberately starts when the Host accepts the prompt, not on the
+       * click, so connecting a fresh agent never inflates the reported time.
+       */
       const send = useCallback(async () => {
         const message = draft.trim()
         if (message === '' || selectedKey === null || sending) return
+        const echo = { id: `echo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, text: message, timestamp: new Date().toISOString() }
+        sendingRef.current = true
         setSending(true)
         stickToBottomRef.current = true
+        setDraft('')
+        if (textareaRef.current !== null) textareaRef.current.style.height = 'auto'
+        setEchoes((current) => [...current, echo])
+        setLivePhase('connecting')
+        setRunStartedAt(null)
         try {
           if (!attached) {
             const ready = await ensureAttached(selectedKey)
-            if (!ready) return
+            if (!ready) {
+              // The prompt never left the browser: take the bubble back and
+              // hand the text to the reader, the way a failed send should.
+              rollbackTurn(echo.id)
+              setDraft(message)
+              return
+            }
           }
           await api('prompt', { method: 'POST', body: JSON.stringify({ key: selectedKey, message, mode: 'auto' }) })
-          setDraft('')
-          if (textareaRef.current !== null) textareaRef.current.style.height = 'auto'
+          setRunStartedAt(Date.now())
+          setLivePhase('running')
         } catch (error) {
+          rollbackTurn(echo.id)
+          setDraft(message)
           showNotice(`${t('promptFailed')}: ${error instanceof Error ? error.message : String(error)}`, true)
         } finally {
+          sendingRef.current = false
           setSending(false)
         }
-      }, [attached, draft, ensureAttached, selectedKey, sending, showNotice, t])
+      }, [attached, draft, ensureAttached, rollbackTurn, selectedKey, sending, setLivePhase, showNotice, t])
 
       const chooseModel = useCallback(async (model) => {
         if (selectedKey === null || modelSwitching) return
@@ -5350,7 +5516,40 @@ window.__ModuleLoader__.load({
         const node = scrollRef.current
         if (node === null || !stickToBottomRef.current) return
         node.scrollTop = node.scrollHeight
-      }, [transcript, streamingMessage])
+      }, [transcript, streamingMessage, echoes, turnPhase])
+
+      /**
+       * Backstop for the running row. The settle event is the happy path; a
+       * dropped event stream, a crashed child, or a turn adopted by another tab
+       * would otherwise leave the row ticking forever. Poll only while a turn is
+       * painted, and never while the submit itself is still in flight.
+       */
+      useEffect(() => {
+        if (turnPhase === null || selectedKey === null) return undefined
+        let cancelled = false
+        const check = async () => {
+          // The submit owns the phase until its own promise settles.
+          if (cancelled || sendingRef.current) return
+          // Prefer the bridge the panel is showing; a session key also carries
+          // its bridge id as the prefix before the encoded native key.
+          const id = bridgeId ?? String(selectedKey).slice(0, String(selectedKey).lastIndexOf('.'))
+          if (id === '' || id === null) return
+          try {
+            const body = await api(`activity?bridge=${encodeURIComponent(id)}`)
+            if (cancelled) return
+            const entry = (Array.isArray(body.activity) ? body.activity : []).find((row) => row.key === selectedKey)
+            const live = entry !== undefined && (entry.state === 'running' || entry.state === 'connecting')
+            if (!live) finishTurn()
+          } catch {
+            // A failed probe says nothing about the turn; keep the row.
+          }
+        }
+        const timer = setInterval(check, 5000)
+        return () => {
+          cancelled = true
+          clearInterval(timer)
+        }
+      }, [turnPhase, selectedKey, bridgeId, finishTurn])
 
       const onScroll = useCallback(() => {
         const node = scrollRef.current
@@ -5360,6 +5559,12 @@ window.__ModuleLoader__.load({
 
 
       const isStreaming = state?.isStreaming === true || streamingMessage !== null
+      // A turn is live from the submit click until the agent settles: the
+      // indicator shows while connecting and while the model is working.
+      const isTurnLive = turnPhase !== null || isStreaming
+      // The header meta and the running row describe the same live turn, so both
+      // read the deep-diving label while an agent is connecting or working.
+      const turnLabel = t('deepDiving')
       const fallbackStats = useMemo(
         () => deriveBridgeStats(transcript.filter((item) => item.kind === 'message').map((item) => item.message)),
         [transcript],
@@ -5390,7 +5595,7 @@ window.__ModuleLoader__.load({
           h('span', { className: 'dshBridge_headMeta' },
             selectedKey === null
               ? [bridge?.name, bridge?.engineLabel, t('subtitle')].filter(Boolean).join(' · ')
-              : [bridge?.name, selectedSession?.cwd, attaching ? t('sessionConnecting') : isStreaming ? t('running') : attached ? t('idle') : t('sessionIdle')].filter(Boolean).join(' · ')),
+              : [bridge?.name, selectedSession?.cwd, isTurnLive ? turnLabel : attached ? t('idle') : t('sessionIdle')].filter(Boolean).join(' · ')),
           h('span', { className: 'dshBridge_headSpacer' }),
           h('button', {
             key: 'refresh',
@@ -5436,6 +5641,16 @@ window.__ModuleLoader__.load({
                           'div',
                           { className: 'dshBridge_flow' },
                           ...renderTranscriptFlow(transcript, selectedSession?.cwd ?? detail?.cwd ?? null, t, streamingMessage, ui.home),
+                          ...echoes.map((echo) => h(UserTurn, {
+                            key: echo.id,
+                            message: {
+                              role: 'user',
+                              content: [{ type: 'text', text: echo.text }],
+                              timestamp: echo.timestamp,
+                            },
+                            t,
+                          })),
+                          isTurnLive ? h(BridgeRunningStatus, { key: 'running', startTime: runStartedAt, t }) : null,
                         ),
                       ),
             ),
@@ -5472,9 +5687,6 @@ window.__ModuleLoader__.load({
                       h(
                         'div',
                         { className: 'dshBridge_toolbar' },
-                        attaching
-                          ? h('span', { className: 'dshBridge_hint dshBridge_attachingHint' }, t('sendConnecting'))
-                          : null,
                         h(
                           'div',
                           { className: 'dshBridge_trailing' },
@@ -5689,6 +5901,8 @@ window.__ModuleLoader__.load({
       resolveContentWidth,
       bridgeToolVariant,
       deriveToolSummary,
+      formatRunDuration,
+      dropEchoFor,
       abbreviateHomePath,
       toolDiffTotals,
       assistantParts,

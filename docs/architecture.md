@@ -283,6 +283,16 @@ The transcript copies dsh's own chat vocabulary instead of inventing one:
   Single-file tools never repeat their arguments as JSON.
 - **Turn chrome.** A user message is a right-aligned bubble; an assistant answer
   has no role header and keeps only a hover-revealed copy action.
+- **Submit and the live turn.** Sending is local-first. The click appends a user
+  bubble from local state, clears the card, and starts a running row below the
+  transcript; the durable `message-end(user)` retires that bubble by text match
+  (an unmatched echo retires the oldest one). The clock starts when `POST
+  /prompt` is accepted rather than on the click, so the lazy attach of a cold
+  agent is not counted, and dsh's one-second floor keeps a fast turn from
+  reading as instant. A settled turn, a closed attachment, or a session snapshot
+  that reports neither running nor attached clears the row; a failed submit
+  removes the bubble and restores the draft. The Bridge page header reports the
+  same live state instead of a separate "connecting" wording.
 
 ## Security and persistence
 
