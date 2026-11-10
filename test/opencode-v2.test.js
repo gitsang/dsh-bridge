@@ -210,10 +210,12 @@ test('posts the 2.x prompt body and streams a turn to a settle', async (t) => {
   assert.equal(client.getState().isStreaming, false)
 
   const finalMessage = records.filter((record) => record.type === 'message-end').at(-1).message
-  assert.deepEqual(finalMessage.content.map((block) => block.type), ['thinking', 'text', 'toolCall'])
-  assert.equal(finalMessage.content[1].text, 'echo: hello')
+  // Blocks keep arrival order: the step reasons, calls its tool, then answers.
+  // Appending tools last would put the tool row below the text it produced.
+  assert.deepEqual(finalMessage.content.map((block) => block.type), ['thinking', 'toolCall', 'text'])
+  assert.equal(finalMessage.content[2].text, 'echo: hello')
   // 2.x names its shell tool `shell`; the bridge's row vocabulary wants `bash`.
-  assert.equal(finalMessage.content[2].name, 'bash')
+  assert.equal(finalMessage.content[1].name, 'bash')
   assert.equal(finalMessage.usage.input, 12)
   assert.equal(finalMessage.usage.cacheRead, 30)
 })
@@ -453,9 +455,9 @@ test('drives a whole 2.x turn through the attachment surface', async () => {
   assert.equal(types.filter((type) => type === 'tool-update').length, 1)
   assert.equal(types.filter((type) => type === 'tool-end').length, 1)
   const finalMessage = records.filter((record) => record.type === 'message-end').at(-1).message
-  assert.deepEqual(finalMessage.content.map((block) => block.type), ['thinking', 'text', 'toolCall'])
-  assert.equal(finalMessage.content[1].text, 'echo: hello there')
-  assert.equal(finalMessage.content[2].name, 'bash')
+  assert.deepEqual(finalMessage.content.map((block) => block.type), ['thinking', 'toolCall', 'text'])
+  assert.equal(finalMessage.content[2].text, 'echo: hello there')
+  assert.equal(finalMessage.content[1].name, 'bash')
 
   const messages = await bridge.getMessages()
   assert.equal(messages.messages.filter((message) => message.role === 'user').length, 1)
@@ -668,4 +670,45 @@ test('a 2.x child that dies mid-turn settles the turn and reports the exit', asy
   assert.equal(client.getState().isStreaming, false)
   const settled = records.filter((record) => record.type === 'session-status').at(-1)
   assert.equal(settled.exited, true)
+})
+
+test('keeps tool calls in arrival order between text blocks', async (t) => {
+  const { client } = await v2Client(t)
+  const records = []
+  client.on('event', (record) => records.push(record))
+  await client.prompt(V2_SESSION, 'ordering')
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    if (records.some((record) => record.type === 'session-status' && record.status === 'idle')) break
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  // The fixture streams reasoning, then the tool, then the answer. A message that
+  // appended tools last would render the tool row under prose it never produced.
+  const message = records.filter((record) => record.type === 'message-end').at(-1).message
+  assert.deepEqual(message.content.map((block) => block.type), ['thinking', 'toolCall', 'text'])
+  // The tool row's id is the id the streamed `tool-start` announced.
+  const toolStart = records.find((record) => record.type === 'tool-start')
+  assert.equal(message.content[1].id, toolStart.toolCallId)
+})
+
+test('reports a failed execution to the user and settles the turn', async () => {
+  const bridge = attachment(fakeV2)
+  // The fixture has no execution.failed knob, so the notice path is driven
+  // directly: the record is the one a provider/auth failure produces.
+  await bridge.start()
+  const notices = []
+  bridge.transport.client.on('ui-notification', (notice) => notices.push(notice))
+  const records = []
+  bridge.transport.client.on('event', (record) => records.push(record))
+  bridge.transport.client.streaming = true
+  bridge.transport.client.streamingEmitted = true
+  bridge.transport.client.handleEvent({
+    type: 'session.execution.failed',
+    data: { sessionID: V2_SESSION, error: { type: 'ProviderError', message: 'quota exhausted' } },
+  })
+  assert.equal(records.at(-1).type, 'session-status')
+  assert.equal(records.at(-1).aborted, false)
+  assert.equal(notices.length, 1)
+  assert.match(notices[0].message, /ProviderError: quota exhausted/)
+  await bridge.dispose()
 })

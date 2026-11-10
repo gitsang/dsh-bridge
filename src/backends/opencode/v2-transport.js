@@ -395,6 +395,12 @@ export class OpencodeV2Client extends EventEmitter {
     const turnEnd = TURN_END_EVENTS.get(type)
     if (turnEnd !== undefined) {
       this.aborted = turnEnd.aborted
+      // A failed execution carries the only structured reason the UI can show;
+      // settling alone would look like a silent, successful stop.
+      if (type === 'session.execution.failed') {
+        const detail = structuredErrorText(data.error)
+        if (detail !== '') this.notifyError(`OpenCode: ${detail}`)
+      }
       this.settleTurn(false)
       return
     }
@@ -563,7 +569,23 @@ export class OpencodeV2Client extends EventEmitter {
     const name = bridgeToolName(data.name)
     if (this.tools.has(callId)) return
     this.tools.set(callId, { id: callId, name, input: undefined, output: '', ended: false })
+    this.placeTool(data.assistantMessageID, callId)
     this.emitNative({ type: 'tool-start', toolCallId: callId, toolName: name, args: {} })
+  }
+
+  /**
+   * Record a tool's position in its assistant message.
+   *
+   * A turn interleaves text and tool calls (a step calls a tool, the next step
+   * answers with text), and the rendered message must keep that order: appending
+   * every tool after every text block would put a tool row below the sentence it
+   * produced. A tool that runs before any `input.started` still gets a slot.
+   */
+  placeTool(messageId, callId) {
+    if (typeof messageId !== 'string') return
+    const entry = this.messageFor(messageId)
+    if (entry.blocks.some((block) => block.type === 'tool' && block.id === callId)) return
+    entry.blocks.push({ type: 'tool', id: callId })
   }
 
   /**
@@ -603,12 +625,8 @@ export class OpencodeV2Client extends EventEmitter {
       this.emitNative({ type: 'tool-start', toolCallId: callId, toolName: name, args })
     }
     entry.input = args
-    const messageId = typeof data.assistantMessageID === 'string' ? data.assistantMessageID : undefined
-    if (messageId !== undefined) {
-      const message = this.messageFor(messageId)
-      if (!message.toolIds.includes(callId)) message.toolIds.push(callId)
-      this.emitMessageUpdate(messageId)
-    }
+    this.placeTool(data.assistantMessageID, callId)
+    if (typeof data.assistantMessageID === 'string') this.emitMessageUpdate(data.assistantMessageID)
   }
 
   handleToolProgress(data) {
@@ -632,6 +650,7 @@ export class OpencodeV2Client extends EventEmitter {
     if (entry === undefined) {
       entry = { id: callId, name: bridgeToolName(data.name), input: undefined, output: '', ended: false }
       this.tools.set(callId, entry)
+      this.placeTool(data.assistantMessageID, callId)
       this.emitNative({ type: 'tool-start', toolCallId: callId, toolName: entry.name, args: {} })
     }
     if (entry.ended) return
@@ -652,7 +671,7 @@ export class OpencodeV2Client extends EventEmitter {
   messageFor(messageId) {
     let entry = this.messages.get(messageId)
     if (entry !== undefined) return entry
-    entry = { id: messageId, blocks: [], streams: new Map(), toolIds: [], usage: undefined, finish: undefined, cost: 0, completed: false, errorMessage: undefined }
+    entry = { id: messageId, blocks: [], streams: new Map(), usage: undefined, finish: undefined, cost: 0, completed: false, errorMessage: undefined }
     this.messages.set(messageId, entry)
     this.order.push(messageId)
     return entry
@@ -665,14 +684,15 @@ export class OpencodeV2Client extends EventEmitter {
     let usage
     if (entry !== undefined) {
       for (const block of entry.blocks) {
+        if (block.type === 'tool') {
+          const tool = this.tools.get(block.id)
+          if (tool === undefined) continue
+          content.push({ type: 'toolCall', id: tool.id, name: tool.name, arguments: tool.input ?? {} })
+          continue
+        }
         if (block.text === '') continue
         if (block.type === 'text') content.push({ type: 'text', text: block.text })
         else content.push({ type: 'thinking', thinking: block.text })
-      }
-      for (const callId of entry.toolIds) {
-        const tool = this.tools.get(callId)
-        if (tool === undefined) continue
-        content.push({ type: 'toolCall', id: callId, name: tool.name, arguments: tool.input ?? {} })
       }
       usage = entry.usage
     }
@@ -886,6 +906,9 @@ export class OpencodeV2Client extends EventEmitter {
     }
     const body = { text }
     if (typeof options.delivery === 'string') body.delivery = options.delivery
+    // The echo is staged before the request: SSE events for this turn can reach
+    // the stream before the response does, and a pending echo set after the
+    // await would be flushed by the wrong event.
     this.pendingUserMessage = { text, timestamp: Date.now() }
     this.awaitingTurn = true
     this.aborted = false
