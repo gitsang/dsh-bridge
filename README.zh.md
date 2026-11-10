@@ -345,13 +345,21 @@ key 有序集合写入 `$DSH_HOME/bridge-imports.json`（带版本、0600、原�
 }
 ```
 
-Pi 环境变量仍作为适配器默认值：
+引擎相关的环境变量仍作为适配器默认值，所以当 shell 已经指向正确的安装位置时，
+桥接配置可以留空：
 
 | 变量 | 默认值 | 含义 |
 | --- | --- | --- |
 | `PI_BIN` | 自动探测 | 桥接未设置 `binPath` 时使用 |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi 配置目录 |
-| `PI_CODING_AGENT_SESSION_DIR` | `$PI_CODING_AGENT_DIR/sessions` | Session 根目录 |
+| `PI_CODING_AGENT_SESSION_DIR` | `$PI_CODING_AGENT_DIR/sessions` | Pi Session 根目录 |
+| `CODEX_BIN` | 自动探测 | 未设置 `binPath` 时使用的 Codex 可执行文件 |
+| `CODEX_HOME` | `~/.codex` | Codex 配置目录，会话在其下的 `sessions/` |
+| `OPENCODE_BIN` | 自动探测 | 未设置 `binPath` 时使用的 OpenCode 可执行文件 |
+| `XDG_DATA_HOME` | `~/.local/share` | OpenCode 数据目录为 `$XDG_DATA_HOME/opencode` |
+
+优先级固定为 `binPath` > 环境变量 > `PATH`。解析不到启动器的桥接会在状态点上
+直接报出原因，而不是等到发送时才失败。
 
 ## 开发
 

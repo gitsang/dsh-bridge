@@ -388,13 +388,22 @@ automatically.
 }
 ```
 
-Pi-specific environment variables still work as adapter defaults:
+Engine-specific environment variables still work as adapter defaults, so a
+bridge can stay empty when the shell already points at the right install:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PI_BIN` | auto | Pi executable when the bridge's `binPath` is unset |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi config directory |
-| `PI_CODING_AGENT_SESSION_DIR` | `$PI_CODING_AGENT_DIR/sessions` | Session storage root |
+| `PI_CODING_AGENT_SESSION_DIR` | `$PI_CODING_AGENT_DIR/sessions` | Pi session root |
+| `CODEX_BIN` | auto | Codex executable when `binPath` is unset |
+| `CODEX_HOME` | `~/.codex` | Codex config directory; its sessions live in `sessions/` |
+| `OPENCODE_BIN` | auto | OpenCode executable when `binPath` is unset |
+| `XDG_DATA_HOME` | `~/.local/share` | OpenCode's data directory is `$XDG_DATA_HOME/opencode` |
+
+`binPath` always wins over the environment, and the environment wins over `PATH`. A
+bridge whose launcher cannot be resolved reports that on its status dot instead of
+failing at send time.
 
 ## Development
 
