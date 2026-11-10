@@ -4,10 +4,11 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test, { afterEach, beforeEach } from 'node:test'
-import { apply, name, sessionKey } from '../src/index.js'
+import { apply, decodeSessionKey, name, sessionKey } from '../src/index.js'
 import { readArchiveStore } from '../src/archives.js'
 
 const fake = new URL('./fixtures/fake-pi.mjs', import.meta.url).pathname
+const fakeCodex = new URL('./fixtures/fake-codex.mjs', import.meta.url).pathname
 
 // Never let a host test touch the real ~/.dsh bridge store.
 let originalHome
@@ -910,5 +911,191 @@ test('viewing a finished session clears its completion activity', async () => {
     else process.env.DSH_HOME = previousHome
     if (previousAuto === undefined) delete process.env.BRIDGE_AUTO_CONNECT
     else process.env.BRIDGE_AUTO_CONNECT = previousAuto
+  }
+})
+
+/** One Codex rollout under a temp sessions root, in the real date tree. */
+async function codexFixture(options = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'bridge-plugin-codex-'))
+  const threadId = options.threadId ?? '019e0b6d-c972-72e2-8107-b2df9c0f32e7'
+  const cwd = options.cwd ?? '/tmp/codex-work'
+  const day = join(root, '2026', '01', '02')
+  await mkdir(day, { recursive: true })
+  const file = join(day, `rollout-2026-01-02T10-00-00-${threadId}.jsonl`)
+  const records = [
+    {
+      timestamp: '2026-01-02T10:00:00.000Z',
+      type: 'session_meta',
+      payload: {
+        session_id: threadId,
+        id: threadId,
+        timestamp: '2026-01-02T10:00:00.000Z',
+        cwd,
+        originator: 'dsh-bridge',
+        cli_version: '0.162.1',
+        source: 'cli',
+        model_provider: 'openai',
+      },
+    },
+    {
+      timestamp: '2026-01-02T10:00:01.000Z',
+      type: 'turn_context',
+      payload: { cwd, approval_policy: 'never' },
+    },
+    {
+      timestamp: '2026-01-02T10:00:02.000Z',
+      type: 'response_item',
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'old codex question' }] },
+    },
+    {
+      timestamp: '2026-01-02T10:00:04.000Z',
+      type: 'response_item',
+      payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'old codex answer' }] },
+    },
+  ]
+  await writeFile(file, records.map((record) => `${JSON.stringify(record)}\n`).join(''), 'utf8')
+  return { root, file, threadId }
+}
+
+test('lists, reads and drives a Codex session through the bridge routes', async () => {
+  const { root, threadId } = await codexFixture()
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const codexHome = await mkdtemp(join(tmpdir(), 'bridge-plugin-codex-home-'))
+  const previousHome = process.env.DSH_HOME
+  const previousCodexHome = process.env.CODEX_HOME
+  process.env.DSH_HOME = home
+  process.env.CODEX_HOME = codexHome
+  try {
+    const { ctx, routes, disposers } = host()
+    apply(ctx)
+    try {
+      const created = await (await call(routes, 'bridges', post({
+        name: 'Local Codex',
+        mode: 'cli',
+        engine: 'codex',
+        config: { sessionsRoot: root, binPath: fakeCodex },
+      }))).json()
+      const bridge = created.bridges.find((entry) => entry.name === 'Local Codex')
+      assert.equal(bridge.available, true)
+      assert.equal(bridge.config.sessionsRoot, root)
+      assert.equal(bridge.config.skipApprovals, true)
+
+      // Import-first admission gate, same as every other engine.
+      const candidates = await (await call(routes, `imports?bridge=${encodeURIComponent(bridge.id)}`)).json()
+      assert.equal(candidates.sessions.length, 1)
+      assert.equal(candidates.sessions[0].id, threadId)
+      assert.equal(candidates.sessions[0].cwd, '/tmp/codex-work')
+
+      await call(routes, 'imports', post({ bridge: bridge.id, sessionKeys: [candidates.sessions[0].key] }))
+      const listed = await (await call(routes, `sessions?bridge=${encodeURIComponent(bridge.id)}`)).json()
+      assert.equal(listed.available, true)
+      assert.equal(listed.engine, 'codex')
+      assert.equal(listed.sessions.length, 1)
+      assert.equal(listed.workspaces[0].path, '/tmp/codex-work')
+
+      const key = listed.sessions[0].key
+      const detail = await (await call(routes, `session?key=${encodeURIComponent(key)}`)).json()
+      assert.equal(detail.session.bridge, bridge.id)
+      assert.equal(detail.session.engine, 'codex')
+      assert.deepEqual(detail.session.messages.map((message) => message.role), ['user', 'assistant'])
+      assert.equal(detail.session.messages[0].content[0].text, 'old codex question')
+
+      const attached = await (await call(routes, 'attach', post({ key }))).json()
+      assert.equal(attached.ok, true)
+      assert.equal(attached.engine, 'codex')
+      assert.equal(attached.state.sessionId, threadId)
+      assert.equal(attached.state.isStreaming, false)
+
+      const models = await (await call(routes, `models?key=${encodeURIComponent(key)}`)).json()
+      assert.equal(models.ok, true)
+      assert.deepEqual(models.models.map((model) => model.id), ['fake-model'])
+
+      const prompt = await (await call(routes, 'prompt', post({ key, message: 'hello codex' }))).json()
+      assert.equal(prompt.ok, true)
+      assert.equal(prompt.activity.state, 'running')
+
+      // The turn settles on its own; the host records the completion.
+      const deadline = Date.now() + 5000
+      let activity
+      while (Date.now() < deadline) {
+        activity = (await (await call(routes, `activity?bridge=${encodeURIComponent(bridge.id)}`)).json())
+          .activity.find((entry) => entry.key === key)
+        if (activity?.state === 'idle') break
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      assert.equal(activity.state, 'idle')
+
+      const detached = await (await call(routes, 'detach', post({ key }))).json()
+      assert.deepEqual(detached, { ok: true, detached: true })
+    } finally {
+      for (const dispose of disposers.reverse()) await dispose?.()
+    }
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME
+    else process.env.CODEX_HOME = previousCodexHome
+    await rm(home, { recursive: true, force: true })
+    await rm(codexHome, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('creates a new Codex session that the bridge can attach to', async () => {
+  const { root } = await codexFixture()
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const codexHome = await mkdtemp(join(tmpdir(), 'bridge-plugin-codex-home-'))
+  const workspace = await mkdtemp(join(tmpdir(), 'bridge-plugin-codex-ws-'))
+  const previousHome = process.env.DSH_HOME
+  const previousCodexHome = process.env.CODEX_HOME
+  const previousAuto = process.env.BRIDGE_AUTO_CONNECT
+  process.env.DSH_HOME = home
+  process.env.CODEX_HOME = codexHome
+  process.env.BRIDGE_AUTO_CONNECT = '0'
+  try {
+    const { ctx, routes, disposers } = host()
+    apply(ctx)
+    try {
+      const created = await (await call(routes, 'bridges', post({
+        name: 'Local Codex',
+        mode: 'cli',
+        engine: 'codex',
+        config: { sessionsRoot: root, binPath: fakeCodex },
+      }))).json()
+      const bridge = created.bridges.find((entry) => entry.name === 'Local Codex')
+
+      const session = await (await call(routes, 'sessions', post({
+        bridge: bridge.id,
+        cwd: workspace,
+      }))).json()
+      assert.equal(session.ok, true)
+      assert.equal(session.engine, 'codex')
+      assert.equal(session.session.cwd, workspace)
+      // The Bridge writes the resumable header itself, so the key exists before
+      // the first turn and the new session is already imported.
+      const createdFile = decodeSessionKey(session.session.key).nativeKey
+      assert.equal(existsSync(Buffer.from(createdFile, 'base64url').toString('utf8')), true)
+
+      const listed = await (await call(routes, `sessions?bridge=${encodeURIComponent(bridge.id)}`)).json()
+      assert.equal(listed.sessions.some((entry) => entry.key === session.session.key), true)
+
+      const attached = await (await call(routes, 'attach', post({ key: session.session.key }))).json()
+      assert.equal(attached.ok, true)
+      assert.equal(attached.state.sessionId, session.session.id)
+      await call(routes, 'detach', post({ key: session.session.key }))
+    } finally {
+      for (const dispose of disposers.reverse()) await dispose?.()
+    }
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME
+    else process.env.CODEX_HOME = previousCodexHome
+    if (previousAuto === undefined) delete process.env.BRIDGE_AUTO_CONNECT
+    else process.env.BRIDGE_AUTO_CONNECT = previousAuto
+    await rm(home, { recursive: true, force: true })
+    await rm(codexHome, { recursive: true, force: true })
+    await rm(workspace, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true })
   }
 })
