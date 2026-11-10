@@ -83,6 +83,14 @@ function transportError(message, cause) {
   return Object.assign(new Error(message), { status: 502, cause })
 }
 
+/** True when a fetch failed at the socket level rather than with an HTTP status. */
+function isNetworkFailure(error) {
+  if (error === null || typeof error !== 'object') return false
+  if (error.name === 'TypeError' && error.message === 'fetch failed') return true
+  const code = error.cause?.code ?? error.code
+  return code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'EPIPE' || code === 'UND_ERR_SOCKET'
+}
+
 function parseJsonBody(text) {
   if (typeof text !== 'string' || text === '') return undefined
   try {
@@ -286,9 +294,13 @@ export class OpencodeServer extends EventEmitter {
       if (error?.name === 'AbortError') {
         throw transportError(`OpenCode ${options.method ?? 'GET'} ${pathname} timed out after ${timeoutMs}ms`)
       }
-      // A killed server resets the socket before the exit event is delivered;
-      // report the exit rather than a bare ECONNRESET so callers can tell the
-      // difference between a crashed child and a network fault.
+      // A killed server resets the socket before the process exit is delivered,
+      // so a network-level failure has to give the exit event a moment before it
+      // can be reported as a plain connection error. Callers (and the host's
+      // error copy) need to tell a dead child from a network fault.
+      if (error?.status !== 502 && isNetworkFailure(error) && !this.exited) {
+        await this.waitForExit(250)
+      }
       if (this.exited) {
         throw transportError(`OpenCode server exited before responding${this.stderrSuffix()}`, error)
       }
