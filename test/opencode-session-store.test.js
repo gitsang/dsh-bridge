@@ -494,6 +494,47 @@ test('normalizes a live API transcript into the same vocabulary', { skip }, () =
   assert.deepEqual(transcript.model, { provider: 'fake', id: 'fake-model' })
 })
 
+test('drops unknown and non-conversational part types', { skip }, () => {
+  // OpenCode adds part kinds over time (subtask, snapshot, retry, …). An
+  // unknown one must be ignored rather than surfaced as an unrenderable block,
+  // and the surrounding text must survive.
+  const transcript = store.messagesFromApiEntries([
+    {
+      info: { id: 'msg_u', role: 'assistant', time: { created: 1 }, providerID: 'p', modelID: 'x' },
+      parts: [
+        { type: 'future-part', data: { anything: true } },
+        { type: 'text', text: 'kept' },
+        { type: 'subtask', prompt: 'nested agent' },
+        { type: 'step-start' },
+        { type: 'snapshot', snapshot: 'abc' },
+        { type: 'tool', callID: 'c1', tool: 'todowrite', state: { status: 'pending', input: {} } },
+      ],
+    },
+  ])
+  assert.deepEqual(transcript.messages[0].content, [
+    { type: 'text', text: 'kept' },
+    { type: 'toolCall', id: 'c1', name: 'others', arguments: {} },
+  ])
+  // An assistant message with nothing renderable is dropped entirely.
+  const empty = store.messagesFromApiEntries([
+    { info: { id: 'msg_e', role: 'assistant', time: { created: 1 } }, parts: [{ type: 'step-start' }] },
+  ])
+  assert.deepEqual(empty.messages, [])
+})
+
+test('drops an assistant message with no tool-call id', { skip }, () => {
+  const transcript = store.messagesFromApiEntries([
+    {
+      info: { id: 'msg_a', role: 'assistant', time: { created: 1 } },
+      parts: [{ type: 'tool', tool: 'bash', state: { status: 'completed', input: {}, output: 'x' } }],
+    },
+  ])
+  // Without a call id the browser cannot pair the result with a tool row, so
+  // the block must not be emitted at all.
+  assert.deepEqual(transcript.messages, [])
+  assert.deepEqual(transcript.tools, [])
+})
+
 test('shapes a created API session into the listed summary form', { skip }, () => {
   const summary = store.summaryFromApiSession({
     id: 'ses_created00000000000000000001',
