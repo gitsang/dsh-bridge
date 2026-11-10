@@ -243,10 +243,12 @@ test('forwards questions and rejects them when cancelled', async () => {
   await bridge.dispose()
 })
 
-test('rejects unknown dialogs', async () => {
+test('rejects unknown dialogs synchronously for the host route', async () => {
   const bridge = attachment()
   await bridge.start()
-  await assert.rejects(bridge.respondUi('nope', { confirmed: true }), /unknown extension UI request/)
+  // The host's /ui-response route calls respondUi without awaiting and turns a
+  // thrown error into its 409; an async rejection would escape it entirely.
+  assert.throws(() => bridge.respondUi('nope', { confirmed: true }), /unknown extension UI request/)
   await bridge.dispose()
 })
 
@@ -259,6 +261,32 @@ test('auto-answers interactive questions when approval is on', async () => {
   await bridge.prompt('needs an answer')
   await waitForStatus(bridge, 'idle', from)
   assert.deepEqual(dialogs, [])
+  await bridge.dispose()
+})
+
+test('attaching mid-turn shows the turn as running', async () => {
+  const bridge = attachment()
+  await bridge.start()
+  // Mark the session busy behind the attachment's back, then reconcile: the
+  // deferred busy event must arrive after a host listener could subscribe.
+  await fetch(`${bridge.baseUrl}/session/status`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionID: SESSION_ID, busy: true }),
+  })
+  const from = bridge.records.length
+  await bridge.snapshot()
+  const busy = await waitForStatus(bridge, 'busy', from)
+  assert.equal(busy.type, 'session-status')
+  assert.equal(bridge.getState().isStreaming, true)
+  // Going idle settles the turn that was already in flight.
+  await fetch(`${bridge.baseUrl}/session/status`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionID: SESSION_ID, busy: false }),
+  })
+  await waitForStatus(bridge, 'idle', from)
+  assert.equal(bridge.getState().isStreaming, false)
   await bridge.dispose()
 })
 

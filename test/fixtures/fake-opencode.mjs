@@ -376,6 +376,15 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  if (path === '/session/status' && method === 'POST') {
+    // Test hook: mark the session busy as if a TUI turn were already running, so
+    // attaching mid-turn can be exercised.
+    const body = await readBody(request)
+    if (body.sessionID !== undefined) setStatus(body.sessionID, body.busy === true ? { type: 'busy' } : undefined)
+    sendJson(response, 200, { ok: true })
+    return
+  }
+
   if (path === '/session/status') {
     const payload = {}
     for (const [sessionId, status] of sessionStatus.entries()) payload[sessionId] = status

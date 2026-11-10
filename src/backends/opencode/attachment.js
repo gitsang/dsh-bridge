@@ -573,6 +573,7 @@ export class OpencodeAttachment extends EventEmitter {
 
     // Streaming state, filled from SSE events and reconciled once after start.
     this.busy = false
+    this.busyEmitted = false
     this.awaitingTurn = false
     this.aborted = false
     this.model = undefined
@@ -760,11 +761,11 @@ export class OpencodeAttachment extends EventEmitter {
   handleSessionStatus(status) {
     const kind = typeof status?.type === 'string' ? status.type : ''
     if (kind === 'busy') {
-      if (this.busy) return
+      if (this.busy && this.busyEmitted) return
       this.busy = true
       this.awaitingTurn = true
       this.aborted = false
-      this.emitNative({ type: 'session-status', status: 'busy' })
+      this.emitBusy()
       return
     }
     if (kind === 'idle') {
@@ -1021,6 +1022,25 @@ export class OpencodeAttachment extends EventEmitter {
   }
 
   /**
+   * Announce the start of a turn.
+   *
+   * The host keys turn state on `agent-start`; it is emitted once per turn even
+   * though OpenCode repeats `session.status: busy` for every step. `defer` is
+   * used when the busy state is discovered during attach reconciliation, where
+   * the host has not subscribed to the attachment's events yet.
+   */
+  emitBusy(defer = false) {
+    if (this.busyEmitted) return
+    this.busyEmitted = true
+    const emit = () => {
+      if (this.disposed || !this.busy) return
+      this.emitNative({ type: 'session-status', status: 'busy' })
+    }
+    if (defer) setImmediate(emit)
+    else emit()
+  }
+
+  /**
    * End the current turn exactly once.
    *
    * The host keys turn state on `agent-start` / `agent-settled`; a missing
@@ -1035,6 +1055,7 @@ export class OpencodeAttachment extends EventEmitter {
       if (this.startedMessages.has(messageId) && !this.endedMessages.has(messageId)) this.endMessage(messageId)
     }
     this.busy = false
+    this.busyEmitted = false
     this.awaitingTurn = false
     this.emitNative({ type: 'session-status', status: 'idle', aborted: this.aborted, ...(fromExit ? { exited: true } : {}) })
     this.aborted = false
@@ -1063,6 +1084,10 @@ export class OpencodeAttachment extends EventEmitter {
     if (current?.type === 'busy') {
       this.busy = true
       this.awaitingTurn = true
+      // Attaching mid-turn is rare (the Bridge closes an attachment shortly
+      // after every settle) but must still show as running, so the deferred
+      // emit lands after the host has subscribed to this attachment's events.
+      this.emitBusy(true)
     }
     return this.stateView()
   }
@@ -1284,11 +1309,19 @@ export class OpencodeAttachment extends EventEmitter {
    */
   forwardUiRequest(uiRequest, context) {
     const timer = setTimeout(() => {
-      void this.respondUi(uiRequest.id, { cancelled: true }).catch(() => {})
+      // Auto-deny instead of leaving the turn blocked forever. Unknown-id throws
+      // are possible if the dialog was answered in the same tick, so swallow
+      // them: an exception escaping a timer callback would kill the host.
+      try {
+        void this.respondUi(uiRequest.id, { cancelled: true }).catch(() => {})
+      } catch {
+        // Already answered.
+      }
       this.emit('ui-notification', {
         type: 'extension_ui_request',
         id: `ui-timeout-${uiRequest.id}`,
         method: 'notify',
+        notifyType: 'error',
         message: `OpenCode ${context.kind} request timed out and was rejected automatically.`,
       })
     }, this.uiTimeoutMs)
@@ -1297,12 +1330,31 @@ export class OpencodeAttachment extends EventEmitter {
     this.emit('ui-request', uiRequest)
   }
 
-  /** Answer one forwarded permission/question dialog (host `ui-response` route). */
-  async respondUi(id, response = {}) {
+  /**
+   * Answer one forwarded permission/question dialog (host `ui-response` route).
+   *
+   * The host calls this without awaiting, so state validation is synchronous (a
+   * throw becomes the route's 400/409) and only the reply itself is async. A
+   * transport failure is reported as a notification rather than as an unhandled
+   * rejection the host would never see.
+   */
+  respondUi(id, response = {}) {
     const pending = this.pendingUi.get(id)
     if (pending === undefined) throw Object.assign(new Error('unknown extension UI request'), { status: 409 })
     this.pendingUi.delete(id)
     clearTimeout(pending.timer)
+    return this.sendUiResponse(id, pending, response).catch((error) => {
+      this.emit('ui-notification', {
+        type: 'extension_ui_request',
+        id: `ui-reply-error-${id}`,
+        method: 'notify',
+        notifyType: 'error',
+        message: `OpenCode could not record the answer to ${id}: ${errorMessage(error)}`,
+      })
+    })
+  }
+
+  async sendUiResponse(id, pending, response) {
     const cancelled = response.cancelled === true
     const v2 = pending.v2 === true
     if (pending.kind === 'permission') {
