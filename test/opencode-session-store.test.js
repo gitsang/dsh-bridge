@@ -30,6 +30,7 @@ const BOTH_SESSION = 'ses_both00000000000000000000001'
 const V2_ONLY_SESSION = 'ses_v2only000000000000000000001'
 const LEGACY_ONLY_SESSION = 'ses_legacyonly000000000000001'
 const CHILD_SESSION = 'ses_child0000000000000000000001'
+const LONG_MESSAGE_SESSION = 'ses_longmsg00000000000000000001'
 
 /**
  * Build a temporary OpenCode database covering both storage generations.
@@ -212,6 +213,17 @@ function buildDatabase(DatabaseSync) {
   // The "both" session has v2 rows only; its legacy table stays empty.
   insertSessionMessage.run('sesmsg_both_user', BOTH_SESSION, 'user', 0, 200, 200, JSON.stringify({ text: 'both generations', time: { created: 200 } }))
 
+  // A session whose first message exceeds the preview clip, so the list stays
+  // bounded the way the Pi adapter's preview does.
+  insertSession.run(
+    LONG_MESSAGE_SESSION, 'global', null, '/work/long', 'Long preview', '1.1.49', null, null,
+    Date.parse('2026-01-01T00:00:00.000Z'), Date.parse('2026-01-01T00:00:02.000Z'),
+  )
+  insertSessionMessage.run('sesmsg_long_user', LONG_MESSAGE_SESSION, 'user', 0, 50, 50, JSON.stringify({
+    text: 'y'.repeat(5000),
+    time: { created: 50 },
+  }))
+
   // The v2 session with an auto-generated placeholder title gets no transcript.
   return db
 }
@@ -269,7 +281,7 @@ test('lists sessions from both storage generations', { skip }, async () => {
   const ids = result.sessions.map((session) => session.id)
   assert.deepEqual(
     ids,
-    [V2_ONLY_SESSION, BOTH_SESSION, V2_SESSION, CHILD_SESSION, LEGACY_SESSION, LEGACY_ONLY_SESSION],
+    [V2_ONLY_SESSION, BOTH_SESSION, V2_SESSION, CHILD_SESSION, LEGACY_SESSION, LEGACY_ONLY_SESSION, LONG_MESSAGE_SESSION],
   )
 })
 
@@ -306,6 +318,26 @@ test('derives cwd, timestamps, model, message counts and first message', { skip 
   assert.equal(byId.get(CHILD_SESSION).parentId, V2_ONLY_SESSION)
   assert.equal(byId.get(V2_ONLY_SESSION).archived, true)
   assert.equal(byId.get(LEGACY_SESSION).archived, false)
+})
+
+test('groups sessions into workspaces like the Pi engine', { skip }, async () => {
+  const { opencodeEngine } = await import('../src/backends/opencode/index.js')
+  const result = await opencodeEngine.listSessions(config(), env)
+  assert.equal(result.root, fixture.dir)
+  const workspaces = new Map(result.workspaces.map((workspace) => [workspace.path, workspace]))
+  assert.deepEqual([...workspaces.keys()].sort(), ['/work/demo', '/work/long', '/work/other', '/work/shared'])
+  assert.equal(workspaces.get('/work/other').name, 'other')
+  assert.equal(workspaces.get('/work/other').sessionCount, 3)
+  assert.equal(workspaces.get('/work/demo').sessionCount, 2)
+  // Every listed session keeps its OpenCode id as the browser-facing key.
+  assert.ok(result.sessions.every((session) => session.nativeKey === session.key && session.id === session.key))
+})
+
+test('clips long first messages in list previews', { skip }, async () => {
+  const { sessions } = await store.listOpencodeSessions(config(), env)
+  const long = sessions.find((session) => session.id === LONG_MESSAGE_SESSION)
+  assert.equal(long.firstMessage.length, 2001)
+  assert.ok(long.firstMessage.endsWith('…'))
 })
 
 test('bounds the session list', { skip }, async () => {

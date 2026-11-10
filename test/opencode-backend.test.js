@@ -477,6 +477,36 @@ test('probe resolves OPENCODE_BIN from the environment', async () => {
   await rm(root, { recursive: true, force: true })
 })
 
+test('engine rejects malformed native keys before building an attachment', async () => {
+  await assert.rejects(
+    opencodeEngine.readSession('ses_bad; drop table session', { sessionsRoot: tmpdir() }, process.env),
+    /invalid OpenCode session id/,
+  )
+  await assert.rejects(
+    opencodeEngine.createAttachment({
+      session: { nativeKey: 'not-a-session', cwd: tmpdir() },
+      config: { binPath: fake },
+      env: { ...process.env },
+    }),
+    /invalid OpenCode session id/,
+  )
+})
+
+test('engine builds an attachment with the bridge config and env', async () => {
+  const bridge = await opencodeEngine.createAttachment({
+    session: { nativeKey: SESSION_ID, cwd: tmpdir() },
+    config: { binPath: fake, autoApprove: false },
+    env: { ...process.env },
+  })
+  assert.equal(bridge.env.PATH, process.env.PATH)
+  assert.equal(bridge.autoApprove, false)
+  assert.equal(bridge.sessionId, SESSION_ID)
+  await bridge.start()
+  assert.equal(bridge.running, true)
+  await bridge.dispose()
+  assert.equal(bridge.running, false)
+})
+
 test('engine lists and reads sessions from its database', { skip: !existsSync(fake) }, async () => {
   // The engine-level check uses the real user database only when it is readable;
   // everywhere else the session-store tests cover the schema, so skip cleanly.
