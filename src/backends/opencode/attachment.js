@@ -128,7 +128,6 @@ export class OpencodeServer extends EventEmitter {
     this.requestTimeoutMs = options.requestTimeoutMs ?? options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
     this.child = undefined
     this.exited = false
-    this.stopping = false
     this.baseUrl = undefined
     this.stdout = ''
     this.stderrRing = createStderrRing(STDERR_RING_BYTES)
@@ -352,7 +351,6 @@ export class OpencodeServer extends EventEmitter {
    */
   async stop() {
     if (this.child === undefined || this.exited) return
-    this.stopping = true
     this.abortInflight(transportError('OpenCode server was disposed'))
     const child = this.child
     try {
@@ -579,7 +577,6 @@ export class OpencodeAttachment extends EventEmitter {
     this.model = undefined
     this.lastEventAt = undefined
     this.lastEventType = undefined
-    this.sessionInfo = undefined
     this.lastSessionName = undefined
     this.messages = new Map()
     this.messageOrder = []
@@ -779,7 +776,6 @@ export class OpencodeAttachment extends EventEmitter {
 
   handleSessionUpdated(info) {
     if (info === null || typeof info !== 'object') return
-    this.sessionInfo = { ...(this.sessionInfo ?? {}), ...info }
     if (info.model !== null && typeof info.model === 'object' && typeof info.model.id === 'string') {
       this.model = { provider: info.model.providerID, id: info.model.id }
     }
@@ -1075,7 +1071,6 @@ export class OpencodeAttachment extends EventEmitter {
       this.server.request(`/session/${encodeURIComponent(this.sessionId)}`).catch(() => undefined),
     ])
     if (info !== null && typeof info === 'object') {
-      this.sessionInfo = info
       if (typeof info.model?.id === 'string') this.model = { provider: info.model.providerID, id: info.model.id }
       const name = sessionName(info.title)
       if (name !== undefined) this.lastSessionName = name
