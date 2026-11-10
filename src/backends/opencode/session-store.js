@@ -18,7 +18,7 @@
  * every read closes the connection immediately: a long-lived WAL reader would
  * pin the WAL checkpoint and make the owner's writes more expensive.
  */
-import { accessSync, constants, existsSync, statSync } from 'node:fs'
+import { accessSync, constants, existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -95,8 +95,57 @@ export function opencodeDataDir(config = {}, env = process.env) {
   return resolve(join(dataHome, 'opencode'))
 }
 
+/**
+ * Resolve the SQLite file the engine keeps its sessions in.
+ *
+ * `opencode.db` is what both 1.x and 2.x write, but 2.x also honours
+ * `OPENCODE_DB` (an explicit path) and channels can name their file
+ * `opencode-<channel>.db`. A 2.x-only install whose database is one of those
+ * must still pass the readiness probe, so the lookup is: an explicit
+ * `OPENCODE_DB`, then `opencode.db`, then any `opencode-*.db` sibling. When
+ * nothing exists the plain path is returned so the error names what was tried.
+ */
 export function opencodeDatabasePath(config = {}, env = process.env) {
-  return join(opencodeDataDir(config, env), 'opencode.db')
+  const dataDir = opencodeDataDir(config, env)
+  const explicit = typeof env.OPENCODE_DB === 'string' ? env.OPENCODE_DB.trim() : ''
+  // `:memory:` is a valid 2.x value but is not a readable file, so it can never
+  // satisfy the probe; fall through to the on-disk candidates instead.
+  if (explicit !== '' && explicit !== ':memory:') {
+    const resolved = resolve(explicit.startsWith('~') ? join(homedir(), explicit.slice(1)) : explicit)
+    if (existsSync(resolved)) return resolved
+  }
+  const standard = join(dataDir, 'opencode.db')
+  if (existsSync(standard)) return standard
+  const channel = findChannelDatabase(dataDir)
+  return channel ?? standard
+}
+
+/** Pick the newest `opencode-<channel>.db` in one data directory. */
+function findChannelDatabase(dataDir) {
+  let names
+  try {
+    names = readdirSync(dataDir)
+  } catch {
+    return undefined
+  }
+  const candidates = names.filter((name) => /^opencode-[^/]+\.db$/.test(name))
+  if (candidates.length === 0) return undefined
+  let best
+  let bestTime = -Infinity
+  for (const name of candidates) {
+    const path = join(dataDir, name)
+    try {
+      const info = statSync(path)
+      if (!info.isFile()) continue
+      if (info.mtimeMs > bestTime) {
+        bestTime = info.mtimeMs
+        best = path
+      }
+    } catch {
+      // An unreadable entry is simply not a candidate.
+    }
+  }
+  return best
 }
 
 /**
@@ -562,7 +611,7 @@ export function summaryFromApiSession(info) {
 export async function listOpencodeSessions(config = {}, env = process.env, options = {}) {
   const limit = Math.max(1, Math.min(Number.isFinite(options.limit) ? options.limit : DEFAULT_LIMIT, MAX_LIMIT))
   const dataDir = opencodeDataDir(config, env)
-  const dbPath = join(dataDir, 'opencode.db')
+  const dbPath = opencodeDatabasePath(config, env)
   return withDatabase(dbPath, (db) => {
     const hasLegacy = hasTable(db, 'session')
     const hasV2 = hasTable(db, 'session_v2')

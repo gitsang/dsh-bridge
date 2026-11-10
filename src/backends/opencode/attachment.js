@@ -30,11 +30,16 @@
  *   as the fallback;
  * - the server ignores stdin EOF and SIGTERM, so shutdown ends with SIGKILL.
  */
-import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { createStderrRing, resolveCliCommand } from '../cli.js'
+import {
+  OpencodeServer,
+  parseJsonBody,
+  parseServerUrl,
+  resolveOpencodeCommand,
+  transportError,
+} from './launcher.js'
 import {
   bridgeToolArguments,
   bridgeToolName,
@@ -42,352 +47,28 @@ import {
   opencodeDataDir,
   summaryFromApiSession,
 } from './session-store.js'
+import { permissionUiRequest, questionUiRequest } from './ui.js'
+import {
+  OpencodeV2Client,
+  messagesFromV2Entries,
+  modelsFromV2Catalog,
+  summaryFromV2Session,
+  usageFromV2Tokens,
+} from './v2-transport.js'
+
+// Both transports share one server child implementation; re-exported here because
+// this module is the OpenCode adapter's public entry point.
+export { OpencodeServer, parseServerUrl, resolveOpencodeCommand }
+export { permissionUiRequest, questionUiRequest }
 
 const DEFAULT_READY_TIMEOUT_MS = 30_000
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const DEFAULT_UI_TIMEOUT_MS = 120_000
 const DEFAULT_MODEL_TIMEOUT_MS = 60_000
-const STDERR_RING_BYTES = 16 * 1024
-const LISTEN_LINE = /opencode server listening on (https?:\/\/[^\s]+)/
-
-/** Resolve the launcher without spawning: config wins, then OPENCODE_BIN, then PATH. */
-export function resolveOpencodeCommand(config = {}, env = process.env) {
-  return resolveCliCommand({
-    configBin: config.binPath,
-    envVar: 'OPENCODE_BIN',
-    defaultNames: ['opencode'],
-    env,
-  })
-}
-
-/**
- * Extract the server URL from the CLI's stdout.
- *
- * The banner line is plain text on stdout, not JSON, and the URL is followed by
- * a newline: tolerate trailing punctuation so a future "listening on …)." form
- * still parses.
- */
-export function parseServerUrl(text) {
-  if (typeof text !== 'string') return undefined
-  const match = LISTEN_LINE.exec(text)
-  if (match === null) return undefined
-  return match[1].replace(/[),.;]+$/, '')
-}
+const DEFAULT_V2_MODEL_TIMEOUT_MS = 90_000
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error)
-}
-
-/** Give every transport failure the 502 shape the host reports to the browser. */
-function transportError(message, cause) {
-  return Object.assign(new Error(message), { status: 502, cause })
-}
-
-/** True when a fetch failed at the socket level rather than with an HTTP status. */
-function isNetworkFailure(error) {
-  if (error === null || typeof error !== 'object') return false
-  if (error.name === 'TypeError' && error.message === 'fetch failed') return true
-  const code = error.cause?.code ?? error.code
-  return code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'EPIPE' || code === 'UND_ERR_SOCKET'
-}
-
-function parseJsonBody(text) {
-  if (typeof text !== 'string' || text === '') return undefined
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * One `opencode serve` child plus bounded JSON requests to it.
- *
- * The attachment owns exactly one server (cwd = session directory); the
- * session-create helper and the model catalog spawn their own short-lived copies
- * and reap them. Requests are tracked so a disposed attachment aborts every
- * in-flight fetch instead of leaving a socket to keep the event loop alive.
- */
-export class OpencodeServer extends EventEmitter {
-  /**
-   * @param {object} options
-   * @param {string} [options.cwd] directory the server binds (its own cwd)
-   * @param {NodeJS.ProcessEnv} [options.env]
-   * @param {{command: string, prefixArgs?: string[]}} [options.resolved]
-   * @param {number} [options.readyTimeoutMs]
-   * @param {number} [options.requestTimeoutMs]
-   */
-  constructor(options = {}) {
-    super()
-    this.cwd = typeof options.cwd === 'string' && options.cwd !== '' && existsSync(options.cwd)
-      ? options.cwd
-      : homedir()
-    this.env = options.env ?? process.env
-    this.resolved = options.resolved ?? resolveOpencodeCommand({}, this.env)
-    this.readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS
-    this.requestTimeoutMs = options.requestTimeoutMs ?? options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
-    this.child = undefined
-    this.exited = false
-    this.baseUrl = undefined
-    this.stdout = ''
-    this.stderrRing = createStderrRing(STDERR_RING_BYTES)
-    this.inflight = new Set()
-    this.urls = []
-    this.exitInfo = undefined
-  }
-
-  get pid() {
-    return this.child?.pid
-  }
-
-  get running() {
-    return this.child !== undefined && !this.exited
-  }
-
-  get stderr() {
-    return this.stderrRing.value
-  }
-
-  /** Spawn the server and resolve once it reports a listening URL and /health. */
-  async start() {
-    if (this.child !== undefined) return this
-    const args = [...(this.resolved.prefixArgs ?? []), 'serve', '--port', '0', '--hostname', '127.0.0.1']
-    let child
-    try {
-      child = spawn(this.resolved.command, args, {
-        cwd: this.cwd,
-        env: this.env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-    } catch (error) {
-      throw transportError(`could not start the OpenCode server: ${errorMessage(error)}`, error)
-    }
-    this.child = child
-    child.stdout.setEncoding('utf8')
-    child.stderr.setEncoding('utf8')
-    child.stdout.on('data', (chunk) => {
-      // Keep only a bounded prefix: the listening line is printed once, before
-      // any other stdout traffic, so a long-running server cannot grow this.
-      if (this.baseUrl === undefined) this.stdout = (this.stdout + chunk).slice(-64 * 1024)
-      this.checkForServerUrl()
-    })
-    child.stderr.on('data', (chunk) => this.stderrRing.push(chunk))
-    child.on('error', (error) => this.handleExit(undefined, error))
-    child.on('exit', (code, signal) => this.handleExit({ code, signal }))
-    this.emit('spawn', { pid: child.pid, command: this.resolved.command, args, cwd: this.cwd })
-    try {
-      await this.waitForServerUrl()
-      // A server that printed its URL but cannot answer /health is not usable;
-      // failing here keeps the attachment's start error close to its cause.
-      await this.request('/global/health')
-    } catch (error) {
-      // A failed start must not leave the child running: the caller's only
-      // handle to it is this object, which it will not start again.
-      await this.stop()
-      throw error
-    }
-    return this
-  }
-
-  checkForServerUrl() {
-    if (this.baseUrl !== undefined) return
-    const url = parseServerUrl(this.stdout)
-    if (url === undefined) return
-    this.baseUrl = url.replace(/\/+$/, '')
-    const waiters = this.urls
-    this.urls = []
-    for (const resolve of waiters) resolve(this.baseUrl)
-  }
-
-  waitForServerUrl() {
-    if (this.baseUrl !== undefined) return Promise.resolve(this.baseUrl)
-    if (this.exited) {
-      return Promise.reject(transportError(`OpenCode server exited before it was ready${this.failureSuffix()}`))
-    }
-    return new Promise((resolve, reject) => {
-      const onExit = () => {
-        clearTimeout(timer)
-        cleanup()
-        reject(transportError(`OpenCode server exited before it was ready${this.failureSuffix()}`))
-      }
-      const timer = setTimeout(() => {
-        cleanup()
-        reject(transportError(
-          `OpenCode server did not report a listening URL within ${this.readyTimeoutMs}ms${this.stderrSuffix()}`,
-        ))
-      }, this.readyTimeoutMs)
-      timer.unref?.()
-      const onReady = (url) => {
-        clearTimeout(timer)
-        cleanup()
-        resolve(url)
-      }
-      const cleanup = () => {
-        this.urls = this.urls.filter((entry) => entry !== onReady)
-        this.off('exit', onExit)
-      }
-      this.urls.push(onReady)
-      this.once('exit', onExit)
-    })
-  }
-
-  stderrSuffix() {
-    const detail = this.stderr.trim()
-    return detail === '' ? '' : `: ${detail}`
-  }
-
-  /**
-   * Failure detail for a start that never became ready. A spawn error (ENOENT,
-   * EACCES) has no stderr, so its message is the only useful diagnostic.
-   */
-  failureSuffix() {
-    const spawnError = this.exitInfo?.error
-    if (spawnError !== undefined && spawnError !== null) {
-      const message = errorMessage(spawnError)
-      if (message !== '') return `: ${message}`
-    }
-    return this.stderrSuffix()
-  }
-
-  handleExit(info, error) {
-    if (this.exited) return
-    this.exited = true
-    this.exitInfo = error === undefined ? info : { error }
-    this.urls = []
-    this.abortInflight(transportError(`OpenCode server exited before responding${this.stderrSuffix()}`, error))
-    this.emit('exit', { ...(info ?? {}), ...(error === undefined ? {} : { error }), stderr: this.stderr })
-  }
-
-  /**
-   * One bounded JSON request. `timeoutMs: 0` disables the timeout.
-   */
-  async request(pathname, options = {}) {
-    if (!this.running || this.baseUrl === undefined) {
-      throw transportError('OpenCode server is not running')
-    }
-    const url = new URL(pathname, this.baseUrl)
-    const controller = new AbortController()
-    const entry = { controller, failure: undefined }
-    this.inflight.add(entry)
-    const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs
-    const timer = timeoutMs > 0
-      ? setTimeout(() => controller.abort(), timeoutMs)
-      : undefined
-    timer?.unref?.()
-    try {
-      const response = await fetch(url, {
-        method: options.method ?? 'GET',
-        headers: options.body === undefined ? {} : { 'content-type': 'application/json' },
-        body: options.body === undefined ? undefined : JSON.stringify(options.body),
-        signal: controller.signal,
-      })
-      const text = await response.text()
-      if (!response.ok) {
-        throw transportError(
-          `OpenCode ${options.method ?? 'GET'} ${pathname} failed with ${response.status}${text === '' ? '' : `: ${text.slice(0, 500)}`}`,
-        )
-      }
-      return parseJsonBody(text)
-    } catch (error) {
-      if (entry.failure !== undefined) throw entry.failure
-      if (error?.name === 'AbortError') {
-        throw transportError(`OpenCode ${options.method ?? 'GET'} ${pathname} timed out after ${timeoutMs}ms`)
-      }
-      // A killed server resets the socket before the process exit is delivered,
-      // so a network-level failure has to give the exit event a moment before it
-      // can be reported as a plain connection error. Callers (and the host's
-      // error copy) need to tell a dead child from a network fault.
-      if (error?.status !== 502 && isNetworkFailure(error) && !this.exited) {
-        await this.waitForExit(250)
-      }
-      if (this.exited) {
-        throw transportError(`OpenCode server exited before responding${this.stderrSuffix()}`, error)
-      }
-      if (error?.status === 502) throw error
-      throw transportError(`OpenCode ${options.method ?? 'GET'} ${pathname} failed: ${errorMessage(error)}`, error)
-    } finally {
-      clearTimeout(timer)
-      this.inflight.delete(entry)
-    }
-  }
-
-  /**
-   * Abort every open socket. The attachment's own event stream is not tracked
-   * here: it is a long-lived read that only its owner can cancel.
-   */
-  abortInflight(failure) {
-    for (const entry of this.inflight) {
-      entry.failure = failure
-      entry.controller.abort()
-    }
-    this.inflight.clear()
-  }
-
-  /**
-   * Streamed GET (the SSE `/event` feed). The response body is pumped by the
-   * caller; `signal` lets the attachment cancel the read during dispose.
-   */
-  async streamRequest(pathname, signal) {
-    if (!this.running || this.baseUrl === undefined) {
-      throw transportError('OpenCode server is not running')
-    }
-    try {
-      const response = await fetch(new URL(pathname, this.baseUrl), { signal })
-      if (!response.ok) {
-        throw transportError(`OpenCode GET ${pathname} failed with ${response.status}`)
-      }
-      return response
-    } catch (error) {
-      if (error?.name === 'AbortError') throw error
-      if (error?.status === 502) throw error
-      throw transportError(`OpenCode GET ${pathname} failed: ${errorMessage(error)}`, error)
-    }
-  }
-
-  /**
-   * Shut the server down. Real OpenCode ignores stdin EOF and SIGTERM (verified
-   * on 1.19.5), so this is a bounded escalation and only SIGKILL is guaranteed:
-   * leaving the child alive would keep the host's event loop busy forever.
-   */
-  async stop() {
-    if (this.child === undefined || this.exited) return
-    this.abortInflight(transportError('OpenCode server was disposed'))
-    const child = this.child
-    try {
-      child.stdin.end()
-    } catch {
-      // The child may already have closed stdin.
-    }
-    if (await this.waitForExit(300)) return
-    try {
-      child.kill('SIGTERM')
-    } catch {
-      // Already gone.
-    }
-    if (await this.waitForExit(250)) return
-    try {
-      child.kill('SIGKILL')
-    } catch {
-      // Already gone.
-    }
-    await this.waitForExit(1000)
-  }
-
-  waitForExit(timeoutMs) {
-    if (this.exited) return Promise.resolve(true)
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        this.off('exit', onExit)
-        resolve(false)
-      }, timeoutMs)
-      timer.unref?.()
-      const onExit = () => {
-        clearTimeout(timer)
-        resolve(true)
-      }
-      this.once('exit', onExit)
-    })
-  }
 }
 
 /**
@@ -443,15 +124,27 @@ async function withTemporaryServer(options, reader) {
  *
  * Sessions are service-owned records with project/workspace bookkeeping, so
  * inserting into SQLite directly would be a schema bet. Instead this spawns a
- * short-lived server with the workspace as its cwd (OpenCode binds the session
- * directory from that cwd; a `directory` body field was observed to be ignored),
- * posts `/session`, and reaps the server. Measured cost: ~1.7 s startup plus
- * <1 s for the create.
+ * short-lived server with the workspace as its cwd (both generations bind the
+ * session directory from that cwd; a `directory` body field was observed to be
+ * ignored by 1.x), creates the session through whichever API the binary speaks,
+ * and reaps the server. Measured cost: ~1.7 s startup plus < 1 s for the create.
  */
 export async function createOpencodeSession({ cwd, config = {}, env = process.env, logger } = {}) {
   const resolved = resolveOpencodeCommand(config, env)
   try {
     return await withTemporaryServer({ cwd, env, resolved }, async (server) => {
+      const generation = await server.detectGeneration()
+      if (generation === 'v2') {
+        // The 2.x create route answers `{data:{…}}`; the row carries the
+        // workspace under `location.directory` instead of a top-level field.
+        const created = await server.request('/api/session', { method: 'POST', body: {} })
+        const info = created?.data
+        if (info === null || typeof info !== 'object' || typeof info.id !== 'string') {
+          throw transportError('OpenCode returned no session id')
+        }
+        const read = await server.request(`/api/session/${encodeURIComponent(info.id)}`).catch(() => undefined)
+        return summaryFromV2Session(read?.data ?? info)
+      }
       const created = await server.request('/session', { method: 'POST', body: {} })
       const id = typeof created?.id === 'string' ? created.id : undefined
       if (id === undefined) throw transportError('OpenCode returned no session id')
@@ -473,6 +166,10 @@ export async function createOpencodeSession({ cwd, config = {}, env = process.en
  * Query the model catalog with a short-lived server. The host caches the
  * result per bridge for ten minutes, so paying one server start is acceptable;
  * every wait is bounded and the child is always reaped.
+ *
+ * The two generations disagree about where the catalog lives (`/provider` with a
+ * `{all, connected}` envelope vs `/api/model` with a flat `{data}` list), so the
+ * probe decides which reader to use before any model is reported.
  */
 export async function queryOpencodeModels(config = {}, env = process.env) {
   const resolved = resolveOpencodeCommand(config, env)
@@ -482,6 +179,13 @@ export async function queryOpencodeModels(config = {}, env = process.env) {
     return await withTemporaryServer(
       { cwd, env, resolved, readyTimeoutMs: DEFAULT_MODEL_TIMEOUT_MS },
       async (server) => {
+        const generation = await server.detectGeneration()
+        if (generation === 'v2') {
+          // 2.x answers a catalog for the server's cwd, so a session directory
+          // and a data directory both work; the response is already flat.
+          const payload = await server.request('/api/model', { timeoutMs: DEFAULT_V2_MODEL_TIMEOUT_MS })
+          return modelsFromV2Catalog(payload)
+        }
         const payload = await server.request('/provider', { timeoutMs: DEFAULT_MODEL_TIMEOUT_MS })
         return modelsFromProviders(payload)
       },
@@ -495,78 +199,26 @@ export async function queryOpencodeModels(config = {}, env = process.env) {
 }
 
 /**
- * Build the Pi-shaped extension dialog payload for one permission request.
+ * The OpenCode 1.x conversation, over a server the attachment already started.
  *
- * The v2 event family names the fields `action`/`resources` instead of
- * `permission`/`patterns`; both shapes reach the same dialog.
+ * Kept as its own class so the 1.x event vocabulary, which the host has been
+ * running against 1.19.5, is untouched by the 2.x work: the facade below picks
+ * one transport per detected generation and forwards the same bridge events.
  */
-export function permissionUiRequest(request) {
-  const permission = typeof request?.permission === 'string'
-    ? request.permission
-    : typeof request?.action === 'string' ? request.action : 'tool'
-  const patterns = Array.isArray(request?.patterns)
-    ? request.patterns
-    : Array.isArray(request?.resources) ? request.resources : []
-  const command = request?.metadata?.command
-  const detail = typeof command === 'string' && command !== ''
-    ? command
-    : patterns.length > 0 ? patterns.join(', ') : ''
-  return {
-    type: 'extension_ui_request',
-    id: request.id,
-    method: 'confirm',
-    title: `OpenCode wants to run ${permission}`,
-    message: detail === '' ? `OpenCode is asking for permission to use ${permission}.` : detail,
-  }
-}
-
-/** Build the Pi-shaped extension dialog payload for one interactive question. */
-export function questionUiRequest(request) {
-  const questions = Array.isArray(request?.questions) ? request.questions : []
-  const first = questions[0] ?? {}
-  const options = Array.isArray(first.options)
-    ? first.options.map((option) => (typeof option === 'string' ? option : option?.label)).filter(Boolean)
-    : []
-  return {
-    type: 'extension_ui_request',
-    id: request.id,
-    method: options.length > 0 ? 'select' : 'confirm',
-    title: typeof first.header === 'string' && first.header !== '' ? first.header : 'OpenCode question',
-    message: typeof first.question === 'string' && first.question !== '' ? first.question : 'OpenCode is asking a question.',
-    ...(options.length === 0 ? {} : { options }),
-  }
-}
-
-/** One live OpenCode session attachment. */
-export class OpencodeAttachment extends EventEmitter {
+class OpencodeV1Transport extends EventEmitter {
   /**
    * @param {object} options
+   * @param {OpencodeServer} options.server started server for `options.sessionId`
    * @param {string} options.sessionId OpenCode session id (`ses_…`)
-   * @param {string} [options.cwd] workspace directory the server should bind
-   * @param {NodeJS.ProcessEnv} [options.env]
-   * @param {object} [options.config] bridge config (`binPath`, `autoApprove`, …)
-   * @param {number} [options.readyTimeoutMs]
-   * @param {number} [options.requestTimeoutMs]
+   * @param {boolean} [options.autoApprove]
    * @param {number} [options.uiTimeoutMs]
    */
   constructor(options) {
     super()
     this.sessionId = options.sessionId
-    this.config = options.config ?? {}
-    this.env = options.env ?? process.env
-    this.autoApprove = this.config.autoApprove !== false
-    this.requestTimeoutMs = options.requestTimeoutMs ?? options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    this.server = options.server
+    this.autoApprove = options.autoApprove !== false
     this.uiTimeoutMs = options.uiTimeoutMs ?? DEFAULT_UI_TIMEOUT_MS
-    this.resolved = options.resolved ?? resolveOpencodeCommand(this.config, this.env)
-    this.server = new OpencodeServer({
-      cwd: options.cwd,
-      env: this.env,
-      resolved: this.resolved,
-      readyTimeoutMs: options.readyTimeoutMs ?? options.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
-      requestTimeoutMs: this.requestTimeoutMs,
-    })
-    this.timeoutMs = this.requestTimeoutMs
-    this.server.on('spawn', (info) => this.emit('spawn', info))
     this.server.on('exit', (info) => this.handleExit(info))
 
     // Streaming state, filled from SSE events and reconciled once after start.
@@ -616,14 +268,9 @@ export class OpencodeAttachment extends EventEmitter {
     return this.server.baseUrl
   }
 
-  /** Spawn the server, attach the event stream, and reconcile the session. */
+  /** Attach the event stream and reconcile the session state. */
   async start() {
     if (this.ready) return this
-    await this.server.start()
-    if (this.disposed) {
-      await this.server.stop()
-      return this
-    }
     this.ready = true
     this.openEventStream()
     await this.reconcile()
@@ -1400,7 +1047,7 @@ export class OpencodeAttachment extends EventEmitter {
     this.emit('exit', info)
   }
 
-  /** Stop the server and release every socket. */
+  /** Release this transport's sockets; the facade reaps the shared child. */
   async dispose() {
     if (this.disposed && this.exited) return
     this.disposed = true
@@ -1408,7 +1055,6 @@ export class OpencodeAttachment extends EventEmitter {
     this.eventsController = undefined
     for (const pending of this.pendingUi.values()) clearTimeout(pending.timer)
     this.pendingUi.clear()
-    await this.server.stop()
   }
 }
 
@@ -1436,4 +1082,381 @@ function usageFromTokens(tokens) {
 
 function numberOrZero(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+/**
+ * Adapts {@link OpencodeV2Client} to the bridge's attachment surface.
+ *
+ * The client already emits normalized records; what remains is the Pi-shaped
+ * transcript/stats/catalog calls and the prompt modes. `steer` maps to the 2.x
+ * inbox `delivery` hint (the server queues it into a running execution instead
+ * of starting a second turn), and `followUp` is the same queued delivery.
+ */
+class OpencodeV2Transport extends EventEmitter {
+  /**
+   * @param {object} options
+   * @param {OpencodeV2Client} options.client started 2.x client
+   */
+  constructor(options) {
+    super()
+    this.client = options.client
+    this.sessionId = options.client.sessionId
+    this.autoApprove = options.client.autoApprove
+    this.client.on('event', (record) => {
+      this.emit('event', record)
+      this.emit(record.type, record)
+    })
+    this.client.on('ui-request', (request) => this.emit('ui-request', request))
+    this.client.on('ui-notification', (notice) => this.emit('ui-notification', notice))
+    this.client.on('exit', (info) => this.emit('exit', info))
+    this.client.on('spawn', (info) => this.emit('spawn', info))
+  }
+
+  get pid() {
+    return this.client.pid
+  }
+
+  get running() {
+    return this.client.running
+  }
+
+  get exited() {
+    return this.client.exited
+  }
+
+  get stderr() {
+    return this.client.stderr
+  }
+
+  get baseUrl() {
+    return this.client.baseUrl
+  }
+
+  get child() {
+    return this.client.child
+  }
+
+  start() {
+    return this.client.start()
+  }
+
+  getState() {
+    return this.client.getState()
+  }
+
+  snapshot() {
+    return this.client.snapshot()
+  }
+
+  /** Normalized transcript for the live session (Pi-shaped). */
+  async getMessages() {
+    const entries = await this.client.getMessages(this.sessionId)
+    return messagesFromV2Entries(entries)
+  }
+
+  /**
+   * Post one user message.
+   *
+   * 2.x serves the same prompt route for every mode: `delivery: 'steer'` is what
+   * a TUI sends while a turn is running, and the server queues it into the
+   * current execution. The bridge's three modes therefore differ only in that
+   * hint, exactly like 1.x's single `prompt_async` route.
+   */
+  async sendPrompt(message, kind) {
+    if (typeof message !== 'string' || message.trim() === '') {
+      throw Object.assign(new Error('message is required'), { status: 400 })
+    }
+    const delivery = kind === 'prompt' ? 'queue' : 'steer'
+    await this.client.prompt(this.sessionId, message, { delivery })
+    return { accepted: true, ...(kind === 'steer' ? { queued: true } : {}) }
+  }
+
+  prompt(message) {
+    return this.sendPrompt(message, 'prompt')
+  }
+
+  steer(message) {
+    return this.sendPrompt(message, 'steer')
+  }
+
+  followUp(message) {
+    return this.sendPrompt(message, 'followUp')
+  }
+
+  async abort() {
+    await this.client.interrupt(this.sessionId)
+    return { aborted: true }
+  }
+
+  async setModel(provider, model) {
+    if (typeof provider !== 'string' || provider === '' || typeof model !== 'string' || model === '') {
+      throw Object.assign(new Error('provider and model are required'), { status: 400 })
+    }
+    await this.client.setModel(this.sessionId, { providerID: provider, id: model })
+    return { provider, id: model }
+  }
+
+  /**
+   * Fold the 2.x transcript into the host's stats shape.
+   *
+   * Token totals come from the session row (2.x accumulates them there and also
+   * announces them per turn via `session.usage.updated`); the 2.x catalog does
+   * expose a context window, but the *used* context is not reported anywhere the
+   * Bridge can read cheaply, so `contextUsage` is omitted rather than invented.
+   */
+  async getSessionStats() {
+    const [entries, session] = await Promise.all([
+      this.client.getMessages(this.sessionId),
+      this.client.getSession(this.sessionId).catch(() => undefined),
+    ])
+    let userMessages = 0
+    let assistantMessages = 0
+    let toolCalls = 0
+    let tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }
+    let cost = 0
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (entry === null || typeof entry !== 'object') continue
+      if (entry.type === 'user') userMessages += 1
+      if (entry.type !== 'assistant') continue
+      assistantMessages += 1
+      const usage = usageFromV2Tokens(entry.tokens)
+      if (usage !== undefined) {
+        tokens.input += usage.input
+        tokens.output += usage.output
+        tokens.cacheRead += usage.cacheRead
+        tokens.cacheWrite += usage.cacheWrite
+        tokens.reasoning += usage.reasoning ?? 0
+      }
+      if (typeof entry.cost === 'number') cost += entry.cost
+      toolCalls += (Array.isArray(entry.content) ? entry.content : []).filter((block) => block?.type === 'tool').length
+    }
+    if (typeof session?.tokens === 'object' && session.tokens !== null) {
+      // The session row is the server's own running total and covers compaction
+      // and other turns whose rows may have been pruned from the message page.
+      const total = usageFromV2Tokens(session.tokens)
+      if (total !== undefined && userMessages + assistantMessages > 0) {
+        tokens = {
+          input: total.input,
+          output: total.output,
+          cacheRead: total.cacheRead,
+          cacheWrite: total.cacheWrite,
+          reasoning: total.reasoning ?? tokens.reasoning,
+        }
+      }
+      if (typeof session.cost === 'number') cost = session.cost
+    }
+    return {
+      sessionId: this.sessionId,
+      userMessages,
+      assistantMessages,
+      toolCalls,
+      totalMessages: userMessages + assistantMessages,
+      tokens: { ...tokens, total: tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite },
+      cost,
+    }
+  }
+
+  async getAvailableModels() {
+    return this.client.listModels()
+  }
+
+  respondUi(id, response) {
+    return this.client.respondUi(id, response)
+  }
+
+  async dispose() {
+    await this.client.dispose()
+  }
+}
+
+/**
+ * One live OpenCode session attachment, for either server generation.
+ *
+ * The npm package is the only thing that names a generation (`opencode-ai` 1.x
+ * vs `@opencode/cli` 2.x); the bridge config names a binary. So the server is
+ * started once, asked which API it speaks, and handed to the matching transport:
+ * the 1.x logic below is unchanged, and a 2.x binary reaches the new transport
+ * without the user having to declare which generation they installed.
+ */
+export class OpencodeAttachment extends EventEmitter {
+  /**
+   * @param {object} options
+   * @param {string} options.sessionId OpenCode session id (`ses_…`)
+   * @param {string} [options.cwd] workspace directory the server should bind
+   * @param {NodeJS.ProcessEnv} [options.env]
+   * @param {object} [options.config] bridge config (`binPath`, `autoApprove`, …)
+   * @param {number} [options.readyTimeoutMs]
+   * @param {number} [options.requestTimeoutMs]
+   * @param {number} [options.uiTimeoutMs]
+   */
+  constructor(options) {
+    super()
+    this.sessionId = options.sessionId
+    this.config = options.config ?? {}
+    this.env = options.env ?? process.env
+    this.autoApprove = this.config.autoApprove !== false
+    this.requestTimeoutMs = options.requestTimeoutMs ?? options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+    this.uiTimeoutMs = options.uiTimeoutMs ?? DEFAULT_UI_TIMEOUT_MS
+    this.resolved = options.resolved ?? resolveOpencodeCommand(this.config, this.env)
+    this.server = new OpencodeServer({
+      cwd: options.cwd,
+      env: this.env,
+      resolved: this.resolved,
+      readyTimeoutMs: options.readyTimeoutMs ?? options.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
+      requestTimeoutMs: this.requestTimeoutMs,
+    })
+    this.timeoutMs = this.requestTimeoutMs
+    this.server.on('spawn', (info) => this.emit('spawn', info))
+    this.server.on('exit', (info) => this.handleExit(info))
+    this.transport = undefined
+    this.generation = undefined
+    this.disposed = false
+    this.ready = false
+  }
+
+  get child() {
+    return this.server.child
+  }
+
+  get pid() {
+    return this.server.pid
+  }
+
+  get running() {
+    return this.server.running
+  }
+
+  get exited() {
+    return this.server.exited
+  }
+
+  get stderr() {
+    return this.server.stderr
+  }
+
+  get baseUrl() {
+    return this.server.baseUrl
+  }
+
+  /** Spawn the server, detect its generation, and attach the matching transport. */
+  async start() {
+    if (this.ready) return this
+    await this.server.start()
+    if (this.disposed) {
+      await this.server.stop()
+      return this
+    }
+    this.generation = await this.server.detectGeneration()
+    if (this.generation === 'v2') {
+      this.transport = new OpencodeV2Transport({
+        client: new OpencodeV2Client({
+          sessionId: this.sessionId,
+          server: this.server,
+          autoApprove: this.autoApprove,
+          uiTimeoutMs: this.uiTimeoutMs,
+        }),
+      })
+    } else {
+      this.transport = new OpencodeV1Transport({
+        server: this.server,
+        sessionId: this.sessionId,
+        autoApprove: this.autoApprove,
+        uiTimeoutMs: this.uiTimeoutMs,
+      })
+    }
+    this.transport.on('event', (record) => this.emit('event', record))
+    // `exit` is forwarded by the transport, which settles the turn first; the
+    // facade's own server listener only covers an exit before a transport exists.
+    for (const type of ['ui-request', 'ui-notification', 'exit', 'session-name', 'session-status', 'session-error']) {
+      this.transport.on(type, (payload) => this.emit(type, payload))
+    }
+    await this.transport.start()
+    this.ready = true
+    return this
+  }
+
+  getState() {
+    return this.transport?.getState() ?? {
+      sessionId: this.sessionId,
+      isStreaming: false,
+      model: null,
+      pid: this.pid,
+      autoApprove: this.autoApprove,
+    }
+  }
+
+  snapshot() {
+    return this.transport?.snapshot() ?? Promise.resolve(this.getState())
+  }
+
+  getMessages() {
+    return this.requireTransport().getMessages()
+  }
+
+  getSessionStats() {
+    return this.requireTransport().getSessionStats()
+  }
+
+  prompt(message) {
+    return this.requireTransport().prompt(message)
+  }
+
+  steer(message) {
+    return this.requireTransport().steer(message)
+  }
+
+  followUp(message) {
+    return this.requireTransport().followUp(message)
+  }
+
+  abort() {
+    return this.requireTransport().abort()
+  }
+
+  setModel(provider, model) {
+    return this.requireTransport().setModel(provider, model)
+  }
+
+  getAvailableModels() {
+    return this.requireTransport().getAvailableModels()
+  }
+
+  respondUi(id, response) {
+    return this.requireTransport().respondUi(id, response)
+  }
+
+  /**
+   * A call before `start()` is a programming error in the host, not an engine
+   * failure: report it as a 409 like the other unsupported-operation paths.
+   */
+  requireTransport() {
+    if (this.transport === undefined) {
+      throw Object.assign(new Error('the OpenCode attachment has not been started'), { status: 409 })
+    }
+    return this.transport
+  }
+
+  /**
+   * The server died. With a transport attached, that transport has already
+   * settled the turn and forwarded its own `exit`; emitting here too would
+   * deliver two exits to the host for one child.
+   */
+  handleExit(info) {
+    if (this.transport !== undefined) return
+    this.emit('exit', info)
+  }
+
+  /** Stop the server and release every socket. */
+  async dispose() {
+    if (this.disposed && this.exited) return
+    this.disposed = true
+    try {
+      await this.transport?.dispose()
+    } finally {
+      // The facade owns the child: both transports share this one server, so
+      // reaping it here is what guarantees no `opencode serve` outlives the
+      // attachment.
+      await this.server.stop()
+    }
+  }
 }
