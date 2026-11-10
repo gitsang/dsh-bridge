@@ -9,8 +9,10 @@ roots). The top-left dsh mark shows **Local** (the native dsh conversation) plus
 every saved bridge, and selecting one switches both the sidebar and the main
 conversation area to that bridge.
 
-Pi is the first fully supported engine. Codex, OpenCode, and remote DSH appear in
-the add-bridge form but are marked as pending until their adapters are connected.
+Three CLI engines are fully supported — **Pi**, **Codex**, and **OpenCode** — each
+with its own session store, live attachment protocol, model catalog, and event
+normalizer. Remote **DSH** (a second DeepSeek Harness instance) appears in the
+add-bridge form but is marked as pending until its adapter is connected.
 
 ## Status
 
@@ -19,6 +21,8 @@ the add-bridge form but are marked as pending until their adapters are connected
 - [x] Create/edit/delete bridges in a standalone settings page styled like native dsh Settings
 - [x] CLI / Web mode selection and mode-specific engine list
 - [x] Confirmed Pi engine: JSONL sessions, RPC attach, normalized events, prompts
+- [x] Confirmed Codex engine: rollout JSONL sessions, `app-server` JSON-RPC attach, approval dialogs
+- [x] Confirmed OpenCode engine: SQLite sessions, local `serve` HTTP/SSE attach, permission dialogs
 - [x] Top-left “Local + configured bridges” dropdown with live connection dots
 - [x] Startup readiness probe per bridge (no agent spawned)
 - [x] Per-turn lazy attach: send starts Pi, settle closes it
@@ -30,14 +34,12 @@ the add-bridge form but are marked as pending until their adapters are connected
 - [x] dsh-style search button and result list
 - [x] dsh-style Select Workspace Directory dialog with New folder
 - [x] Per-workspace New Session action plus workspace rename / soft delete
-- [x] Durable workspace mapping in `bridge-workspaces.json`; delete marks only, never touches Pi JSONL
+- [x] Durable workspace mapping in `bridge-workspaces.json`; delete marks only, never touches engine data
 - [x] Durable per-bridge import membership in `bridge-imports.json`
 - [x] Host-owned, per-bridge session archive in `bridge-archives.json` with attach/prompt admission checks
 - [x] dsh-styled transcript: native process rows, tool cards, and composer
 - [x] Draggable left/right content-width handles, sharing dsh Web's width preference
 - [x] Composer model picker and a dsh-style statusline (turns/steps, tokens, cache hit)
-- [ ] Codex engine adapter
-- [ ] OpenCode engine adapter
 - [ ] Remote DSH Web engine adapter
 
 ## UX
@@ -51,7 +53,7 @@ Local                     Return to DeepSeek Harness
 ────────────────────────────────────────────────────
 Work Pi                   CLI · Pi
 Scratch Pi                CLI · Pi
-Company Codex             CLI · Codex          (adapter pending)
+Company Codex             CLI · Codex
 Bridge settings
 ```
 
@@ -90,20 +92,21 @@ immediately. Import membership is persisted per bridge in
 ### Connection lifecycle
 
 When the dsh host starts, every configured bridge is probed by
-`bridge: auto-connect`. For Pi the probe only checks the launcher and sessions
-root; **no agent process is spawned**. The status endpoint
+`bridge: auto-connect`. Each engine's probe only checks its launcher and its
+session store — Pi's sessions root, Codex's rollout root, OpenCode's
+`opencode.db`; **no agent process is spawned**. The status endpoint
 `GET /api/bridge/status` reports that readiness, and the switcher polls it while
 open.
 
 Agent processes are **per turn**:
 
-1. opening a session reads JSONL history only (composer is already available);
+1. opening a session reads durable history only (composer is already available);
 2. the first send calls `POST /api/bridge/attach` and then `prompt`;
 3. the sidebar row shows a spinner while the turn runs;
-4. `agent_settled` marks the row green and closes the Pi process ~1.2s later
+4. `agent_settled` marks the row green and closes the engine process ~1.2s later
    (long enough to flush the final events).
 
-So one bridge needs at most one Pi process while a turn is active, rather than
+So one bridge needs at most one agent process while a turn is active, rather than
 one process per opened session. Sending again in the same session re-attaches.
 
 Session activity is host-owned (`sessionActivity`) and exposed via
@@ -117,13 +120,45 @@ assistant message. The bridge parses the current branch and reports
 `session.model`, so an unconnected session still shows its model instead of a
 placeholder. Live attachment state stays authoritative and overrides it.
 
+### Engines
+
+Each engine owns its own session storage, attach protocol, and event mapping.
+Nothing engine-specific leaks into the host: `src/backends/registry.js` imports
+the three descriptors and the routes only ever call the adapter contract.
+
+| Engine | Session store | Live attachment | Model catalog | Approvals |
+| --- | --- | --- | --- | --- |
+| **Pi** | `$PI_CODING_AGENT_SESSION_DIR` JSONL tree | `pi --mode rpc` over JSONL on stdio | `get_available_models` on a short-lived RPC child | Extension UI dialogs forwarded to the browser |
+| **Codex** | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` | `codex app-server --stdio` over JSON-RPC 2.0 | `model/list` on a short-lived app-server | `item/*/requestApproval` answered by the Bridge, or forwarded when approvals are kept |
+| **OpenCode** | `opencode.db` (SQLite; v2 `session_message` with a legacy `message`/`part` fallback) | `opencode serve` on a loopback port, HTTP + SSE | `GET /provider` from the same server | Permission and question events answered or forwarded |
+| **DSH** | remote instance | planned | planned | — |
+
+Two engine-specific quirks are worth knowing because they shape the UI:
+
+- **Codex has no persisted session title.** The sidebar name is derived from the
+  session's first real user message, and harness-injected user turns
+  (`<environment_context>`, `AGENTS.md`, aborted-turn notices) are filtered out
+  so they never become a title.
+- **OpenCode's database holds two schema generations.** A session can be
+  announced by one CLI version and continued by another, so reading prefers the
+  newer `session_message` transcript and falls back to the legacy
+  `message`/`part` pair. The reader opens the database read-only and closes it
+  after every query.
+
+Every adapter translates its native tool names onto the same narrow vocabulary
+the browser styles (`bash`, `read`, `search`, `write`, `edit`, `others`), from
+both the durable transcript and the live stream, so a call looks identical
+before and after a reload.
+
 ### Model catalog without an agent
 
-`get_available_models` is computed by Pi's model runtime (user `models.json`,
-bundled catalog, credentials, extension providers), so it cannot be derived from
-a session file. Instead of a resident control process, the Pi engine spawns a
-short-lived `pi --mode rpc --no-session` child, asks for the catalog, and exits.
-The host caches the result per bridge for 10 minutes.
+No engine's catalog can be read from its session store: Pi computes it from
+`models.json`, the bundled catalog, credentials, and extension providers; Codex
+answers `model/list`; OpenCode collects it from its configured providers. Instead
+of a resident control process, each engine spawns a short-lived instance on
+demand — `pi --mode rpc --no-session`, `codex app-server`, or a temporary
+`opencode serve` — asks for the catalog, and exits. The host caches the result
+per bridge for 10 minutes.
 
 `GET /api/bridge/models?key=…` therefore works while detached: it reads the live
 attachment when there is one, and otherwise returns the cached/short-lived
@@ -144,12 +179,19 @@ Models), so it still reads as the same product:
   - **Engine**:
     - CLI → Pi, Codex, OpenCode
     - Web → DSH
-  - engine-specific fields. Pi currently uses:
-    - Sessions root
-    - Bin path
-    - Offline startup
-  - DSH uses Base URL and Access token. Tokens are redacted from API responses
-    and preserved when an edit leaves the secret field blank.
+  - engine-specific fields:
+    - **Pi**: Sessions root, Bin path, Offline startup
+    - **Codex**: Sessions root, Bin path, Skip approvals
+    - **OpenCode**: Data directory, Bin path, Auto-approve
+    - **DSH**: Base URL and Access token. Tokens are redacted from API responses
+      and preserved when an edit leaves the secret field blank.
+
+The two approval switches exist because a Bridge turn has no native terminal to
+answer. `Skip approvals` (Codex) starts the app-server with `approvalPolicy:
+never`; `Auto-approve` (OpenCode) answers the server's permission events itself.
+Turn either off and those prompts are forwarded to a Bridge dialog instead — but
+a prompt the Bridge cannot answer would leave the turn waiting, so both default
+to on.
 
 ### Selected bridge
 
@@ -226,8 +268,8 @@ Host bridge core
 
 Engine adapters
   ├─ Pi (implemented)
-  ├─ Codex (planned)
-  ├─ OpenCode (planned)
+  ├─ Codex (implemented)
+  ├─ OpenCode (implemented)
   └─ DSH (planned)
 ```
 

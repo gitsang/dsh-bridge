@@ -8,8 +8,9 @@ Bridge 采用**实例模型**：用户可以先创建多个已保存的桥接，
 对话），并列出所有已配置桥接；选择某个桥接后，侧边栏和右侧对话区会一起切换到
 该桥接。
 
-Pi 是第一个完整支持的引擎。Codex、OpenCode、远程 DSH 会出现在新增桥接表单里，
-在适配器接入前明确标记为暂不可用。
+三个 CLI 引擎都已完整支持——**Pi**、**Codex**、**OpenCode**——各自有独立的会话
+存储、实时连接协议、模型目录和事件归一化。远程 **DSH**（另一个 DeepSeek Harness
+实例）会出现在新增桥接表单里，在适配器接入前明确标记为暂不可用。
 
 ## 当前状态
 
@@ -18,6 +19,8 @@ Pi 是第一个完整支持的引擎。Codex、OpenCode、远程 DSH 会出现�
 - [x] 独立 Bridge 设置页内新增 / 编辑 / 删除桥接（视觉规格对齐 dsh 原生设置）
 - [x] CLI / Web 模式与按模式过滤的引擎列表
 - [x] Pi 引擎完整可用：JSONL 会话、RPC attach、事件归一化、prompt
+- [x] Codex 引擎完整可用：rollout JSONL 会话、`app-server` JSON-RPC attach、审批弹窗
+- [x] OpenCode 引擎完整可用：SQLite 会话、本地 `serve` HTTP/SSE attach、权限弹窗
 - [x] 左上角「本机 + 已配置桥接」下拉框，带实时连接状态点
 - [x] 启动时只做就绪探测（不启动 agent 进程）
 - [x] 按轮次 lazy attach：发送时启动 Pi，结束即关闭
@@ -29,14 +32,12 @@ Pi 是第一个完整支持的引擎。Codex、OpenCode、远程 DSH 会出现�
 - [x] dsh 风格搜索按钮与结果列表
 - [x] dsh 风格“选择工作区目录”弹窗，可新建文件夹并加入工作区
 - [x] 每个工作区右侧的新建会话按钮，以及工作区重命名 / 软删除
-- [x] 工作区映射持久化到 `bridge-workspaces.json`，删除只做标记，不碰 Pi JSONL
+- [x] 工作区映射持久化到 `bridge-workspaces.json`，删除只做标记，不碰引擎数据
 - [x] 按桥接隔离的导入成员持久化到 `bridge-imports.json`
 - [x] 按桥接隔离的归档状态持久化到 `bridge-archives.json`，并在 attach / prompt 时校验
 - [x] dsh 风格对话界面与 composer
 - [x] 与 dsh Web 一致的左右内容宽度拖拽手柄，共用宽度偏好
 - [x] composer 模型选择器与 dsh 风格 statusline（轮次/步数、Token、缓存命中）
-- [ ] Codex 引擎适配器
-- [ ] OpenCode 引擎适配器
 - [ ] 远程 DSH Web 引擎适配器
 
 ## 交互
@@ -50,7 +51,7 @@ Pi 是第一个完整支持的引擎。Codex、OpenCode、远程 DSH 会出现�
 ────────────────────────────────────────────────────
 工作 Pi                   CLI · Pi
 临时 Pi                   CLI · Pi
-公司 Codex                CLI · Codex          （适配器待接入）
+公司 Codex                CLI · Codex
 Bridge 设置
 ```
 
@@ -63,18 +64,19 @@ Bridge 设置
 ### 连接生命周期
 
 dsh Host 启动时会对每个已配置桥接做一次就绪探测，**不会启动 agent 进程**。
-探测只检查 Pi 可执行文件和 Session 根目录。`GET /api/bridge/status` 返回该
-状态，下拉框打开时会轮询刷新。
+探测只检查各引擎的可执行文件与会话存储——Pi 的 Session 根目录、Codex 的 rollout
+根目录、OpenCode 的 `opencode.db`。`GET /api/bridge/status` 返回该状态，下拉框
+打开时会轮询刷新。
 
 Agent 进程是**按轮次**的：
 
-1. 打开会话只读取 JSONL 历史，composer 直接可用；
+1. 打开会话只读取持久化历史，composer 直接可用；
 2. 第一次发送调用 `POST /api/bridge/attach`，随后 `prompt`；
 3. 运行期间侧边栏该会话显示转圈；
-4. `agent_settled` 后显示绿点，并在约 1.2 秒后关闭 Pi 进程
+4. `agent_settled` 后显示绿点，并在约 1.2 秒后关闭引擎进程
    （留一点时间把最后的事件刷给浏览器）。
 
-因此同一时刻每个桥接最多只有一个 Pi 进程，而不是「打开过几个会话就有几个」。
+因此同一时刻每个桥接最多只有一个 agent 进程，而不是「打开过几个会话就有几个」。
 同一会话再次发送会重新 attach。
 
 ### 未连接时也能看到当前模型
@@ -86,14 +88,40 @@ attach 之后以实时 state 为准。
 
 ### 未连接时也能加载模型目录
 
-`get_available_models` 由 Pi 的 model runtime 计算（用户 `models.json`、内置目录、
-凭据、扩展注册的 provider），无法从会话文件推出。Bridge 不常驻控制进程，而是
-临时启动一个 `pi --mode rpc --no-session`，查询目录后立刻退出；Host 按桥接缓存
-10 分钟。
+任何引擎的模型目录都无法从会话存储推出：Pi 由 model runtime 计算（用户
+`models.json`、内置目录、凭据、扩展注册的 provider），Codex 通过 `model/list`
+回答，OpenCode 从已配置的 provider 汇总。Bridge 不常驻控制进程，而是按需临时
+启动一个实例——`pi --mode rpc --no-session`、`codex app-server`，或临时的
+`opencode serve`——查询目录后立刻退出；Host 按桥接缓存 10 分钟。
 
 因此 `GET /api/bridge/models?key=…` 在未连接时同样可用：有 attachment 时用实时
 目录，否则用短命进程/缓存（`source: "catalog"`）。未连接时选择的模型会先记为
 pending，下次 attach 后立即应用。
+
+### 引擎
+
+每个引擎自带会话存储、连接协议和事件映射。任何引擎细节都不会泄漏到 Host：
+`src/backends/registry.js` 只 import 三个描述符，路由只调用适配器契约。
+
+| 引擎 | 会话存储 | 实时连接 | 模型目录 | 审批 |
+| --- | --- | --- | --- | --- |
+| **Pi** | `$PI_CODING_AGENT_SESSION_DIR` JSONL 文件树 | stdio 上的 `pi --mode rpc` JSONL | 短生命周期 RPC 子进程的 `get_available_models` | 扩展 UI 弹窗转发到浏览器 |
+| **Codex** | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` | stdio 上的 `codex app-server` JSON-RPC 2.0 | 短生命周期 app-server 的 `model/list` | `item/*/requestApproval` 由 Bridge 回答，保留审批时转发 |
+| **OpenCode** | `opencode.db`（SQLite；新格式 `session_message`，回退旧格式 `message`/`part`） | 回环端口上的 `opencode serve`，HTTP + SSE | 同一 server 的 `GET /provider` | 权限与提问事件由 Bridge 回答或转发 |
+| **DSH** | 远程实例 | 待接入 | 待接入 | — |
+
+有两处引擎特性值得单独说明，因为它们直接影响界面：
+
+- **Codex 不持久化会话标题。** 侧边栏名称来自会话里第一条真实用户消息，并会过滤
+  掉 harness 注入的用户轮次（`<environment_context>`、`AGENTS.md`、中断提示等），
+  避免它们变成标题。
+- **OpenCode 数据库里并存两代 schema。** 一个会话可能由某个 CLI 版本创建、又被
+  另一个版本继续写入，所以读取时优先用新格式 `session_message`，回退到旧格式
+  `message`/`part`。读取全程以只读方式打开数据库，每次查询后关闭。
+
+所有适配器都会把原生工具名翻译成浏览器使用的同一套窄词汇（`bash`、`read`、
+`search`、`write`、`edit`、`others`），持久记录和实时流两条路径都翻译，所以同一次
+调用在刷新前后长得一样。
 
 ### 设置页
 
@@ -107,11 +135,16 @@ Bridge 设置是**独立页面**，不注册进 dsh 原生设置；但弹窗外�
   - **引擎**：
     - CLI → Pi、Codex、OpenCode
     - Web → DSH
-  - 不同引擎展示不同配置项。Pi 当前包括：
-    - Session 根目录
-    - Bin 地址
-    - 离线启动
-  - DSH 包括服务地址和访问令牌。令牌不会出现在 API 响应里；编辑时留空会保留原值。
+  - 不同引擎展示不同配置项：
+    - **Pi**：Session 根目录、Bin 地址、离线启动
+    - **Codex**：Session 根目录、Bin 地址、跳过审批
+    - **OpenCode**：数据目录、Bin 地址、自动批准
+    - **DSH**：服务地址和访问令牌。令牌不会出现在 API 响应里；编辑时留空会保留原值。
+
+两个审批开关存在的原因是：Bridge 的一轮对话没有原生终端可以回答询问。`跳过审批`
+（Codex）以 `approvalPolicy: never` 启动 app-server；`自动批准`（OpenCode）由
+Bridge 自己回答服务端的权限事件。如果关掉其中任何一个，这些询问会转发到 Bridge
+弹窗——但 Bridge 无法回答的询问会让整轮对话一直等待，所以两者默认都打开。
 
 ### 导入会话
 
@@ -193,8 +226,8 @@ Host bridge core
 
 Engine adapters
   ├─ Pi（已实现）
-  ├─ Codex（待接入）
-  ├─ OpenCode（待接入）
+  ├─ Codex（已实现）
+  ├─ OpenCode（已实现）
   └─ DSH（待接入）
 ```
 

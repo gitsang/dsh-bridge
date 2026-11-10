@@ -56,12 +56,76 @@ browser receives serializable engine descriptors from
 | Engine | Mode | State | Config fields |
 | --- | --- | --- | --- |
 | Pi | CLI | implemented | sessionsRoot, binPath, offline |
-| Codex | CLI | planned | sessionsRoot, binPath |
-| OpenCode | CLI | planned | sessionsRoot, binPath |
+| Codex | CLI | implemented | sessionsRoot, binPath, skipApprovals |
+| OpenCode | CLI | implemented | sessionsRoot, binPath, autoApprove |
 | DSH | Web | planned | baseUrl, token |
 
 Planned engines can be saved as bridge records and appear in the menu disabled;
 listing/attach returns a clear unavailable state instead of crashing.
+
+## Engine adapters
+
+All three CLI adapters implement the same contract, so the host has no
+engine-specific branches. What differs is where each engine keeps its history
+and how it is driven:
+
+### Pi
+
+- **History**: one JSONL file per session below the configured root; the first
+  line is a header, later lines form an `id`/`parentId` tree and only the
+  current branch becomes the transcript.
+- **Live**: `pi --mode rpc` with JSONL commands on stdin and correlated
+  responses/events on stdout.
+- **New session**: the Bridge writes the session header itself, because Pi
+  defers file creation until the first message and the composer needs a key.
+
+### Codex
+
+- **History**: `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`. Each
+  line is `session_meta`, `turn_context`, `response_item`, `event_msg`, or a
+  bookkeeping record. `response_item` is canonical for the transcript;
+  `event_msg` duplicates are only used for user turns that never produced one.
+  `developer`/`system` messages are harness plumbing and are dropped, as are
+  `encrypted_content`-only reasoning items.
+- **Live**: `codex app-server --stdio`, newline-delimited JSON-RPC 2.0.
+  `thread/resume` for an existing rollout, `turn/start` to prompt,
+  `turn/steer` to steer, `turn/interrupt` to abort. Server→client approval
+  requests are answered by the attachment (`accept`/`decline`) and surfaced as
+  Bridge dialogs.
+- **New session**: a single `session_meta` line is written by the Bridge. A
+  resume of a hand-written header only succeeds when it carries both a
+  `cli_version` and a `model_provider` that the local `config.toml` knows.
+- **History reads come from the file, not `thread/read`**, because
+  `includeTurns` is not implemented in codex-cli 0.162.1; the file also
+  survives notifications missed while detached.
+- **Model selection is next-turn**: Codex cannot switch models mid-thread, so
+  `setModel` records the choice and applies it to the following `turn/start`.
+
+### OpenCode
+
+- **History**: `opencode.db` (SQLite, WAL). Two schema generations coexist:
+  `session_v2` + `session_message` (blocks already arrays) and the legacy
+  `session` + `message`/`part`. The reader unions them: the newest ids come
+  from a narrow projection of each generation, the metadata row is read from
+  whichever table owns it, and the transcript prefers v2 rows with a legacy
+  fallback. The database is opened read-only and closed after each query.
+- **Live**: `opencode serve --port 0` on loopback. Readiness is the
+  `opencode server listening on http://…` stdout line. `POST
+  /session/{id}/prompt_async` returns immediately and the turn streams over
+  `GET /event` (SSE); `POST /session/{id}/abort` stops it. HTTP+SSE was chosen
+  over ACP after measuring: `serve` is ready in ~1.7 s and history calls answer
+  in 8–20 ms, while ACP `session/load` took 32 s+.
+- **New session**: created through the engine's own service via a short-lived
+  server (its cwd binds the workspace directory), never by inserting rows into
+  SQLite, so project/workspace bookkeeping stays the engine's.
+- **Tool arguments** are normalized (`filePath` → `path`) for older sessions.
+
+### Shared tool vocabulary
+
+Both the durable transcript and the live event stream translate native tool
+names onto the names the browser styles (`bash`, `read`, `search`, `write`,
+`edit`, `others`). Keeping both paths on one mapping is what makes a tool call
+render identically before and after a reload.
 
 ## Session identity
 
@@ -312,19 +376,6 @@ The transcript copies dsh's own chat vocabulary instead of inventing one:
 - Bridge mutations are detach-gated while an attachment is alive.
 
 ## Roadmap
-
-### Codex CLI
-
-- list rollout JSONL sessions under `~/.codex/sessions`
-- use `codex exec --json` / resume for turns, or the app-server protocol
-- map JSONL events to the normalized vocabulary
-- map approval/elicitation to extension UI
-
-### OpenCode CLI
-
-- prefer OpenCode's local HTTP server API over reading its SQLite store
-- list workspaces/sessions, subscribe to events, send prompts, abort
-- map permission prompts to extension UI
 
 ### Remote DSH Web
 
