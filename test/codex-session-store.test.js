@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, stat, utimes, writeFile } from 'node:fs/promi
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
+  bridgeToolName,
   collectRolloutFiles,
   createCodexSession,
   isInjectedUserText,
@@ -185,7 +186,10 @@ test('readSession normalizes the transcript into the Pi block vocabulary', async
   const toolCalls = assistant.content.filter((block) => block.type === 'toolCall')
   assert.equal(toolCalls.length, 2)
   assert.deepEqual(toolCalls[0].arguments, { cmd: 'rg parser' })
-  assert.equal(toolCalls[1].name, 'apply_patch')
+  // History names use the client's narrow vocabulary, exactly like live
+  // tool-start events, so a durable transcript and a streaming one agree.
+  assert.equal(toolCalls[0].name, 'bash')
+  assert.equal(toolCalls[1].name, 'edit')
   assert.equal(toolCalls[1].arguments.path, 'src/parser.js')
   const results = session.messages.filter((entry) => entry.role === 'toolResult')
   assert.deepEqual(results.map((entry) => entry.toolCallId), ['call-1', 'call-2'])
@@ -193,6 +197,44 @@ test('readSession normalizes the transcript into the Pi block vocabulary', async
   assert.equal(results[0].isError, false)
   assert.deepEqual(session.tools.map((tool) => tool.id), ['call-1', 'call-2'])
   assert.deepEqual(session.tools.map((tool) => tool.status), ['done', 'done'])
+})
+
+test('history tool names match the live vocabulary for every Codex tool shape', async () => {
+  // The browser styles a tool row from its name. A history row whose name came
+  // straight from Codex (`exec`, `apply_patch`) would render as a generic row
+  // while the same call streamed live rendered as a bash/edit row.
+  for (const name of ['shell', 'exec', 'exec_command', 'local_shell', 'bash']) {
+    assert.equal(bridgeToolName(name), 'bash', name)
+  }
+  for (const name of ['apply_patch', 'fileChange']) assert.equal(bridgeToolName(name), 'edit', name)
+  assert.equal(bridgeToolName('read_file'), 'read')
+  assert.equal(bridgeToolName('web_search'), 'search')
+  assert.equal(bridgeToolName('wait'), 'others')
+  assert.equal(bridgeToolName(undefined), 'others')
+
+  const root = await tempRoot()
+  const file = await writeRollout(root, [
+    sessionMeta(),
+    { timestamp: '2026-01-02T10:00:01.000Z', type: 'turn_context', payload: { cwd: '/work/project' } },
+    { timestamp: '2026-01-02T10:00:02.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'go' }] } },
+    {
+      timestamp: '2026-01-02T10:00:03.000Z',
+      type: 'response_item',
+      payload: {
+        type: 'custom_tool_call',
+        status: 'completed',
+        name: 'exec',
+        call_id: 'call-exec',
+        input: 'const r = await Promise.all([tools.exec_command({cmd:"rg parser",workdir:"/work"})])',
+      },
+    },
+  ])
+  const session = await readCodexSession(file)
+  const call = session.messages.flatMap((entry) => entry.content ?? []).find((block) => block.type === 'toolCall')
+  assert.equal(call.name, 'bash')
+  // The scripted `exec` shape hides its command one level down; the row must be
+  // able to name it instead of printing the whole script.
+  assert.equal(call.arguments.command, 'rg parser')
 })
 
 test('readSession prefers response items over the duplicate event_msg copies', async () => {

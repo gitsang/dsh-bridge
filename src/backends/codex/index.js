@@ -11,6 +11,7 @@ import { basename, join, resolve } from 'node:path'
 import { executableOnPath, resolveCliCommand, runCommand } from '../cli.js'
 import { CodexAttachment, queryCodexModels } from './attachment.js'
 import {
+  bridgeToolName,
   codexHome,
   codexModelProvider,
   codexModelId,
@@ -19,6 +20,13 @@ import {
   pathFromSessionKey,
   readCodexSession,
 } from './session-store.js'
+
+/**
+ * The client styles a tool row from its name, and that table is narrow. The
+ * translation lives beside the transcript reader so the history path and the
+ * live-stream path can never disagree about a tool's name.
+ */
+export { bridgeToolName }
 
 export const CODEX_ENGINE_ID = 'codex'
 
@@ -40,36 +48,6 @@ export function resolveCodexCommand(config = {}, env = process.env) {
     defaultNames: ['codex'],
     env,
   })
-}
-
-/**
- * Map one Codex tool name onto the small vocabulary the Bridge client styles.
- *
- * The client keys its icon, title, and argument-summary renderer off these
- * names, so an unmapped Codex name would render as a generic row.
- */
-export function bridgeToolName(name) {
-  const value = typeof name === 'string' ? name : ''
-  const lower = value.toLowerCase()
-  if (lower === 'apply_patch' || lower === 'filechange' || lower === 'edit' || lower === 'write') {
-    return lower === 'apply_patch' || lower === 'filechange' ? 'edit' : lower
-  }
-  if (
-    lower === 'shell'
-    || lower === 'exec'
-    || lower === 'exec_command'
-    || lower === 'container.exec'
-    || lower === 'local_shell'
-    || lower === 'shell_command'
-    || lower === 'commandexecution'
-    || lower === 'bash'
-  ) {
-    return 'bash'
-  }
-  if (lower === 'read_file' || lower === 'view_file' || lower === 'read') return 'read'
-  if (lower === 'read_image' || lower === 'imageview') return 'read'
-  if (lower === 'grep' || lower === 'glob' || lower === 'web_search' || lower === 'websearch' || lower === 'search') return 'search'
-  return 'others'
 }
 
 function decorateSession(session) {

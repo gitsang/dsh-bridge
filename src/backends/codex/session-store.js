@@ -143,13 +143,49 @@ function reasoningText(payload) {
 }
 
 /**
- * `apply_patch` arrives as free-form patch text. Surface the first touched path
- * so the client's edit row can name a file instead of dumping the patch body.
+ * Free-form custom tool calls carry their payload as one `input` string. Both
+ * of Codex's shapes hide the interesting part from a one-line row, so surface
+ * it: `apply_patch` names the first touched file, and the scripted `exec` tool
+ * (oh-my-codex) names the first command it runs.
  */
 function customInputArguments(name, input) {
-  if (name !== 'apply_patch') return { input }
-  const match = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/m.exec(input)
-  return match === null ? { input } : { path: match[1].trim(), patch: input }
+  if (name === 'apply_patch') {
+    const match = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/m.exec(input)
+    return match === null ? { input } : { path: match[1].trim(), patch: input }
+  }
+  const command = /cmd:\s*\\?["']([^"'\\]+)/.exec(input)
+  if (command !== null && command[1].trim() !== '') return { command: command[1].trim(), input }
+  return { input }
+}
+
+/**
+ * Map one Codex tool name onto the small vocabulary the Bridge client styles.
+ *
+ * The client keys its icon, title, and argument-summary renderer off these
+ * names, so an unmapped Codex name would render as a generic row.
+ */
+export function bridgeToolName(name) {
+  const value = typeof name === 'string' ? name : ''
+  const lower = value.toLowerCase()
+  if (lower === 'apply_patch' || lower === 'filechange' || lower === 'edit' || lower === 'write') {
+    return lower === 'apply_patch' || lower === 'filechange' ? 'edit' : lower
+  }
+  if (
+    lower === 'shell'
+    || lower === 'exec'
+    || lower === 'exec_command'
+    || lower === 'container.exec'
+    || lower === 'local_shell'
+    || lower === 'shell_command'
+    || lower === 'commandexecution'
+    || lower === 'bash'
+  ) {
+    return 'bash'
+  }
+  if (lower === 'read_file' || lower === 'view_file' || lower === 'read') return 'read'
+  if (lower === 'read_image' || lower === 'imageview') return 'read'
+  if (lower === 'grep' || lower === 'glob' || lower === 'web_search' || lower === 'websearch' || lower === 'search') return 'search'
+  return 'others'
 }
 
 function toolCallBlock(payload) {
@@ -171,7 +207,9 @@ function toolCallBlock(payload) {
   } else {
     args = {}
   }
-  return { type: 'toolCall', id, name: typeof payload.name === 'string' ? payload.name : 'tool', arguments: args }
+  // History and live events must agree on the name the client styles rows
+  // with, so translate at the single point a call is read from the rollout.
+  return { type: 'toolCall', id, name: bridgeToolName(payload.name), arguments: args }
 }
 
 function toolOutputText(payload) {
