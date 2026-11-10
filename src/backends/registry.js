@@ -6,6 +6,7 @@
  * record. Several bridges may point at the same engine with different session
  * roots or binaries; the registry only describes the engine capabilities.
  */
+import { codexEngine } from './codex/index.js'
 import { piEngine } from './pi/index.js'
 
 /** Transport modes accepted by the bridge manager. */
@@ -49,20 +50,6 @@ function plannedEngine(definition) {
     },
   }
 }
-
-const codexEngine = plannedEngine({
-  id: 'codex',
-  label: 'Codex',
-  mode: 'cli',
-  description: 'Connect to OpenAI Codex CLI sessions.',
-  unavailableReason: 'the CLI event and session adapters are not implemented yet',
-  capabilities: ['sessions', 'attach', 'stream', 'prompt', 'abort'],
-  configFields: [
-    { key: 'sessionsRoot', type: 'string', labelKey: 'sessionsRoot', hintKey: 'sessionsRootHint', placeholder: '~/.codex/sessions' },
-    { key: 'binPath', type: 'string', labelKey: 'binPath', hintKey: 'binPathHint', placeholder: 'codex' },
-  ],
-  defaultConfig: () => ({ sessionsRoot: null, binPath: null }),
-})
 
 const opencodeEngine = plannedEngine({
   id: 'opencode',

@@ -598,16 +598,18 @@ test('planned engines can be saved and report an unavailable adapter', async () 
   try {
     const { ctx, routes } = host()
     apply(ctx)
+    // Remote DSH is the remaining declared-but-unimplemented engine; Codex and
+    // OpenCode now own real adapters and are covered by the engine test files.
     const created = await (await call(routes, 'bridges', post({
-      name: 'Codex CLI',
-      mode: 'cli',
-      engine: 'codex',
-      config: { sessionsRoot: '/tmp/codex' },
+      name: 'Remote DSH',
+      mode: 'web',
+      engine: 'dsh',
+      config: { baseUrl: 'https://dsh.example.com' },
     }))).json()
-    const codex = created.bridges.find((bridge) => bridge.name === 'Codex CLI')
-    assert.equal(codex.available, false)
+    const remote = created.bridges.find((bridge) => bridge.name === 'Remote DSH')
+    assert.equal(remote.available, false)
 
-    const listed = await (await call(routes, `sessions?bridge=${encodeURIComponent(codex.id)}`)).json()
+    const listed = await (await call(routes, `sessions?bridge=${encodeURIComponent(remote.id)}`)).json()
     assert.equal(listed.ok, true)
     assert.equal(listed.available, false)
     assert.deepEqual(listed.sessions, [])

@@ -23,7 +23,11 @@ test('registers Pi, Codex, OpenCode and remote DSH engines', () => {
   assert.equal(getEngine('opencode').mode, 'cli')
   assert.equal(getEngine('dsh').mode, 'web')
   assert.equal(getEngine('pi').available, true)
-  assert.equal(getEngine('codex').available, false)
+  // Codex and OpenCode own real adapters; remote DSH is still a declared stub.
+  assert.equal(getEngine('codex').available, true)
+  assert.equal(getEngine('dsh').available, false)
+  assert.equal(typeof getEngine('codex').createAttachment, 'function')
+  assert.equal(typeof getEngine('codex').listSessions, 'function')
 })
 
 test('defaults start with one configurable Pi bridge', () => {

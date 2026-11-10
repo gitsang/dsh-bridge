@@ -107,8 +107,21 @@ function legacyEngineConfig(engineId, legacy) {
   return migrated
 }
 
+/**
+ * Did the legacy record actually configure this engine?
+ *
+ * Defaults must not count. A boolean engine setting that defaults to `true`
+ * (Codex's `skipApprovals`, OpenCode's `autoApprove`) is present in every
+ * normalized config, so treating any non-false value as "configured" would
+ * migrate an unused engine into the bridge list on every upgrade.
+ */
 function hasConfiguredValue(engine, config) {
-  return Object.values(normalizeEngineConfig(engine, config)).some((value) => value !== null && value !== false)
+  const normalized = normalizeEngineConfig(engine, config)
+  const defaults = engineConfigDefaults(engine)
+  return Object.entries(normalized).some(([key, value]) => {
+    if (typeof value === 'boolean') return value !== defaults[key]
+    return value !== null && value !== defaults[key]
+  })
 }
 
 function migrateLegacySettings(input) {
