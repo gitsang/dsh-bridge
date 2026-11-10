@@ -14,6 +14,16 @@ let model = { id: 'fake-model', provider: 'fake', name: 'Fake' }
 const messages = []
 
 const write = (record) => process.stdout.write(`${JSON.stringify(record)}\n`)
+
+/**
+ * Opt-in delay before a turn settles.
+ *
+ * The fake normally completes a turn synchronously, which makes any assertion
+ * about a turn that is *still running* inherently racy. A test that needs the
+ * running state to be observable sets this to a few hundred milliseconds;
+ * everything else keeps the instant behaviour.
+ */
+const settleDelayMs = Number(process.env.FAKE_PI_SETTLE_DELAY_MS ?? 0) || 0
 const respond = (id, command, data) => write({ id, type: 'response', command, success: true, data })
 
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity })
@@ -54,8 +64,15 @@ rl.on('line', (line) => {
     write({ type: 'message_end', message: done })
     write({ type: 'turn_end', message: done, toolResults: [] })
     write({ type: 'agent_end', messages })
-    write({ type: 'agent_settled' })
-    streaming = false
+    if (settleDelayMs > 0) {
+      setTimeout(() => {
+        write({ type: 'agent_settled' })
+        streaming = false
+      }, settleDelayMs)
+    } else {
+      write({ type: 'agent_settled' })
+      streaming = false
+    }
     return
   }
   if (command.type === 'get_state') {

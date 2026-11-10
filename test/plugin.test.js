@@ -868,6 +868,7 @@ test('viewing a finished session clears its completion activity', async () => {
   const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
   const previousHome = process.env.DSH_HOME
   const previousAuto = process.env.BRIDGE_AUTO_CONNECT
+  const previousSettle = process.env.FAKE_PI_SETTLE_DELAY_MS
   process.env.DSH_HOME = home
   process.env.BRIDGE_AUTO_CONNECT = '0'
   try {
@@ -899,17 +900,26 @@ test('viewing a finished session clears its completion activity', async () => {
       const after = await (await call(routes, 'activity?bridge=pi-local')).json()
       assert.deepEqual(after.activity, [])
 
-      // A running turn is never cleared by an ack.
-      await call(routes, 'prompt', post({ key, message: 'ping' }))
-      const acked = await (await call(routes, 'activity', post({ key }))).json()
-      assert.equal(acked.cleared, false)
-      assert.ok(['running', 'connecting', 'idle'].includes(acked.activity.state))
+      // A running turn is never cleared by an ack. The fake settles a turn
+      // synchronously by default, so hold the settle briefly: without it this
+      // assertion races the child and only passes when attach is slow.
+      process.env.FAKE_PI_SETTLE_DELAY_MS = '1500'
+      try {
+        await call(routes, 'prompt', post({ key, message: 'ping' }))
+        const acked = await (await call(routes, 'activity', post({ key }))).json()
+        assert.equal(acked.cleared, false)
+        assert.equal(acked.activity.state, 'running')
+      } finally {
+        delete process.env.FAKE_PI_SETTLE_DELAY_MS
+      }
     } finally {
       for (const dispose of disposers.reverse()) await dispose?.()
     }
   } finally {
     if (previousHome === undefined) delete process.env.DSH_HOME
     else process.env.DSH_HOME = previousHome
+    if (previousSettle === undefined) delete process.env.FAKE_PI_SETTLE_DELAY_MS
+    else process.env.FAKE_PI_SETTLE_DELAY_MS = previousSettle
     if (previousAuto === undefined) delete process.env.BRIDGE_AUTO_CONNECT
     else process.env.BRIDGE_AUTO_CONNECT = previousAuto
   }
