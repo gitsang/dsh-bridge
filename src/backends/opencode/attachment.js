@@ -34,7 +34,7 @@ import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { createLineDecoder, createStderrRing, resolveCliCommand } from '../cli.js'
+import { createStderrRing, resolveCliCommand } from '../cli.js'
 import {
   bridgeToolArguments,
   bridgeToolName,

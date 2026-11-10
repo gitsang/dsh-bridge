@@ -20,40 +20,43 @@ import {
 const fake = new URL('./fixtures/fake-opencode.mjs', import.meta.url).pathname
 const SESSION_ID = 'ses_fake000000000000000000000'
 
-/** Build one attachment wired to the fixture server instead of the real CLI. */
+/**
+ * Build one attachment wired to the fixture server instead of the real CLI.
+ *
+ * The fixture's turn can finish before a test attaches its own listener, so
+ * every emitted record is retained on the attachment from construction and the
+ * tests wait on that history instead of racing the live stream.
+ */
 function attachment(extra = {}) {
   const { config, env, ...rest } = extra
-  return new OpencodeAttachment({
+  const bridge = new OpencodeAttachment({
     sessionId: SESSION_ID,
     cwd: tmpdir(),
     env: { ...process.env, ...(env ?? {}) },
     ...rest,
     config: { binPath: fake, autoApprove: true, ...(config ?? {}) },
   })
+  bridge.records = []
+  bridge.on('event', (record) => bridge.records.push(record))
+  return bridge
 }
 
-/** Collect every native record an attachment emits, in order. */
-function recordEvents(target) {
-  const records = []
-  target.on('event', (record) => records.push(record))
-  return records
+const isStatus = (record, status) => record?.type === 'session-status' && record.status === status
+
+/** Wait for a record matching `predicate` that appears after `from`. */
+async function waitForRecord(bridge, from, predicate, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const found = bridge.records.slice(from).find(predicate)
+    if (found !== undefined) return found
+    if (Date.now() > deadline) throw new Error('timed out waiting for an event')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
 }
 
-/** Resolve on the first record matching a predicate, with a bounded wait. */
-function waitFor(target, predicate, timeoutMs = 15_000) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      target.off('event', onEvent)
-      reject(new Error('timed out waiting for an event'))
-    }, timeoutMs)
-    const onEvent = (record) => {
-      if (!predicate(record)) return
-      clearTimeout(timer)
-      target.off('event', onEvent)
-      resolve(record)
-    }
-    target.on('event', onEvent)
-  })
+/** Wait for the next session-status of the given kind after `from`. */
+function waitForStatus(bridge, status, from = bridge.records.length, timeoutMs) {
+  return waitForRecord(bridge, from, (record) => isStatus(record, status), timeoutMs)
 }
 
 test('parses the listening line from the CLI banner', () => {
@@ -84,11 +87,12 @@ test('starts the server and reconciles state', async () => {
 test('prompts, streams the turn, and settles in order', async () => {
   const bridge = attachment()
   await bridge.start()
-  const records = recordEvents(bridge)
-  const settled = waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'idle')
+  const from = bridge.records.length
+  const settled = waitForStatus(bridge, 'idle', from)
   const accepted = await bridge.prompt('hello')
   assert.deepEqual(accepted, { accepted: true })
   await settled
+  const records = bridge.records.slice(from)
   const types = records.map((record) => record.type)
   // The user message ends before the turn starts; the assistant message is
   // bracketed by exactly one start and one end; the tool expands once.
@@ -115,11 +119,12 @@ test('prompts, streams the turn, and settles in order', async () => {
 test('keeps the state busy while a turn runs', async () => {
   const bridge = attachment()
   await bridge.start()
-  const busy = waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'busy')
+  const from = bridge.records.length
+  const busy = waitForStatus(bridge, 'busy', from)
   await bridge.prompt('slow please')
   await busy
   assert.equal(bridge.getState().isStreaming, true)
-  await waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'idle')
+  await waitForStatus(bridge, 'idle', from)
   assert.equal(bridge.getState().isStreaming, false)
   await bridge.dispose()
 })
@@ -127,28 +132,33 @@ test('keeps the state busy while a turn runs', async () => {
 test('steers a running turn with the same endpoint', async () => {
   const bridge = attachment()
   await bridge.start()
-  const records = recordEvents(bridge)
+  const from = bridge.records.length
+  const busy = waitForStatus(bridge, 'busy', from)
+  const idle = waitForStatus(bridge, 'idle', from)
   await bridge.prompt('first')
-  await waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'busy')
+  await busy
   const steered = await bridge.steer('second')
   assert.deepEqual(steered, { accepted: true, queued: true })
-  await waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'idle')
+  await idle
   // Both prompts reach the transcript as separate user messages.
   const messages = await bridge.getMessages()
   const userTexts = messages.messages.filter((message) => message.role === 'user').map((message) => message.content[0].text)
   assert.deepEqual(userTexts, ['first', 'second'])
-  assert.ok(records.length > 0)
+  assert.ok(bridge.records.length > from)
   await bridge.dispose()
 })
 
 test('aborts a running turn and settles it as aborted', async () => {
   const bridge = attachment()
   await bridge.start()
+  const from = bridge.records.length
+  const busy = waitForStatus(bridge, 'busy', from)
   await bridge.prompt('count to a million')
-  await waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'busy')
+  await busy
+  const settledTurn = waitForStatus(bridge, 'idle', from)
   const result = await bridge.abort()
   assert.deepEqual(result, { aborted: true })
-  const settled = await waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'idle')
+  const settled = await settledTurn
   assert.equal(settled.aborted, true)
   await bridge.dispose()
 })
@@ -158,12 +168,11 @@ test('auto-approves permission prompts without a dialog', async () => {
   await bridge.start()
   const dialogs = []
   bridge.on('ui-request', (request) => dialogs.push(request))
+  const from = bridge.records.length
   await bridge.prompt('needs approval')
-  await waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'idle')
+  await waitForStatus(bridge, 'idle', from)
   assert.deepEqual(dialogs, [])
   // The turn completed: the tool ran after the auto-approved permission.
-  const records = []
-  bridge.on('event', (record) => records.push(record))
   const messages = await bridge.getMessages()
   assert.equal(messages.messages.some((message) => message.role === 'toolResult'), true)
   await bridge.dispose()
@@ -182,8 +191,9 @@ test('forwards permission prompts and replies to the verified endpoint', async (
   assert.equal(request.type, 'extension_ui_request')
   assert.match(request.title, /bash/)
   assert.equal(request.message, 'echo hi')
+  const from = bridge.records.length
   await bridge.respondUi(request.id, { confirmed: true })
-  await waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'idle')
+  await waitForStatus(bridge, 'idle', from)
   await bridge.dispose()
 })
 
@@ -192,8 +202,9 @@ test('auto-approves the v2 permission event family through its reply route', asy
   await bridge.start()
   const dialogs = []
   bridge.on('ui-request', (request) => dialogs.push(request))
+  const from = bridge.records.length
   await bridge.prompt('needs v2 approval')
-  await waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'idle')
+  await waitForStatus(bridge, 'idle', from)
   assert.deepEqual(dialogs, [])
   await bridge.dispose()
 })
@@ -209,8 +220,9 @@ test('forwards the v2 permission dialog and answers through the session route', 
   const [request] = await dialog
   assert.equal(request.method, 'confirm')
   assert.equal(request.message, 'echo hi')
+  const from = bridge.records.length
   await bridge.respondUi(request.id, { confirmed: true })
-  await waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'idle')
+  await waitForStatus(bridge, 'idle', from)
   await bridge.dispose()
 })
 
@@ -225,8 +237,9 @@ test('forwards questions and rejects them when cancelled', async () => {
   const [request] = await dialog
   assert.equal(request.method, 'select')
   assert.deepEqual(request.options, ['alpha', 'beta'])
+  const from = bridge.records.length
   await bridge.respondUi(request.id, { cancelled: true })
-  await waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'idle')
+  await waitForStatus(bridge, 'idle', from)
   await bridge.dispose()
 })
 
@@ -242,8 +255,9 @@ test('auto-answers interactive questions when approval is on', async () => {
   await bridge.start()
   const dialogs = []
   bridge.on('ui-request', (request) => dialogs.push(request))
+  const from = bridge.records.length
   await bridge.prompt('needs an answer')
-  await waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'idle')
+  await waitForStatus(bridge, 'idle', from)
   assert.deepEqual(dialogs, [])
   await bridge.dispose()
 })
@@ -251,8 +265,9 @@ test('auto-answers interactive questions when approval is on', async () => {
 test('reports statistics folded from the transcript', async () => {
   const bridge = attachment()
   await bridge.start()
+  const from = bridge.records.length
   await bridge.prompt('stats please')
-  await waitFor(bridge, (record) => record.type === 'session-status' && record.status === 'idle')
+  await waitForStatus(bridge, 'idle', from)
   const stats = await bridge.getSessionStats()
   assert.equal(stats.userMessages, 1)
   assert.equal(stats.assistantMessages, 1)
