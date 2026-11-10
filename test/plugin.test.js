@@ -9,6 +9,7 @@ import { readArchiveStore } from '../src/archives.js'
 
 const fake = new URL('./fixtures/fake-pi.mjs', import.meta.url).pathname
 const fakeCodex = new URL('./fixtures/fake-codex.mjs', import.meta.url).pathname
+const fakeOpencode = new URL('./fixtures/fake-opencode.mjs', import.meta.url).pathname
 
 // Never let a host test touch the real ~/.dsh bridge store.
 let originalHome
@@ -1097,5 +1098,139 @@ test('creates a new Codex session that the bridge can attach to', async () => {
     await rm(codexHome, { recursive: true, force: true })
     await rm(workspace, { recursive: true, force: true })
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+/**
+ * Minimal OpenCode data directory: one v2 session with a real transcript.
+ *
+ * The plugin integration test only needs the columns the adapter selects; the
+ * engine's own store test covers the full 1.19.5 schema and both generations.
+ */
+async function opencodeFixture() {
+  const { DatabaseSync } = await import('node:sqlite')
+  const dataDir = await mkdtemp(join(tmpdir(), 'bridge-plugin-opencode-'))
+  const dbPath = join(dataDir, 'opencode.db')
+  const db = new DatabaseSync(dbPath)
+  const sessionId = 'ses_bridgefixture0000000001'
+  db.exec(`
+    create table session_v2 (
+      id text primary key, project_id text, parent_id text, slug text, directory text,
+      title text, version text, agent text, model text, time_created integer,
+      time_updated integer, time_archived integer
+    );
+    create table session_message (
+      id text primary key, session_id text, type text, seq integer,
+      time_created integer, time_updated integer, data text
+    );
+  `)
+  const created = Date.parse('2026-01-02T10:00:00.000Z')
+  const updated = Date.parse('2026-01-02T10:05:00.000Z')
+  db.prepare(
+    'insert into session_v2 (id, project_id, directory, title, version, agent, model, time_created, time_updated) values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(
+    sessionId, 'global', '/work/oc-demo', 'OpenCode demo', '1.19.5', 'build',
+    JSON.stringify({ id: 'glm-5.2', providerID: 'fake-provider' }), created, updated,
+  )
+  const insertMessage = db.prepare(
+    'insert into session_message (id, session_id, type, seq, time_created, time_updated, data) values (?, ?, ?, ?, ?, ?, ?)',
+  )
+  insertMessage.run('msg_oc_user_1', sessionId, 'user', 1, created, created, JSON.stringify({
+    time: { created }, text: 'old opencode question',
+  }))
+  insertMessage.run('msg_oc_assistant_1', sessionId, 'assistant', 2, created + 1000, created + 1000, JSON.stringify({
+    time: { created: created + 1000, completed: created + 2000 },
+    model: { id: 'glm-5.2', providerID: 'fake-provider' },
+    content: [
+      { type: 'text', text: 'old opencode answer' },
+      { type: 'tool', id: 'call_oc_1', name: 'bash', state: { status: 'completed', input: { command: 'echo hi' }, output: 'hi\n' } },
+    ],
+    finish: 'stop',
+  }))
+  db.close()
+  return { dataDir, dbPath, sessionId }
+}
+
+test('lists, reads and drives an OpenCode session through the bridge routes', async () => {
+  const { dataDir } = await opencodeFixture()
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const previousHome = process.env.DSH_HOME
+  const previousDataHome = process.env.XDG_DATA_HOME
+  process.env.DSH_HOME = home
+  // Point the default data directory at the fixture so the bridge config stays
+  // minimal, exactly as a user with a stock install would have it.
+  process.env.XDG_DATA_HOME = dataDir
+  try {
+    const { ctx, routes, disposers } = host()
+    apply(ctx)
+    try {
+      const created = await (await call(routes, 'bridges', post({
+        name: 'Local OpenCode',
+        mode: 'cli',
+        engine: 'opencode',
+        config: { sessionsRoot: dataDir, binPath: fakeOpencode },
+      }))).json()
+      const bridge = created.bridges.find((entry) => entry.name === 'Local OpenCode')
+      assert.equal(bridge.available, true)
+      assert.equal(bridge.config.autoApprove, true)
+      assert.equal(bridge.engineLabel, 'OpenCode')
+
+      const candidates = await (await call(routes, `imports?bridge=${encodeURIComponent(bridge.id)}`)).json()
+      assert.equal(candidates.sessions.length, 1)
+      assert.equal(candidates.sessions[0].cwd, '/work/oc-demo')
+      assert.equal(candidates.sessions[0].name, 'OpenCode demo')
+
+      await call(routes, 'imports', post({ bridge: bridge.id, sessionKeys: [candidates.sessions[0].key] }))
+      const listed = await (await call(routes, `sessions?bridge=${encodeURIComponent(bridge.id)}`)).json()
+      assert.equal(listed.available, true)
+      assert.equal(listed.engine, 'opencode')
+      assert.equal(listed.sessions.length, 1)
+      assert.equal(listed.workspaces[0].path, '/work/oc-demo')
+
+      const key = listed.sessions[0].key
+      const detail = await (await call(routes, `session?key=${encodeURIComponent(key)}`)).json()
+      assert.equal(detail.session.bridge, bridge.id)
+      assert.equal(detail.session.engine, 'opencode')
+      assert.deepEqual(detail.session.messages.map((message) => message.role), ['user', 'assistant', 'toolResult'])
+      assert.equal(detail.session.messages[0].content[0].text, 'old opencode question')
+      // Tool calls use the client's narrow vocabulary, not OpenCode's own names.
+      const toolCall = detail.session.messages[1].content.find((block) => block.type === 'toolCall')
+      assert.equal(toolCall.name, 'bash')
+
+      const attached = await (await call(routes, 'attach', post({ key }))).json()
+      assert.equal(attached.ok, true)
+      assert.equal(attached.engine, 'opencode')
+      assert.equal(typeof attached.state.sessionId, 'string')
+
+      const models = await (await call(routes, `models?key=${encodeURIComponent(key)}`)).json()
+      assert.equal(models.ok, true)
+      assert.ok(Array.isArray(models.models))
+      assert.ok(models.models.length > 0)
+
+      const prompt = await (await call(routes, 'prompt', post({ key, message: 'hello opencode' }))).json()
+      assert.equal(prompt.ok, true)
+
+      const deadline = Date.now() + 8000
+      let activity
+      while (Date.now() < deadline) {
+        activity = (await (await call(routes, `activity?bridge=${encodeURIComponent(bridge.id)}`)).json())
+          .activity.find((entry) => entry.key === key)
+        if (activity?.state === 'idle') break
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      assert.equal(activity.state, 'idle')
+
+      const detached = await (await call(routes, 'detach', post({ key }))).json()
+      assert.deepEqual(detached, { ok: true, detached: true })
+    } finally {
+      for (const dispose of disposers.reverse()) await dispose?.()
+    }
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+    if (previousDataHome === undefined) delete process.env.XDG_DATA_HOME
+    else process.env.XDG_DATA_HOME = previousDataHome
+    await rm(home, { recursive: true, force: true })
+    await rm(dataDir, { recursive: true, force: true })
   }
 })

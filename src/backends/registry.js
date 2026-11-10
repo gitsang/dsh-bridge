@@ -7,6 +7,7 @@
  * roots or binaries; the registry only describes the engine capabilities.
  */
 import { codexEngine } from './codex/index.js'
+import { opencodeEngine } from './opencode/index.js'
 import { piEngine } from './pi/index.js'
 
 /** Transport modes accepted by the bridge manager. */
@@ -50,20 +51,6 @@ function plannedEngine(definition) {
     },
   }
 }
-
-const opencodeEngine = plannedEngine({
-  id: 'opencode',
-  label: 'OpenCode',
-  mode: 'cli',
-  description: 'Connect to OpenCode CLI sessions.',
-  unavailableReason: 'the CLI event and session adapters are not implemented yet',
-  capabilities: ['sessions', 'attach', 'stream', 'prompt', 'abort'],
-  configFields: [
-    { key: 'sessionsRoot', type: 'string', labelKey: 'sessionsRoot', hintKey: 'sessionsRootHint', placeholder: '~/.local/share/opencode' },
-    { key: 'binPath', type: 'string', labelKey: 'binPath', hintKey: 'binPathHint', placeholder: 'opencode' },
-  ],
-  defaultConfig: () => ({ sessionsRoot: null, binPath: null }),
-})
 
 const dshEngine = plannedEngine({
   id: 'dsh',
