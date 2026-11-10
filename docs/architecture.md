@@ -109,12 +109,33 @@ and how it is driven:
   from a narrow projection of each generation, the metadata row is read from
   whichever table owns it, and the transcript prefers v2 rows with a legacy
   fallback. The database is opened read-only and closed after each query.
-- **Live**: `opencode serve --port 0` on loopback. Readiness is the
-  `opencode server listening on http://…` stdout line. `POST
-  /session/{id}/prompt_async` returns immediately and the turn streams over
-  `GET /event` (SSE); `POST /session/{id}/abort` stops it. HTTP+SSE was chosen
-  over ACP after measuring: `serve` is ready in ~1.7 s and history calls answer
-  in 8–20 ms, while ACP `session/load` took 32 s+.
+- **Two client generations, one adapter.** `opencode-ai` 1.x and
+  `@opencode/cli` 2.x both answer `serve` but speak different APIs, and the
+  packaged `opencode` command may point at either. The adapter therefore
+  launches the configured binary, reads the readiness banner (`opencode server
+  listening on http://…` for 1.x, `server listening on http://…` for 2.x),
+  then detects the generation: an authenticated `GET /api/session` that returns
+  a `{data:[…]}` envelope means 2.x; otherwise a successful `GET
+  /global/health` means 1.x. The detection is cached per server and the
+  matching transport is attached. `src/backends/opencode/launcher.js` owns the
+  server child for both generations and mints its own `OPENCODE_PASSWORD`,
+  which is how 2.x's mandatory Basic auth is satisfied deterministically (it
+  also drops an inherited `OPENCODE_SERVER_PASSWORD`, which would make 1.x
+  demand a secret the adapter cannot know).
+- **Live, 1.x**: `POST /session/{id}/prompt_async` returns immediately and the
+  turn streams over `GET /event` (SSE); `POST /session/{id}/abort` stops it.
+  HTTP+SSE was chosen over ACP after measuring: `serve` is ready in ~1.7 s and
+  history calls answer in 8–20 ms, while ACP `session/load` took 32 s+.
+- **Live, 2.x**: everything is under `/api` behind Basic auth. `POST
+  /api/session/{id}/prompt` takes **`{text}`** (not 1.x's `{parts:[…]}`) and
+  turns stream a different event family — `session.execution.*`,
+  `session.step.*`, `session.text.*`, `session.reasoning.*`,
+  `session.tool.*` — which the transport accumulates into the same Pi block
+  vocabulary. `POST /api/session/{id}/model` takes
+  `{model:{id,providerID}}` and answers 204, so the client synthesizes the
+  selection instead of reading a body. Because 2.x exposes a context *window*
+  but no cheap *used* figure, `contextUsage` is omitted rather than reporting a
+  bogus 0%.
 - **New session**: created through the engine's own service via a short-lived
   server (its cwd binds the workspace directory), never by inserting rows into
   SQLite, so project/workspace bookkeeping stays the engine's.

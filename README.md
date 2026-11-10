@@ -130,11 +130,19 @@ the three descriptors and the routes only ever call the adapter contract.
 | --- | --- | --- | --- | --- |
 | **Pi** | `$PI_CODING_AGENT_SESSION_DIR` JSONL tree | `pi --mode rpc` over JSONL on stdio | `get_available_models` on a short-lived RPC child | Extension UI dialogs forwarded to the browser |
 | **Codex** | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` | `codex app-server --stdio` over JSON-RPC 2.0 | `model/list` on a short-lived app-server | `item/*/requestApproval` answered by the Bridge, or forwarded when approvals are kept |
-| **OpenCode** | `opencode.db` (SQLite; v2 `session_message` with a legacy `message`/`part` fallback) | `opencode serve` on a loopback port, HTTP + SSE | `GET /provider` from the same server | Permission and question events answered or forwarded |
+| **OpenCode** | `opencode.db` (SQLite; `session_message` with a legacy `message`/`part` fallback) | `opencode serve` on a loopback port, HTTP + SSE — **both 1.x and 2.x** | `GET /provider` (1.x) or `GET /api/model` (2.x) from the same server | Permission and question events answered or forwarded |
 | **DSH** | remote instance | planned | planned | — |
 
-Two engine-specific quirks are worth knowing because they shape the UI:
+Three engine-specific quirks are worth knowing because they shape the UI:
 
+- **OpenCode ships two generations under the same command.** `opencode-ai` 1.x
+  and `@opencode/cli` 2.x are different npm packages with different server
+  APIs: 1.x serves unprefixed routes and needs no auth, while 2.x serves
+  everything under `/api` and always requires HTTP Basic auth. The adapter
+  launches the configured binary, detects which generation answered
+  (an authenticated `GET /api/session` succeeding means 2.x), and speaks the
+  matching protocol — so one bridge config works with either install, and a
+  user upgrading OpenCode does not have to reconfigure the bridge.
 - **Codex has no persisted session title.** The sidebar name is derived from the
   session's first real user message, and harness-injected user turns
   (`<environment_context>`, `AGENTS.md`, aborted-turn notices) are filtered out

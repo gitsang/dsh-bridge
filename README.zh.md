@@ -107,11 +107,19 @@ pending，下次 attach 后立即应用。
 | --- | --- | --- | --- | --- |
 | **Pi** | `$PI_CODING_AGENT_SESSION_DIR` JSONL 文件树 | stdio 上的 `pi --mode rpc` JSONL | 短生命周期 RPC 子进程的 `get_available_models` | 扩展 UI 弹窗转发到浏览器 |
 | **Codex** | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` | stdio 上的 `codex app-server` JSON-RPC 2.0 | 短生命周期 app-server 的 `model/list` | `item/*/requestApproval` 由 Bridge 回答，保留审批时转发 |
-| **OpenCode** | `opencode.db`（SQLite；新格式 `session_message`，回退旧格式 `message`/`part`） | 回环端口上的 `opencode serve`，HTTP + SSE | 同一 server 的 `GET /provider` | 权限与提问事件由 Bridge 回答或转发 |
+| **OpenCode** | `opencode.db`（SQLite；`session_message`，回退旧格式 `message`/`part`） | 回环端口上的 `opencode serve`，HTTP + SSE——**同时支持 1.x 与 2.x** | 同一 server 的 `GET /provider`（1.x）或 `GET /api/model`（2.x） | 权限与提问事件由 Bridge 回答或转发 |
 | **DSH** | 远程实例 | 待接入 | 待接入 | — |
 
-有两处引擎特性值得单独说明，因为它们直接影响界面：
+有三处引擎特性值得单独说明，因为它们直接影响界面：
 
+- **OpenCode 在同一个命令下有两代客户端。** `opencode-ai` 1.x 与
+  `@opencode/cli` 2.x 是两个不同的 npm 包，服务端 API 也不同：1.x 的接口没有
+  前缀、默认无需认证；2.x 的全部接口在 `/api` 下，并且**强制** HTTP Basic 认证。
+  适配器会启动配置的可执行文件，读取就绪横幅（1.x 是
+  `opencode server listening on http://…`，2.x 是 `server listening on
+  http://…`），再用「带认证的 `GET /api/session` 是否返回 `{data:[…]}`」判断
+  代际，然后说对应的协议。因此同一份桥接配置在两种安装上都能用，用户升级
+  OpenCode 不需要改配置。
 - **Codex 不持久化会话标题。** 侧边栏名称来自会话里第一条真实用户消息，并会过滤
   掉 harness 注入的用户轮次（`<environment_context>`、`AGENTS.md`、中断提示等），
   避免它们变成标题。
