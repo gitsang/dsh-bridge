@@ -371,7 +371,12 @@ export class CodexAttachment extends EventEmitter {
     this.lastEventAt = Date.now()
     this.lastEventType = record.type
     this.emit('event', record)
-    if (typeof record.type === 'string') this.emit(record.type, record)
+    if (typeof record.type !== 'string') return
+    // `error` is EventEmitter's reserved channel: emitting it without a
+    // listener throws and would take the whole host down. A transient provider
+    // error ("Reconnecting... waiting for network") arrives as a notification
+    // and is surfaced through `event` plus `ui-notification` instead.
+    this.emit(record.type === 'error' ? 'codex-error' : record.type, record)
   }
 
   handleNotification(method, params) {

@@ -352,6 +352,36 @@ test('tool names map to the six variants the client styles', () => {
   }
 })
 
+test('a provider error notification never throws on the reserved error channel', async () => {
+  await withAttachment(async (bridge) => {
+    // Emitting EventEmitter's reserved `error` channel would crash the host;
+    // the adapter must route Codex's transient provider errors through `event`.
+    const events = []
+    const notices = []
+    bridge.on('event', (record) => events.push(record))
+    bridge.on('ui-notification', (record) => notices.push(record))
+    assert.doesNotThrow(() => {
+      bridge.handleNotification('error', {
+        error: { message: 'Reconnecting... waiting for network' },
+        willRetry: true,
+        threadId: THREAD_ID,
+        turnId: 'turn-x',
+      })
+    })
+    assert.equal(events.at(-1).type, 'error')
+    // A retry is expected to resolve itself, so it is not surfaced as a notice.
+    assert.equal(notices.length, 0)
+    bridge.handleNotification('error', {
+      error: { message: 'stream ended' },
+      willRetry: false,
+      threadId: THREAD_ID,
+      turnId: 'turn-x',
+    })
+    assert.equal(notices.length, 1)
+    assert.match(notices[0].message, /stream ended/)
+  })
+})
+
 test('unknown thread items degrade to a generic tool row instead of throwing', async () => {
   await withAttachment(async (bridge) => {
     const events = []
