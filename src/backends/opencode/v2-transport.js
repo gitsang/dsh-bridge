@@ -29,6 +29,7 @@
  */
 import { EventEmitter } from 'node:events'
 import {
+  assistantErrorMessage,
   bridgeToolArguments,
   bridgeToolName,
   summaryFromApiSession,
@@ -154,7 +155,11 @@ export function messagesFromV2Entries(entries) {
         timestamp,
       })
     }
-    if (blocks.length === 0 && results.length === 0) continue
+    // A failed turn usually carries no content blocks at all: 2.x records the
+    // provider/auth/limit failure on the assistant entry instead of a message.
+    // The turn still happened and the user must see why it produced nothing.
+    const errorText = assistantErrorMessage(entry.error)
+    if (blocks.length === 0 && results.length === 0 && errorText === undefined) continue
     messages.push({
       role: 'assistant',
       content: blocks,
@@ -163,7 +168,7 @@ export function messagesFromV2Entries(entries) {
       ...(typeof entry.model?.id === 'string' ? { model: entry.model.id } : {}),
       ...(usage === undefined ? {} : { usage }),
       ...(typeof entry.time?.completed === 'number' ? { stopReason: 'stop' } : {}),
-      ...(typeof entry.error?.type === 'string' ? { errorMessage: entry.error.type } : {}),
+      ...(errorText === undefined ? {} : { errorMessage: errorText }),
     }, ...results)
   }
   return { messages, tools, model }

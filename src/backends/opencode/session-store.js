@@ -248,6 +248,21 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error)
 }
 
+/**
+ * One-line, user-facing text for an assistant entry's `error` record.
+ *
+ * OpenCode stores `{name|type, message}` there. The name alone ("provider.error")
+ * tells the user nothing, so prefer the message and fall back to the name for
+ * rows written by older CLI versions that only had one.
+ */
+export function assistantErrorMessage(error) {
+  if (error === null || typeof error !== 'object') return undefined
+  if (typeof error.message === 'string' && error.message.trim() !== '') return error.message.trim()
+  if (typeof error.name === 'string' && error.name !== '') return error.name
+  if (typeof error.type === 'string' && error.type !== '') return error.type
+  return undefined
+}
+
 function hasTable(db, table) {
   const row = db.prepare("select name from sqlite_master where type = 'table' and name = ?").get(table)
   return row !== undefined && row !== null
@@ -401,7 +416,11 @@ function assistantEntry(entry) {
       timestamp: entry.timestamp,
     })
   }
-  if (blocks.length === 0 && results.length === 0) return undefined
+  // A failed turn usually carries no content blocks at all: OpenCode records the
+  // provider/auth/limit failure on the assistant entry instead of a message. The
+  // turn still happened and the user must see why it produced nothing, so keep
+  // the entry whenever it names an error.
+  if (blocks.length === 0 && results.length === 0 && entry.error === undefined) return undefined
   const message = {
     role: 'assistant',
     content: blocks,
@@ -446,7 +465,7 @@ export function messagesFromSessionMessages(rows) {
       provider: typeof data.model?.providerID === 'string' ? data.model.providerID : undefined,
       modelId: typeof data.model?.id === 'string' ? data.model.id : undefined,
       usage: usageFromTokens(data.tokens),
-      error: typeof data.error?.name === 'string' ? data.error.name : undefined,
+      error: assistantErrorMessage(data.error),
     })
     if (entry === undefined) continue
     messages.push(entry.message, ...entry.results)
@@ -542,7 +561,9 @@ export function messagesFromApiEntries(entries) {
       provider: typeof info.providerID === 'string' ? info.providerID : undefined,
       modelId: typeof info.modelID === 'string' ? info.modelID : undefined,
       usage: usageFromTokens(info.tokens) ?? usageFromTokens(stepFinish?.tokens),
-      error: typeof info.error?.name === 'string' ? info.error.name : undefined,
+      // Prefer the human-readable message: the name alone ("provider.error")
+      // does not tell the user what went wrong. Older rows only carry a name.
+      error: assistantErrorMessage(info.error),
     })
     if (entryResult === undefined) continue
     messages.push(entryResult.message, ...entryResult.results)

@@ -551,3 +551,44 @@ test('shapes a created API session into the listed summary form', { skip }, () =
   assert.deepEqual(summary.model, { provider: 'p1', id: 'm1' })
   assert.deepEqual(summary.messages, [])
 })
+
+test('keeps a failed v1 turn that produced no content blocks', { skip }, () => {
+  // Same invariant as the 2.x reader: a provider/quota failure is recorded on
+  // the assistant message with an empty part list, and dropping it hides the
+  // turn from the transcript entirely.
+  const transcript = store.messagesFromSessionMessages([
+    {
+      id: 'msg_user',
+      type: 'user',
+      seq: 1,
+      time_created: 1000,
+      data: JSON.stringify({ text: 'do the thing', time: { created: 1000 } }),
+    },
+    {
+      id: 'msg_failed',
+      type: 'assistant',
+      seq: 2,
+      time_created: 1100,
+      data: JSON.stringify({
+        time: { created: 1100, completed: 1200 },
+        model: { id: 'm1', providerID: 'p1' },
+        content: [],
+        finish: 'error',
+        error: { type: 'provider.free-limit', message: 'Free usage limit reached.' },
+      }),
+    },
+  ])
+  assert.equal(transcript.messages.length, 2)
+  const failed = transcript.messages[1]
+  assert.equal(failed.role, 'assistant')
+  assert.equal(failed.errorMessage, 'Free usage limit reached.')
+})
+
+test('formats the assistant error record for display', { skip }, () => {
+  assert.equal(store.assistantErrorMessage({ type: 'provider.auth', message: 'virtual key is required' }), 'virtual key is required')
+  assert.equal(store.assistantErrorMessage({ name: 'provider.error' }), 'provider.error')
+  assert.equal(store.assistantErrorMessage({ type: 'aborted' }), 'aborted')
+  assert.equal(store.assistantErrorMessage(undefined), undefined)
+  assert.equal(store.assistantErrorMessage(null), undefined)
+  assert.equal(store.assistantErrorMessage({}), undefined)
+})

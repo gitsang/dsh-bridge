@@ -712,3 +712,51 @@ test('reports a failed execution to the user and settles the turn', async () => 
   assert.match(notices[0].message, /ProviderError: quota exhausted/)
   await bridge.dispose()
 })
+
+test('keeps a failed 2.x turn even when it produced no content blocks', () => {
+  // A provider/quota/auth failure lands on the assistant entry as `error` with
+  // an empty content array. Dropping it made the transcript silently lose the
+  // turn, so the user saw their question and then nothing at all.
+  const transcript = messagesFromV2Entries([
+    { id: 'msg_user', type: 'user', text: 'do the thing', time: { created: 1000 } },
+    {
+      id: 'msg_failed',
+      type: 'assistant',
+      time: { created: 1100, completed: 1200 },
+      model: { id: 'm1', providerID: 'p1' },
+      content: [],
+      finish: 'error',
+      error: { type: 'provider.free-limit', message: 'Free usage limit reached. Connect a provider.' },
+    },
+    { id: 'msg_idle', type: 'idle', outcome: 'failed', time: { created: 1300 } },
+  ])
+  assert.equal(transcript.messages.length, 2)
+  const failed = transcript.messages[1]
+  assert.equal(failed.role, 'assistant')
+  assert.deepEqual(failed.content, [])
+  // The reason must be human-readable, not the bare error type.
+  assert.equal(failed.errorMessage, 'Free usage limit reached. Connect a provider.')
+  assert.equal(failed.stopReason, 'stop')
+})
+
+test('prefers the error message over the error type for a failed turn', () => {
+  // Older CLI versions only stored a name ("provider.error"); newer ones store a
+  // message. Both must render, and the message wins when present.
+  const withMessage = messagesFromV2Entries([
+    { id: 'a', type: 'user', text: 'q', time: { created: 1 } },
+    { id: 'b', type: 'assistant', content: [], time: { created: 2 }, error: { type: 'provider.auth', message: 'virtual key is required' } },
+  ])
+  assert.equal(withMessage.messages[1].errorMessage, 'virtual key is required')
+  const nameOnly = messagesFromV2Entries([
+    { id: 'c', type: 'user', text: 'q', time: { created: 1 } },
+    { id: 'd', type: 'assistant', content: [], time: { created: 2 }, error: { name: 'provider.error' } },
+  ])
+  assert.equal(nameOnly.messages[1].errorMessage, 'provider.error')
+  // A content-less, error-less assistant entry is still dropped: it carries no
+  // information and would render as an empty bubble.
+  const empty = messagesFromV2Entries([
+    { id: 'e', type: 'user', text: 'q', time: { created: 1 } },
+    { id: 'f', type: 'assistant', content: [], time: { created: 2 } },
+  ])
+  assert.equal(empty.messages.length, 1)
+})

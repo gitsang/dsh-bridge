@@ -1612,6 +1612,7 @@ window.__ModuleLoader__.load({
       statsContextPanel: '上下文占用',
       stop: '停止',
       stopped: '已停止',
+      turnFailed: '本轮失败',
       copy: '复制',
       copied: '已复制',
       attachFailed: '连接失败',
@@ -1859,6 +1860,7 @@ window.__ModuleLoader__.load({
       statsContextPanel: 'Context occupancy',
       stop: 'Stop',
       stopped: 'Stopped',
+      turnFailed: 'Turn failed',
       copy: 'Copy',
       copied: 'Copied',
       attachFailed: 'Could not connect',
@@ -1968,6 +1970,7 @@ window.__ModuleLoader__.load({
       '.dshBridge_answer{display:flex;flex-direction:column;min-width:0}',
       '.dshBridge_assistantBody{display:flex;flex-direction:column;gap:16px;font-size:var(--dsh-content-font-size,14px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-primary,currentColor);word-break:break-word}',
       '.dshBridge_stopped{align-self:flex-start;padding:0 6px;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05));color:var(--dsw-alias-label-tertiary,currentColor);font-size:11px;line-height:18px}',
+      '.dshBridge_turnError{align-self:flex-start;display:flex;gap:6px;padding:0 6px;border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05));color:var(--dsw-alias-state-error-primary,currentColor);font-size:11px;line-height:18px}.dshBridge_turnErrorDetail{color:var(--dsw-alias-label-secondary,currentColor);word-break:break-word}',
       '.dshBridge_answerActions{margin-top:16px;margin-left:-6px;opacity:0;transition:opacity .1s ease}',
       '.dshBridge_answer:hover .dshBridge_answerActions,.dshBridge_answerActions:focus-within{opacity:1}',
       '.dshBridge_streaming{min-height:24px}',
@@ -3534,6 +3537,12 @@ window.__ModuleLoader__.load({
           : body,
         !streaming && message?.stopReason === 'aborted'
           ? h('div', { className: 'dshBridge_stopped' }, t('stopped'))
+          : null,
+        // An engine can fail a turn before producing any text (provider auth,
+        // quota, a rejected model). The host keeps that turn with its reason so
+        // the transcript is honest instead of silently empty.
+        !streaming && typeof message?.errorMessage === 'string' && message.errorMessage !== ''
+          ? h('div', { className: 'dshBridge_turnError', role: 'alert' }, t('turnFailed'), h('span', { className: 'dshBridge_turnErrorDetail' }, message.errorMessage))
           : null,
         !streaming && text !== ''
           ? h('div', { className: 'dshBridge_answerActions' }, h(CopyButton, { text, t }))
