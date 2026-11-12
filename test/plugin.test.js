@@ -903,6 +903,11 @@ test('viewing a finished session clears its completion activity', async () => {
       // A running turn is never cleared by an ack. The fake settles a turn
       // synchronously by default, so hold the settle briefly: without it this
       // assertion races the child and only passes when attach is slow.
+      //
+      // The delay is read when the fixture starts, so the previous attach must
+      // be gone first: otherwise its still-live child (spawned before the env
+      // was set) would settle instantly and the ack would race a finished turn.
+      await call(routes, 'detach', post({ key }))
       process.env.FAKE_PI_SETTLE_DELAY_MS = '1500'
       try {
         await call(routes, 'prompt', post({ key, message: 'ping' }))
