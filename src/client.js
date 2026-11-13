@@ -117,8 +117,8 @@ window.__ModuleLoader__.load({
         this.set({ selectedKey: key })
         this.selectHandler?.(key)
       },
-      refresh() {
-        this.refreshHandler?.()
+      refresh(bridgeId) {
+        this.refreshHandler?.(bridgeId)
       },
       hydrateView(bridgeId) {
         const view = readStoredView(bridgeId)
@@ -4185,7 +4185,9 @@ window.__ModuleLoader__.load({
         // so its bridge-id effect never fires again. Ask the panel to reload
         // explicitly; with no mounted panel this is a no-op and mounting loads
         // the list itself. Without it the sidebar would stay on "Loading…".
-        bridgeUi.refresh()
+        // The id is explicit because this handler still closes over the previous
+        // render's `loadSessions`, whose bridgeId is the bridge being left.
+        bridgeUi.refresh(bridge.id)
       }
 
       const anchor = h(
@@ -5175,16 +5177,29 @@ window.__ModuleLoader__.load({
       }, [notice])
 
       const bridgeId = bridge?.id ?? null
-      const loadSessions = useCallback(async () => {
-        if (bridgeId === null) {
+      /**
+       * Load one bridge's session list. The target is a parameter because the
+       * caller may be a render that closed over the previous bridge.
+       *
+       * The response only ever describes the bridge that was asked for, so a
+       * late answer for a bridge that is no longer selected is discarded. This
+       * is the whole ballgame: applying a stale answer used to write its own
+       * `bridge` back into the shared store, which flipped the selection to the
+       * old bridge, which re-ran the bridge-id effect, whose answer flipped it
+       * back. Two in-flight answers then took turns rewriting each other and the
+       * UI visibly jumped between bridges. Selection is owned by the menu.
+       */
+      const loadSessions = useCallback(async (targetId = bridgeId) => {
+        if (targetId === null) {
           bridgeUi.set({ sessions: [], workspaces: [], removedWorkspacePaths: [], loading: false, loadError: null })
           return
         }
+        const stillSelected = () => bridgeUi.state.bridge?.id === targetId
         bridgeUi.set({ loading: true, loadError: null })
         try {
-          const body = await api(`sessions?bridge=${encodeURIComponent(bridgeId)}`)
+          const body = await api(`sessions?bridge=${encodeURIComponent(targetId)}`)
+          if (!stillSelected()) return
           bridgeUi.set({
-            bridge: body.bridge ?? bridgeUi.state.bridge,
             sessions: Array.isArray(body.sessions) ? body.sessions : [],
             workspaces: Array.isArray(body.workspaces) ? body.workspaces : [],
             removedWorkspacePaths: Array.isArray(body.removedWorkspacePaths) ? body.removedWorkspacePaths : [],
@@ -5192,6 +5207,7 @@ window.__ModuleLoader__.load({
             home: typeof body.home === 'string' ? body.home : bridgeUi.state.home,
           })
         } catch (error) {
+          if (!stillSelected()) return
           bridgeUi.set({
             sessions: [],
             workspaces: [],
@@ -5199,7 +5215,7 @@ window.__ModuleLoader__.load({
             loadError: error instanceof Error ? error.message : String(error),
           })
         } finally {
-          bridgeUi.set({ loading: false })
+          if (stillSelected()) bridgeUi.set({ loading: false })
         }
       }, [bridgeId])
 
@@ -5393,7 +5409,7 @@ window.__ModuleLoader__.load({
 
       useEffect(() => {
         bridgeUi.selectHandler = (key) => openSession(key)
-        bridgeUi.refreshHandler = () => loadSessions()
+        bridgeUi.refreshHandler = (targetId) => loadSessions(targetId)
         return () => {
           bridgeUi.selectHandler = null
           bridgeUi.refreshHandler = null
