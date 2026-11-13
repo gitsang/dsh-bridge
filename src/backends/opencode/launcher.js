@@ -28,7 +28,7 @@ import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { createStderrRing, resolveCliCommand } from '../cli.js'
+import { createStderrRing, defaultCliSearchDirs, resolveCliCommand } from '../cli.js'
 
 const DEFAULT_READY_TIMEOUT_MS = 30_000
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
@@ -52,6 +52,9 @@ export function resolveOpencodeCommand(config = {}, env = process.env) {
     configBin: config.binPath,
     envVar: 'OPENCODE_BIN',
     defaultNames: ['opencode'],
+    // A service-managed dsh does not inherit Homebrew's or a version manager's
+    // PATH, so an `opencode` the user plainly has installed looks missing.
+    searchDirs: defaultCliSearchDirs(env),
     env,
   })
 }

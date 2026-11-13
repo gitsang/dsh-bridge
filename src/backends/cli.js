@@ -10,6 +10,7 @@
  */
 import { spawn } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { delimiter, isAbsolute, join } from 'node:path'
 
 /**
@@ -38,14 +39,42 @@ export function executableOnPath(command, env = process.env) {
 }
 
 /**
+ * Well-known install directories a service manager will not put on PATH.
+ *
+ * dsh normally runs as a background service, and launchd/systemd hand a process
+ * a fraction of the login shell's environment — typically not the directories a
+ * version manager or Homebrew adds. A CLI the user plainly has installed then
+ * looks missing to the Bridge. These are the standard locations for each
+ * platform; PATH still wins, so an existing setup is unaffected.
+ */
+export function defaultCliSearchDirs(env = process.env) {
+  const dirs = [
+    join(homedir(), '.local', 'bin'),
+    join(homedir(), '.bun', 'bin'),
+  ]
+  if (process.platform === 'darwin') {
+    dirs.push('/opt/homebrew/bin', '/usr/local/bin')
+  } else if (process.platform === 'linux') {
+    dirs.push('/home/linuxbrew/.linuxbrew/bin', '/usr/local/bin')
+  }
+  if (typeof env.HOME === 'string' && env.HOME !== '') {
+    // Honour an explicit HOME (a test or a container may not match homedir()).
+    const home = env.HOME
+    dirs.unshift(join(home, '.local', 'bin'), join(home, '.bun', 'bin'))
+  }
+  return [...new Set(dirs)]
+}
+
+/**
  * Resolve the launcher for one engine.
  *
  * Order: an explicit bridge config value, then the engine's environment
- * override, then the first default name found on PATH. The resolved command is
- * returned even when it does not exist so callers can report the name they
- * tried instead of a generic failure.
+ * override, then the first default name found on PATH, then the same name in a
+ * well-known install directory. The resolved command is returned even when it
+ * does not exist so callers can report the name they tried instead of a generic
+ * failure.
  */
-export function resolveCliCommand({ configBin, envVar, defaultNames, env = process.env }) {
+export function resolveCliCommand({ configBin, envVar, defaultNames, searchDirs, env = process.env }) {
   if (typeof configBin === 'string' && configBin.trim() !== '') {
     return { command: configBin.trim(), prefixArgs: [], source: 'config' }
   }
@@ -57,6 +86,17 @@ export function resolveCliCommand({ configBin, envVar, defaultNames, env = proce
   }
   for (const name of defaultNames ?? []) {
     if (executableOnPath(name, env)) return { command: name, prefixArgs: [], source: 'path' }
+  }
+  for (const directory of searchDirs ?? []) {
+    for (const name of defaultNames ?? []) {
+      const candidate = join(directory, name)
+      if (executableOnPath(candidate, env)) {
+        return { command: candidate, prefixArgs: [], source: 'fallback' }
+      }
+      if (process.platform === 'win32' && executableOnPath(`${candidate}.exe`, env)) {
+        return { command: `${candidate}.exe`, prefixArgs: [], source: 'fallback' }
+      }
+    }
   }
   return {
     command: (defaultNames ?? [''])[0] ?? '',

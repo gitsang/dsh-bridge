@@ -6,6 +6,7 @@ import test from 'node:test'
 import {
   createLineDecoder,
   createStderrRing,
+  defaultCliSearchDirs,
   executableOnPath,
   resolveCliCommand,
   runCommand,
@@ -75,4 +76,71 @@ test('runCommand captures output and reports a non-zero exit', async () => {
   assert.equal(failing.stderr, 'bad')
   const missing = await runCommand('/definitely/not/a/binary', [])
   assert.equal(missing.spawnError, true)
+})
+
+test('defaultCliSearchDirs covers the service-unfriendly install locations', () => {
+  const dirs = defaultCliSearchDirs({ HOME: '/home/someone' })
+  assert.ok(dirs.includes(join('/home/someone', '.local', 'bin')))
+  assert.ok(dirs.includes(join('/home/someone', '.bun', 'bin')))
+  if (process.platform === 'linux') {
+    // Where Homebrew installs are documented to live on Linux.
+    assert.ok(dirs.includes('/home/linuxbrew/.linuxbrew/bin'))
+  }
+  if (process.platform === 'darwin') {
+    assert.ok(dirs.includes('/opt/homebrew/bin'))
+  }
+  // No duplicates: each directory is probed once.
+  assert.equal(new Set(dirs).size, dirs.length)
+})
+
+test('resolveCliCommand falls back to a well-known dir when PATH misses it', async () => {
+  // Reproduces the reported bug: dsh runs as a service with a minimal PATH, so a
+  // Homebrew-installed CLI is invisible even though the user has it installed.
+  const root = await mkdtemp(join(tmpdir(), 'bridge-cli-fallback-'))
+  try {
+    const tool = join(root, 'agent')
+    await writeFile(tool, '#!/bin/sh\nexit 0\n', 'utf8')
+    await chmod(tool, 0o755)
+    const env = { PATH: '/nonexistent', HOME: '/nonexistent-home' }
+
+    // Nothing on PATH: the fallback directory resolves it to an absolute path.
+    const found = resolveCliCommand({ defaultNames: ['agent'], searchDirs: [root], env })
+    assert.equal(found.command, tool)
+    assert.equal(found.source, 'fallback')
+
+    // PATH still wins over a fallback directory, so an existing setup is stable.
+    const pathDir = join(root, 'on-path')
+    const { mkdir } = await import('node:fs/promises')
+    await mkdir(pathDir)
+    const onPath = join(pathDir, 'agent')
+    await writeFile(onPath, '#!/bin/sh\nexit 0\n', 'utf8')
+    await chmod(onPath, 0o755)
+    const preferred = resolveCliCommand({
+      defaultNames: ['agent'],
+      searchDirs: [root],
+      env: { PATH: pathDir, HOME: '/nonexistent-home' },
+    })
+    assert.equal(preferred.command, 'agent')
+    assert.equal(preferred.source, 'path')
+
+    // An explicit Bin path still beats both.
+    const configured = resolveCliCommand({
+      configBin: '/opt/custom/agent',
+      defaultNames: ['agent'],
+      searchDirs: [root],
+      env,
+    })
+    assert.equal(configured.command, '/opt/custom/agent')
+    assert.equal(configured.source, 'config')
+
+    // A directory that merely exists as a directory is not an executable.
+    const empty = resolveCliCommand({ defaultNames: ['agent'], searchDirs: [pathDir], env: { PATH: '/nonexistent', HOME: '/x' } })
+    // `pathDir` does contain `agent`, so this resolves; check a name that does not.
+    const absent = resolveCliCommand({ defaultNames: ['no-such-agent'], searchDirs: [pathDir], env: { PATH: '/nonexistent', HOME: '/x' } })
+    assert.equal(absent.source, 'missing')
+    assert.equal(absent.command, 'no-such-agent')
+    assert.equal(empty.source, 'fallback')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

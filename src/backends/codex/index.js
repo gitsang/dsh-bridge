@@ -8,7 +8,7 @@
  */
 import { accessSync, constants, existsSync, statSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
-import { executableOnPath, resolveCliCommand, runCommand } from '../cli.js'
+import { defaultCliSearchDirs, executableOnPath, resolveCliCommand, runCommand } from '../cli.js'
 import { CodexAttachment, queryCodexModels } from './attachment.js'
 import {
   bridgeToolName,
@@ -40,12 +40,16 @@ export function resolveCodexSessionsRoot(config = {}, env = process.env) {
   return resolve(join(codexHome(env), 'sessions'))
 }
 
-/** Resolve the launcher without spawning: config wins, then CODEX_BIN, then PATH. */
+/**
+ * Resolve the launcher without spawning: config wins, then CODEX_BIN, then PATH,
+ * then a well-known install directory a service manager would not expose.
+ */
 export function resolveCodexCommand(config = {}, env = process.env) {
   return resolveCliCommand({
     configBin: config.binPath,
     envVar: 'CODEX_BIN',
     defaultNames: ['codex'],
+    searchDirs: defaultCliSearchDirs(env),
     env,
   })
 }
@@ -71,7 +75,11 @@ function probeCodex(config = {}, env = process.env) {
   }
   const resolved = resolveCodexCommand(config, env)
   if (!executableOnPath(resolved.command, env)) {
-    throw new Error(`Codex executable was not found: ${resolved.command}`)
+    // Name the fix, not just the symptom: the common cause is a service PATH
+    // that lacks the directory the user installed into.
+    throw new Error(
+      `Codex executable was not found: ${resolved.command}. Set the bridge's Bin path to the absolute codex path, or add its directory to the host's PATH.`,
+    )
   }
   return {
     sessionsRoot: root,

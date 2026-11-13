@@ -47,7 +47,11 @@ function decorateSession(session) {
 function probeOpencode(config = {}, env = process.env) {
   const resolved = resolveOpencodeCommand(config, env)
   if (!executableOnPath(resolved.command, env)) {
-    throw new Error(`OpenCode executable was not found: ${resolved.command}`)
+    // Name the fix, not just the symptom: the common cause is a service PATH
+    // that lacks the directory the user installed into.
+    throw new Error(
+      `OpenCode executable was not found: ${resolved.command}. Set the bridge's Bin path to the absolute opencode path, or add its directory to the host's PATH.`,
+    )
   }
   const dataDir = opencodeDataDir(config, env)
   const dbPath = opencodeDatabasePath(config, env)
