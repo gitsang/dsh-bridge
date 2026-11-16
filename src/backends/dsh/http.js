@@ -8,11 +8,11 @@
  * envelopes, timeouts, retries); mapping results onto sessions is the adapter's
  * job.
  *
- * Auth has two shapes, selected by what the bridge configures:
- * - `token`: `GET /?token=<launch token>` mints a session cookie;
- * - `password`: `POST /login` against a dsh-gateway mints a gateway cookie.
- * Both cookies are reused for every `/api` call. A launch token cannot be used
- * through a gateway: the gateway answers with a redirect to its login page.
+ * Authentication is one shape: the launch token a remote `dsh web` prints in its
+ * startup URL is redeemed by `GET /?token=<token>` for a signed cookie, which is
+ * then reused for every `/api` call. A `dsh-gateway` in front of that instance
+ * is deliberately not supported — it guards the API with a browser password
+ * session, and a launch token cannot traverse it.
  *
  * Only node:http / node:https are used (no global fetch) so TLS options stay
  * controllable and no dependency is added.
@@ -27,7 +27,7 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 const MAX_REDIRECTS = 5
 
 const GATEWAY_TOKEN_HINT =
-  'This DSH is behind dsh-gateway, where launch tokens are not supported. Configure the dsh-gateway password in the bridge settings instead.'
+  'This URL is served by dsh-gateway, which authenticates browsers with a password. The bridge speaks the dsh web protocol and cannot log in through a gateway; point the bridge at that instance\'s dsh web port and use the launch token it printed at startup.'
 
 /** Base class for every error this module throws. */
 export class DshError extends Error {
@@ -124,24 +124,18 @@ function isLoginRedirect(response) {
 /**
  * Create a client for one remote DSH web instance.
  *
- * @returns {{ baseUrl: string, authMode: 'token'|'password'|'none', call: Function,
+ * @returns {{ baseUrl: string, authMode: 'token'|'none', call: Function,
  *   connect: Function, request: Function, close: Function }}
  */
 export function createDshClient({
   baseUrl,
   token = null,
-  password = null,
   allowInsecureTls = false,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   logger = null,
 } = {}) {
   const base = normalizeBaseUrl(baseUrl)
-  const authMode =
-    typeof token === 'string' && token.length > 0
-      ? 'token'
-      : typeof password === 'string' && password.length > 0
-        ? 'password'
-        : 'none'
+  const authMode = typeof token === 'string' && token.length > 0 ? 'token' : 'none'
   const requestTimeoutMs =
     typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS
 
@@ -310,43 +304,10 @@ export function createDshClient({
     }
   }
 
-  async function connectWithPassword() {
-    const body = new URLSearchParams({ password, next: '/' }).toString()
-    const response = await request('POST', '/login', {
-      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'text/html' },
-      body,
-    })
-    const hasSession = cookies.has('dsh_gateway_session')
-    if (hasSession && response.status < 400) return
-    if (response.status === 400) {
-      throw new DshAuthError(
-        'The dsh-gateway has no password yet; open it in a browser to set one, then configure that password in the bridge settings.',
-        'no-password',
-      )
-    }
-    if (response.status === 403) {
-      throw new DshAuthError(
-        'The dsh-gateway refused this request because its Host header is not trusted (HTTP 403). Start it with `--trusted-host <host>` matching the configured URL host, then retry.',
-        'untrusted-host',
-      )
-    }
-    if (response.status === 401 || isLoginRedirect(response)) {
-      throw new DshAuthError(
-        'The dsh-gateway rejected the password (HTTP 401). Check the dsh-gateway password configured in the bridge settings.',
-        'bad-password',
-      )
-    }
-    throw new DshAuthError(
-      `dsh-gateway login failed with HTTP ${response.status} and no session cookie; check the gateway URL and password.`,
-      'unauthenticated',
-    )
-  }
-
   function connect() {
     if (authDone) return Promise.resolve()
     if (connectPromise) return connectPromise
-    const flow =
-      authMode === 'token' ? connectWithToken() : authMode === 'password' ? connectWithPassword() : Promise.resolve()
+    const flow = authMode === 'token' ? connectWithToken() : Promise.resolve()
     const promise = flow
       .then(() => {
         authDone = true
@@ -427,7 +388,7 @@ export function createDshClient({
     // is a deployment problem rather than a transport one.
     if (response.status === 403) {
       throw new DshAuthError(
-        `The remote DSH refused ${method} because this Host is not trusted (HTTP 403). Start the remote dsh web with \`--trusted-host ${base.host}\` (or proxy it through dsh-gateway, which presents a loopback host).`,
+        `The remote DSH refused ${method} because this Host is not trusted (HTTP 403). Start the remote dsh web with \`--trusted-host ${base.host}\` so it accepts the configured address.`,
         'untrusted-host',
       )
     }
@@ -447,7 +408,7 @@ export function createDshClient({
       } catch (retryError) {
         if (authMode === 'none' && retryError instanceof DshHttpError && retryError.status === 401) {
           throw new DshAuthError(
-            'The remote DSH requires authentication; configure a launch token or a dsh-gateway password in the bridge settings.',
+            'The remote DSH requires authentication; paste the launch token from its startup URL in the bridge settings.',
             'unauthenticated',
           )
         }

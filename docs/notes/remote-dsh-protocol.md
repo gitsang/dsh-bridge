@@ -237,12 +237,19 @@ gateway (Host is loopback), which is why it is safe to run the gateway on
 | Get a fresh credential programmatically | no | no | **yes** (`POST /login`) |
 | Suitable as stored config | **no** | only if you own the box | **yes** |
 
-Recommendation: model the engine config as `{ baseUrl, password?, token? }`
-where `password` is the durable credential (gateway) and `token` is a
-bootstrap-only value spliced from the URL the user pastes; the adapter should
-exchange it immediately, keep the resulting cookie in memory, and say plainly
-that it must be re-pasted after every `dsh web` restart. Never persist the
-token as if it were a password.
+Recommendation, as implemented: the adapter keeps flow **A only** —
+`{ baseUrl, token, allowInsecureTls }`. The launch token is exchanged
+immediately and only the resulting cookie is used; the token is stored because
+the remote prints a new one on every restart and the user would otherwise have
+to re-enter it, and the error message says plainly that a rotated token is what
+happened.
+
+Flow **B is deliberately not implemented.** A gateway authenticates *browsers*:
+its cookie comes from a login form, not from the dsh web protocol, and the
+bridge has no business driving that form. Pointing a DSH bridge at a gateway
+port is therefore a deployment mistake the adapter reports (with a pointer at
+dsh web's own port and token) rather than a second credential model to maintain.
+Flow A′ needs the dsh home signing secret, so it is test-only and also unused.
 
 ---
 
@@ -761,15 +768,11 @@ Readiness probe should report **which** of these it hit, in the bridge's own
 connection state (`state:'failed'`, `error`) — see `src/index.js` `probe()`
 usage around line 454. Suggested probe for the `dsh` engine:
 
-1. parse `baseUrl`; if it has a non-empty `password`, use the gateway path,
-   else the token path;
-2. **gateway**: `POST /login` with the stored password (`next=/`)— status 302
-   with `set-cookie: dsh_gateway_session=…` ⇒ credential ok; 401 ⇒ "gateway
-   password rejected"; 200 with a `confirm` field ⇒ "gateway has no password
-   configured yet"; ECONNREFUSED ⇒ "gateway unreachable".
-   then `GET /__dsh_gateway/state` (must be 200 JSON) to read
-   `{upstream, hasPassword, sessions, version}`; a 502 later means dsh web is
-   down behind a live gateway.
+1. parse `baseUrl`;
+2. **gateway URL detected** (a `302` to `/login` on the token exchange or on
+   `/api`): fail with "this is a dsh-gateway; point the bridge at dsh web's own
+   port and use its launch token". The gateway path above is documented for
+   completeness only — the adapter does not implement it.
 3. **direct**: `GET /connect?token=…&interactions=none` — 302
    `./api/remote.mux` + a `dsh-auth-*` cookie ⇒ ok; 401 ⇒ "launch token is
    invalid or the remote dsh restarted"; 403 ⇒ "Host not trusted; start dsh

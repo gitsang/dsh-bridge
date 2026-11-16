@@ -73,6 +73,19 @@ export function valuesFromRow(row) {
 }
 
 /**
+ * A Session a subagent owns, rather than one a user opened.
+ *
+ * dsh lists these as ordinary rows, but they have no standalone durable
+ * address: every history/prompt call for one is refused with
+ * `session/agent-busy: subagent Sessions require their durable parent address`.
+ * The bridge has no nested-session surface, and the parent's transcript already
+ * carries the subagent's work, so these are not bridge sessions at all.
+ */
+export function isSubagentRow(row) {
+  return isObject(row) && row.origin === 'subagent'
+}
+
+/**
  * Convert one `session/list` row into the bridge's neutral session summary.
  *
  * `nativeKey` is the remote Session id; it is opaque to the host and only ever

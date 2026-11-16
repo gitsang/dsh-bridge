@@ -71,7 +71,6 @@ export function clientFromConfig(config, { logger, timeoutMs } = {}) {
   return createDshClient({
     baseUrl: config?.baseUrl ?? '',
     token: config?.token ?? null,
-    password: config?.password ?? null,
     allowInsecureTls: config?.allowInsecureTls === true,
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     logger,

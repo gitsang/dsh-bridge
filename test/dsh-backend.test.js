@@ -13,6 +13,7 @@ import {
   eventsFromPage,
   historyFromEvents,
   isHumanUserMessage,
+  isSubagentRow,
   messageFromEvent,
   modelsFromCatalog,
   neutralEventsFromDsh,
@@ -28,7 +29,7 @@ import { startFakeDsh } from './fixtures/fake-dsh.mjs'
 const TOKEN = 'token-abc'
 
 function config(baseUrl, extra = {}) {
-  return { baseUrl, token: TOKEN, password: null, allowInsecureTls: false, ...extra }
+  return { baseUrl, token: TOKEN, allowInsecureTls: false, ...extra }
 }
 
 /** A two-turn remote log with tool use, injected context, and an abort. */
@@ -215,17 +216,25 @@ test('the engine declares exactly one connection strategy and its own fields', (
   assert.equal(dshEngine.id, 'dsh')
   assert.equal(dshEngine.available, true)
   assert.equal('mode' in dshEngine, false)
-  assert.deepEqual(dshEngine.configFields.map((field) => field.key), ['baseUrl', 'token', 'password', 'allowInsecureTls'])
+  assert.deepEqual(dshEngine.configFields.map((field) => field.key), ['baseUrl', 'token', 'allowInsecureTls'])
   const secrets = dshEngine.configFields.filter((field) => field.type === 'secret').map((field) => field.key)
-  assert.deepEqual(secrets, ['token', 'password'])
+  assert.deepEqual(secrets, ['token'])
 })
 
-test('listSessions reads the remote list and drops untouched sessions', async () => {
+test('listSessions drops blank and subagent rows', async () => {
   const fake = await startFakeDsh({
     token: TOKEN,
     sessions: [
       { id: 'sess-a', title: 'Alpha', workingDirectory: '/work/a', records: sampleRecords().slice(0, 7) },
       { id: 'sess-b', title: 'Blank', workingDirectory: '/work/b', records: [] },
+      {
+        id: 'sess-child',
+        title: 'Subagent',
+        workingDirectory: '/work/a',
+        origin: 'subagent',
+        parentSessionId: 'sess-a',
+        records: sampleRecords().slice(0, 7),
+      },
     ],
   })
   try {
@@ -237,6 +246,13 @@ test('listSessions reads the remote list and drops untouched sessions', async ()
   } finally {
     await fake.close()
   }
+})
+
+test('isSubagentRow recognizes only the subagent origin', () => {
+  assert.equal(isSubagentRow({ origin: 'subagent' }), true)
+  assert.equal(isSubagentRow({ origin: 'user' }), false)
+  assert.equal(isSubagentRow({}), false)
+  assert.equal(isSubagentRow(null), false)
 })
 
 test('readSession rebuilds history, title, and statistics from the remote log', async () => {
@@ -332,12 +348,15 @@ test('probe reports a bad token and an unreachable host honestly', async () => {
   })
 })
 
-test('a gateway deployment needs a password, not a launch token', async () => {
+test('a gateway deployment is refused with a pointer at dsh web', async () => {
   const fake = await startFakeDsh({ token: TOKEN, gateway: true })
   try {
     await assert.rejects(dshEngine.probe(config(fake.url)), (error) => {
       assert.equal(error.kind, 'unauthenticated')
-      assert.match(error.message, /password/)
+      // The bridge speaks the dsh web protocol only; a gateway needs a browser
+      // password it has no field for, so the error must say so.
+      assert.match(error.message, /dsh-gateway/)
+      assert.match(error.message, /launch token/)
       return true
     })
   } finally {

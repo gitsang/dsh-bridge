@@ -60,7 +60,7 @@ browser receives serializable engine descriptors from
 | Pi | local CLI process | implemented | sessionsRoot, binPath, offline |
 | Codex | local CLI process | implemented | sessionsRoot, binPath, skipApprovals |
 | OpenCode | local server | implemented | sessionsRoot, binPath, autoApprove |
-| DSH | remote HTTP client | implemented | baseUrl, token, password, allowInsecureTls |
+| DSH | remote HTTP client | implemented | baseUrl, token, allowInsecureTls |
 
 Planned engines can be saved as bridge records and appear in the menu disabled;
 listing/attach returns a clear unavailable state instead of crashing.
@@ -156,10 +156,10 @@ DSH is the one engine with no local process. The remote instance owns the Agent,
 the durable session log, and the turn loop; the bridge's adapter is a client of
 that instance over its authenticated `/api` RPC.
 
-- `src/backends/dsh/http.js` — wire only: base URL validation, the two auth
-  flows (launch token via `GET /?token=`, gateway password via `POST /login`),
-  the per-client cookie jar, the `client-request`/`server-response` envelope,
-  timeouts, and one re-authentication retry on a 401.
+- `src/backends/dsh/http.js` — wire only: base URL validation, the launch-token
+  exchange (`GET /?token=`), the per-client cookie jar, the
+  `client-request`/`server-response` envelope, timeouts, and one
+  re-authentication retry on a 401.
 - `src/backends/dsh/session-store.js` — pure mapping: `session/list` rows to
   bridge summaries, durable Session events to neutral messages and live events,
   paged history to the transcript shape, catalog groups to the model list, and
@@ -173,6 +173,10 @@ that instance over its authenticated `/api` RPC.
 
 Deliberate choices:
 
+- **No dsh-gateway support.** A gateway authenticates browsers with a password
+  and its own session cookie, so the launch token cannot traverse it. The
+  adapter therefore targets dsh web directly and reports a gateway URL as a
+  deployment mistake instead of growing a second credential model.
 - **Polling over the mux stream.** The durable log is already the authority and
   the browser renders entries, not deltas, so a `remote.mux` WebSocket would add
   framing, reconnection, and API-peer socket lifetime without changing a pixel.
@@ -451,7 +455,7 @@ The transcript copies dsh's own chat vocabulary instead of inventing one:
 
 ### Remote DSH Web
 
-- [x] reuse dsh's authenticated client protocol (token or gateway password)
+- [x] reuse dsh's authenticated client protocol (launch token)
 - [x] store the remote base URL and its credentials in the bridge record
 - [x] list workspaces/sessions, read history, attach, prompt, abort, model pick
 - [x] honest readiness probe per credential failure mode

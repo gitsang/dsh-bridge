@@ -7,12 +7,10 @@
  * runs. "Native key" is that instance's Session id, and it only ever travels
  * back to the same bridge.
  *
- * Two authentication shapes are supported, and they are not interchangeable:
- * - a **launch token** copied from the remote `dsh web` URL, which works
- *   directly against a dsh web server and rotates with every remote restart;
- * - a **dsh-gateway password**, for an instance published through
- *   `@gitsang/dsh-gateway`. A launch token cannot traverse a gateway, so a
- *   bridge behind one must use the password.
+ * Authentication is the **launch token** copied from the remote `dsh web` URL.
+ * It rotates with every remote restart. A `dsh-gateway` in front of that instance
+ * is deliberately not supported: it authenticates browsers with a password, and
+ * a launch token cannot traverse it, so the bridge has to reach dsh web itself.
  */
 import { basename } from 'node:path'
 import { DshAttachment, clientFromConfig, valuesOf } from './attachment.js'
@@ -20,10 +18,11 @@ import { DshAuthError, DshError, DshRpcError } from './http.js'
 import {
   eventsFromPage,
   historyFromEvents,
+  isSubagentRow,
   modelsFromCatalog,
+  neutralEventsFromDsh,
   sessionFromRow,
   statsFromProjections,
-  neutralEventsFromDsh,
 } from './session-store.js'
 
 export const DSH_ENGINE_ID = 'dsh'
@@ -128,13 +127,6 @@ export const dshEngine = {
       placeholder: 'launch token from the remote dsh web URL',
     },
     {
-      key: 'password',
-      type: 'secret',
-      labelKey: 'gatewayPassword',
-      hintKey: 'gatewayPasswordHint',
-      placeholder: 'dsh-gateway password (instead of a token)',
-    },
-    {
       key: 'allowInsecureTls',
       type: 'boolean',
       labelKey: 'allowInsecureTls',
@@ -144,16 +136,18 @@ export const dshEngine = {
   defaultConfig: () => ({
     baseUrl: null,
     token: null,
-    password: null,
     allowInsecureTls: false,
   }),
 
   /**
    * Every session the remote instance reports, newest activity first.
    *
-   * Blank sessions (created there and never prompted) are dropped: their rows
-   * have no title and no turn to read, and the import-first gate would only
-   * hand the user empty rows.
+   * Two kinds of row are dropped. Blank sessions (created there and never
+   * prompted) have no title and no turn to read, so the import-first gate would
+   * only hand the user empty rows. Subagent sessions are listed by dsh but have
+   * no standalone durable address — reading one is refused, so offering it in
+   * the sidebar would only produce an unopenable row; the parent session's
+   * transcript already contains that work.
    */
   async listSessions(config, env) {
     requireConfig(config)
@@ -161,7 +155,7 @@ export const dshEngine = {
     const result = await client.call('session/list', { _request: {} })
     const rows = Array.isArray(result?.items) ? result.items : []
     const sessions = rows
-      .filter((row) => row?.blank !== true)
+      .filter((row) => row?.blank !== true && !isSubagentRow(row))
       .map((row) => sessionFromRow(row))
       .sort((left, right) => String(right.modified).localeCompare(String(left.modified)))
     return { root: client.baseUrl, sessions, workspaces: groupWorkspaces(sessions) }

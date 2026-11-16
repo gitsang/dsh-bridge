@@ -66,44 +66,36 @@ test('token auth mints a cookie that session/list reuses', async (t) => {
   })
 })
 
-test('password auth logs in and reuses the gateway cookie', async (t) => {
-  const fake = await startFakeDsh({ password: 's3cret', sessions: [{ id: 'sess-pw' }] })
+test('a bridge with no credential reports that one is required', async (t) => {
+  const fake = await startFakeDsh({ sessions: [{ id: 'sess-1' }] })
   t.after(() => fake.close())
 
-  const client = createDshClient({ baseUrl: fake.url, password: 's3cret' })
-  assert.equal(client.authMode, 'password')
+  const client = createDshClient({ baseUrl: fake.url })
+  assert.equal(client.authMode, 'none')
+  // `connect()` has nothing to do; the first call is refused by the server and
+  // the failure names the missing credential.
   await client.connect()
-  assert.equal(fake.state.loginRequests, 1)
-
-  const value = await client.call('session/list', { _request: {} })
-  assert.deepEqual(value.items.map((row) => row.sessionId), ['sess-pw'])
-  assert.match(fake.state.lastCookieHeader, /dsh_gateway_session=fake-gateway-session/)
-
-  const wrongPassword = createDshClient({ baseUrl: fake.url, password: 'nope' })
-  await assert.rejects(wrongPassword.connect(), authError('bad-password', /password/i))
+  await assert.rejects(client.call('session/list', { _request: {} }), (error) => {
+    assert.ok(error instanceof DshAuthError, `expected DshAuthError, got ${error?.name}`)
+    assert.equal(error.kind, 'unauthenticated')
+    assert.match(error.message, /launch token/)
+    return true
+  })
 })
 
-test('password auth against a gateway with no password yet reports setup', async (t) => {
-  const fake = await startFakeDsh({})
-  t.after(() => fake.close())
-
-  const client = createDshClient({ baseUrl: fake.url, password: 'anything' })
-  await assert.rejects(
-    client.connect(),
-    authError('no-password', /no password yet; open it in a browser to set one/),
-  )
-})
-
-test('token mode against dsh-gateway tells the user to configure a password', async (t) => {
-  const fake = await startFakeDsh({ gateway: true, password: 'gateway-pw' })
+test('token mode against dsh-gateway points at the dsh web port instead', async (t) => {
+  const fake = await startFakeDsh({ gateway: true })
   t.after(() => fake.close())
 
   const client = createDshClient({ baseUrl: fake.url, token: TOKEN })
   await assert.rejects(client.connect(), (error) => {
     assert.ok(error instanceof DshAuthError, `expected DshAuthError, got ${error?.name}`)
     assert.equal(error.kind, 'unauthenticated')
-    assert.match(error.message, /gateway/i)
-    assert.match(error.message, /password/i)
+    // The message must say the gateway cannot be used, not ask for a password
+    // the bridge no longer accepts.
+    assert.match(error.message, /dsh-gateway/)
+    assert.match(error.message, /launch token/)
+    assert.doesNotMatch(error.message, /Configure the dsh-gateway password/)
     return true
   })
 })
@@ -247,27 +239,28 @@ test('concurrent connect() and call() share one auth exchange', async (t) => {
 })
 
 test('two clients keep independent cookie jars and close() is harmless', async (t) => {
-  const fake = await startFakeDsh({ password: 'pw', sessions: [{ id: 'sess-1' }] })
+  const fake = await startFakeDsh({ sessions: [{ id: 'sess-1' }] })
   t.after(() => fake.close())
 
-  const tokenClient = createDshClient({ baseUrl: fake.url, token: TOKEN })
-  const passwordClient = createDshClient({ baseUrl: fake.url, password: 'pw' })
-  await Promise.all([tokenClient.connect(), passwordClient.connect()])
+  const first = createDshClient({ baseUrl: fake.url, token: TOKEN })
+  const second = createDshClient({ baseUrl: fake.url, token: TOKEN })
+  await Promise.all([first.connect(), second.connect()])
+  // Each client ran its own exchange: a shared jar would show a single one.
+  assert.equal(fake.state.tokenAuthRequests, 2)
 
-  await tokenClient.call('session/list', { _request: {} })
-  assert.match(fake.state.lastCookieHeader, /dsh-auth-fake=/)
-  assert.doesNotMatch(fake.state.lastCookieHeader, /dsh_gateway_session=/)
+  const [a, b] = await Promise.all([
+    first.call('session/list', { _request: {} }),
+    second.call('session/list', { _request: {} }),
+  ])
+  assert.equal(a.items.length, 1)
+  assert.equal(b.items.length, 1)
 
-  await passwordClient.call('session/list', { _request: {} })
-  assert.match(fake.state.lastCookieHeader, /dsh_gateway_session=/)
-  assert.doesNotMatch(fake.state.lastCookieHeader, /dsh-auth-fake=/)
-
-  tokenClient.close()
+  first.close()
   fake.expireAuth()
-  const afterExpiry = await passwordClient.call('session/list', { _request: {} })
+  const afterExpiry = await second.call('session/list', { _request: {} })
   assert.equal(afterExpiry.items.length, 1)
-  const tokenAfterExpiry = await tokenClient.call('session/list', { _request: {} })
-  assert.equal(tokenAfterExpiry.items.length, 1)
+  const firstAfterExpiry = await first.call('session/list', { _request: {} })
+  assert.equal(firstAfterExpiry.items.length, 1)
 })
 
 test('session/page slices records and session/prompt advances the cursor', async (t) => {

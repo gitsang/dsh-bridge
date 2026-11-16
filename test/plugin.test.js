@@ -675,11 +675,10 @@ test('a remote DSH bridge lists, reads and drives a session on the other instanc
     }))).json()
     const remote = created.bridges.find((bridge) => bridge.name === 'Remote DSH')
     assert.equal(remote.available, true)
-    // The secret never leaves the host in a response.
+    // The secret is stored so the adapter can use it, but never leaves the host
+    // in a response: only the boolean `configured` flag does.
     assert.equal(remote.config.token, null)
     assert.equal(remote.configured.token, true)
-    // Tokens and passwords stay out of the on-disk store's plaintext JSON? No:
-    // they are stored, so they can be used; they are only redacted on the wire.
     assert.equal(created.settings.bridges.find((bridge) => bridge.id === remote.id).config.token, null)
 
     // Import-first applies to a remote instance exactly as it does locally.

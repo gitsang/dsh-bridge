@@ -14,8 +14,8 @@ Four engines are supported. Three drive a local coding agent — **Pi**, **Codex
 and **OpenCode** — with their own session store, live attachment protocol, model
 catalog, and event normalizer. The fourth, **DSH**, connects *out* to another
 DeepSeek Harness Web instance: the Bridge becomes a client of that instance's
-sessions, authenticating with either the launch token printed by its `dsh web`
-URL or the password of a `dsh-gateway` in front of it.
+sessions, authenticating with the launch token that instance printed when it
+started.
 
 ## Status
 
@@ -43,10 +43,10 @@ URL or the password of a `dsh-gateway` in front of it.
 - [x] Draggable left/right content-width handles, sharing dsh Web's width preference
 - [x] Composer model picker and a dsh-style statusline (turns/steps, tokens, cache hit)
 - [x] Remote **DSH** engine: another DeepSeek Harness Web instance as a bridge
-  - [x] `URL` + launch token (direct `dsh web`) or `URL` + dsh-gateway password
+  - [x] `URL` + the launch token that remote `dsh web` printed at startup
   - [x] Remote session list, history, prompts, abort, model pick, statistics
   - [x] Durable-log polling (no WebSocket) with turn bracketing for live status
-  - [x] Honest readiness probe: bad token, untrusted host, and gateway-without-password are reported as such
+  - [x] Honest readiness probe: a bad or rotated token, an untrusted Host, and a dsh-gateway URL are each reported as such
 
 ## UX
 
@@ -180,13 +180,15 @@ There is no process to launch and no local session store to parse; the remote
 instance already owns the Agent, the durable log, and the turn loop. The Bridge
 is a *client* of that instance:
 
-- **Auth.** Two mutually exclusive shapes. A **launch token** copied from the
-  remote `dsh web` URL signs in by `GET /?token=…` and lasts 30 days, but the
-  token itself is process-local: it rotates whenever the remote restarts. A
-  **dsh-gateway password** signs in by `POST /login` and is the only option when
-  the remote is published through a gateway, because a token cannot pass
-  through one. The adapter says exactly which of these failed instead of
-  reporting a generic error.
+- **Auth.** The **launch token** copied from the remote `dsh web` startup URL is
+  redeemed by `GET /?token=…` for a signed cookie that lasts 30 days. The token
+  itself is process-local: it rotates whenever the remote restarts, so the
+  bridge reports a rotated token as such instead of failing vaguely.
+- **No dsh-gateway support, on purpose.** A gateway authenticates *browsers*
+  with a password and its own session cookie; a launch token cannot traverse it,
+  and the bridge speaks the dsh web protocol rather than driving a login form.
+  Pointing a DSH bridge at a gateway port therefore fails with a message saying
+  to use dsh web's own address and token.
 - **Sessions.** The remote's `session/list` rows become bridge sessions. Blank
   sessions (created there and never prompted) are hidden. Import-first admission
   applies, so a remote session enters this sidebar only when the user imports it.
@@ -245,12 +247,11 @@ Models), so it still reads as the same product:
     - **Pi**: Sessions root, Bin path, Offline startup
     - **Codex**: Sessions root, Bin path, Skip approvals
     - **OpenCode**: Data directory, Bin path, Auto-approve
-    - **DSH**: Base URL, Launch token, Gateway password, Allow insecure TLS.
-      Both secrets are redacted from API responses and preserved when an edit
-      leaves the field blank. Use the token for a direct `dsh web` (copy it from
-      the URL that instance printed at startup; it rotates on every restart) and
-      the password for an instance published through `dsh-gateway` — a launch
-      token cannot pass through a gateway.
+    - **DSH**: Base URL, Launch token, Allow insecure TLS. The Base URL is the
+      remote `dsh web` itself (its own port, not a gateway in front of it), and
+      the token is the `?token=…` from the URL that instance printed at startup —
+      it rotates on every restart. The token is redacted from API responses and
+      preserved when an edit leaves the field blank.
 
 The two approval switches exist because a Bridge turn has no native terminal to
 answer. `Skip approvals` (Codex) starts the app-server with `approvalPolicy:

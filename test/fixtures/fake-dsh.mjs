@@ -3,9 +3,9 @@
  *
  * Speaks the real wire contract closely enough to exercise the bridge: the
  * `client-request` / `server-response` JSON envelopes on `POST /api/<method>`,
- * the launch-token flow (`GET /?token=...` -> 303 + cookie), the dsh-gateway
- * password flow (`POST /login` -> 302 + gateway cookie), and gateway-style
- * redirects to `/login` for unauthenticated API calls.
+ * the launch-token flow (`GET /?token=...` -> 303 + cookie), and — behind the
+ * `gateway` option — the gateway-style redirect to `/login` that proves the
+ * bridge refuses a gateway instead of hanging.
  *
  * Test-only quirks exist so client error paths are deterministic: `mangleRpcId`
  * answers with a mismatched `rpcId`, `nonJsonBody` answers `/api` with a non-JSON
@@ -17,7 +17,6 @@ import { createServer } from 'node:http'
 
 const TOKEN_COOKIE = 'dsh-auth-fake=v1.fake.sig'
 const CONNECT_COOKIE = 'dsh-auth-fake2=v1.fake2.sig'
-const GATEWAY_COOKIE = 'dsh_gateway_session=fake-gateway-session'
 
 /** The live server's catalog shape: provider groups, a default, provider failures. */
 const DEFAULT_MODEL_CATALOG = {
@@ -82,7 +81,6 @@ const cookieMap = (header) =>
 export async function startFakeDsh(options = {}) {
   const {
     token = 'fake-launch-token',
-    password = null,
     requireTrustedHost = null,
     sessions = [],
     modelCatalog = DEFAULT_MODEL_CATALOG,
@@ -98,7 +96,6 @@ export async function startFakeDsh(options = {}) {
     sessions: new Map(),
     tokenAuthRequests: 0,
     connectAuthRequests: 0,
-    loginRequests: 0,
     apiRequests: 0,
     authDisabled: false,
     authenticated: false,
@@ -125,6 +122,9 @@ export async function startFakeDsh(options = {}) {
       id,
       // A descriptor may script its own reply to `session/prompt`.
       promptEvents: descriptor.promptEvents ?? promptEvents,
+      // Subagent rows are shaped like ordinary ones except for their origin.
+      ...(descriptor.origin === undefined ? {} : { origin: descriptor.origin }),
+      ...(descriptor.parentSessionId === undefined ? {} : { parentSessionId: descriptor.parentSessionId }),
       title: descriptor.title ?? `Fake session ${id}`,
       workingDirectory: descriptor.workingDirectory ?? descriptor.cwd ?? '/work/fake',
       provider: descriptor.provider ?? modelCatalog.defaultProvider ?? 'fake-provider',
@@ -151,6 +151,8 @@ export async function startFakeDsh(options = {}) {
     running: row.running === true,
     blank: row.records.length === 0,
     cwd: row.workingDirectory,
+    ...(row.origin === undefined ? {} : { origin: row.origin }),
+    ...(row.parentSessionId === undefined ? {} : { parentSessionId: row.parentSessionId }),
     projections: {
       kind: 'sequenced',
       asOfSeq: row.lastSeq,
@@ -284,8 +286,8 @@ export async function startFakeDsh(options = {}) {
     return expected.some((host) => host === actual || host === actual.split(':')[0])
   }
 
-  const loginPage = (extra) =>
-    `<!doctype html><html><body><h1>dsh-gateway</h1><form method="post"><input name="password">${extra}</form></body></html>`
+  const loginPage = () =>
+    '<!doctype html><html><body><h1>dsh-gateway</h1><form method="post"><input name="password"></form></body></html>'
 
   function handleTokenGet(req, res, url) {
     state.tokenAuthRequests += 1
@@ -320,21 +322,12 @@ export async function startFakeDsh(options = {}) {
   }
 
   function handleLoginGet(req, res) {
-    return html(res, 200, loginPage(password == null ? '<input name="confirm">' : ''))
+    return html(res, 200, loginPage())
   }
 
-  async function handleLoginPost(req, res) {
-    if (!/application\/x-www-form-urlencoded/i.test(String(req.headers['content-type'] ?? ''))) {
-      return text(res, 415, 'expected application/x-www-form-urlencoded')
-    }
-    const form = new URLSearchParams(await readBody(req))
-    state.loginRequests += 1
-    if (password === null || password === undefined) return html(res, 400, loginPage('<input name="confirm">'))
-    if (state.authDisabled || form.get('password') !== password) {
-      return html(res, 401, '<!doctype html><html><body><p>密码错误</p></body></html>')
-    }
-    validCookies.add(GATEWAY_COOKIE)
-    return send(res, 302, { location: '/', 'set-cookie': GATEWAY_COOKIE }, '')
+  /** A gateway rejects a non-browser login; the bridge never gets past this. */
+  function handleLoginPost(req, res) {
+    return html(res, 401, '<!doctype html><html><body><p>密码错误</p></body></html>')
   }
 
   function handleState(req, res) {
@@ -385,7 +378,7 @@ export async function startFakeDsh(options = {}) {
       const pathname = url.pathname
       if (req.method === 'GET' && pathname === '/') return handleTokenGet(req, res, url)
       if (req.method === 'GET' && pathname === '/connect') return handleConnectGet(req, res, url)
-      if (pathname === '/login') return req.method === 'POST' ? await handleLoginPost(req, res) : handleLoginGet(req, res)
+      if (pathname === '/login') return req.method === 'POST' ? handleLoginPost(req, res) : handleLoginGet(req, res)
       if (req.method === 'GET' && pathname === '/__dsh_gateway/state') return handleState(req, res)
       if (req.method === 'GET' && pathname === '/__hang') return
       if (req.method === 'POST' && pathname.startsWith('/api/')) return await handleApi(req, res, pathname)
