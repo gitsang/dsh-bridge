@@ -23,7 +23,7 @@ add-bridge form but is marked as pending until its adapter is connected.
 - [x] Confirmed Pi engine: JSONL sessions, RPC attach, normalized events, prompts
 - [x] Confirmed Codex engine: rollout JSONL sessions, `app-server` JSON-RPC attach, approval dialogs
 - [x] Confirmed OpenCode engine: SQLite sessions, local `serve` HTTP/SSE attach, permission dialogs
-- [x] Top-left “Local + configured bridges” dropdown with live connection dots
+- [x] Top-left “Local + configured bridges” dropdown: a run badge (spinner, green core when work finished) plus a connection capsule
 - [x] Startup readiness probe per bridge (no agent spawned)
 - [x] Per-turn lazy attach: send starts Pi, settle closes it
 - [x] Sidebar session status: spinner while running, green dot when done
@@ -51,9 +51,9 @@ The dsh brand mark opens a menu:
 ```text
 Local                     Return to DeepSeek Harness
 ────────────────────────────────────────────────────
-Work Pi                   CLI · Pi
-Scratch Pi                CLI · Pi
-Company Codex             CLI · Codex
+Work Pi                   (spinner)                     Connected
+Scratch Pi                (spinner + green core)        Connected
+Company Codex                                       Not connected
 Bridge settings
 ```
 
@@ -61,8 +61,17 @@ Bridge settings
   sidebar.
 - Each configured bridge is a separate row. Bridges are not engines, so two Pi
   rows are normal and expected.
-- A status dot sits beside each bridge: green = connected, orange = connecting,
-  red = failed. Hovering it shows the reason.
+- The leading icon is **run status**, not connection: a spinner while that
+  bridge has a running task, and the same spinner with a green core when it has
+  a finished task nobody has opened yet. A bridge with neither shows its
+  engine icon.
+- The right-hand capsule is **connection state** — `Connected` / `Not connected`
+  (green text when connected). It is deliberately a text pill, so it never
+  competes with the run spinner for the same visual meaning. The probe detail
+  (probe pending, launcher failure, reason) stays in the hover tooltip.
+- The brand mark itself carries the same badge for **every** bridge: a spinner
+  while any bridge is running, with a green core while any bridge has
+  unacknowledged finished work.
 - Unavailable engines are shown but disabled.
 - **Bridge settings** opens the standalone Bridge settings page; it stays out of
   the native dsh Settings dialog and does not navigate away from the current page.
@@ -410,8 +419,8 @@ bridge can stay empty when the shell already points at the right install:
 | `XDG_DATA_HOME` | `~/.local/share` | OpenCode's data directory is `$XDG_DATA_HOME/opencode` |
 
 `binPath` always wins over the environment, and the environment wins over `PATH`. A
-bridge whose launcher cannot be resolved reports that on its status dot instead of
-failing at send time.
+bridge whose launcher cannot be resolved reports that in the switcher's connection
+capsule tooltip instead of failing at send time.
 
 ## Development
 

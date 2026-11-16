@@ -366,13 +366,143 @@ test('Bridge settings rows and editors follow the dsh Models section rhythm', as
   assert.match(source, /h\(Switch, \{/)
 })
 
-test('Bridge menu puts the status dot where the menu check sits', async () => {
+test('the bridge menu leads with run status and ends with a connection capsule', async () => {
   const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
-  const menu = source.slice(source.indexOf('const toggleOpen = () => {'), source.indexOf('if (bridges.length === 0'))
-  assert.doesNotMatch(menu, /engineLabel|modeCli|modeWeb/)
-  assert.match(source, /\.dshBridge_statusDotSlot\{[^}]*width:14px;height:14px/)
-  assert.match(source, /\.dshBridge_statusDot\{[^}]*width:7px;height:7px/)
-  assert.match(source, /\[role="menuitem"\]:has\(\.dshBridge_statusDotSlot\) > svg\{display:none\}/)
+  const switcher = source.indexOf('function BridgeBrandSwitcher(')
+  const menu = source.slice(switcher, source.indexOf("if (bridges.length === 0", switcher))
+  assert.doesNotMatch(menu, /engineLabel/)
+
+  // The leading icon is the run badge: spinner while running, green core for
+  // finished work. Connection never paints a dot, it renders a text capsule.
+  assert.match(menu, /icon: runs \|\| finished/)
+  assert.match(menu, /h\(BridgeRunBadge, \{/)
+  assert.match(menu, /h\(ConnectionPill, \{/)
+  assert.match(menu, /state: connection\.state/)
+  assert.match(menu, /label: connection\.pillLabel/)
+  assert.doesNotMatch(menu, /StatusDot|statusDot/)
+
+  assert.match(source, /className: 'dshBridge_runBadge'/)
+  assert.match(source, /className: 'dshBridge_runRing'/)
+  assert.match(source, /className: 'dshBridge_runCore'/)
+  assert.match(source, /className: 'dshBridge_connPill'/)
+  assert.match(source, /\.dshBridge_runRing\[data-spinning="true"\]\{[^}]*animation:dshBridgeSpin/)
+  assert.match(source, /\.dshBridge_runCore\{[^}]*border-radius:999px;background:var\(--dsw-alias-state-success-primary/)
+  assert.match(source, /\.dshBridge_connPill\{[^}]*border-radius:999px/)
+  assert.match(source, /\.dshBridge_connPill\[data-state="connected"\]/)
+  // The dot vocabulary is gone from the switcher CSS entirely.
+  assert.doesNotMatch(source, /\.dshBridge_statusDot/)
+})
+
+test('the brand mark reports activity from every bridge', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  // One shell-wide poll feeds the brand mark, so it stays live with the menu
+  // closed and with no Bridge panel mounted.
+  assert.match(source, /function useBridgeActivity/)
+  assert.match(source, /api\('activity'\)/)
+  assert.match(source, /setInterval\(tick, ACTIVITY_POLL_MS\)/)
+  assert.match(source, /const activity = useBridgeActivity\(\)/)
+  assert.match(source, /const totals = sumActivityByBridge\(activity\)/)
+  // The badge rides the brand mark's corner without replacing the fish.
+  assert.match(source, /className: 'dshBridge_brandRun'/)
+  assert.match(source, /h\(FishLogo, \{ size \}\)/)
+
+  const exports = moduleExports()
+  const {
+    bridgeIdOfSessionKey,
+    activityByBridge,
+    sumActivityByBridge,
+    runBadgeLabel,
+    connectionState,
+  } = exports.__test
+
+  assert.equal(bridgeIdOfSessionKey('pi-local.c2Vzc2lvbg'), 'pi-local')
+  assert.equal(bridgeIdOfSessionKey('no-separator'), '')
+  assert.equal(bridgeIdOfSessionKey(undefined), '')
+
+  const grouped = activityByBridge([
+    { key: 'pi-local.a', state: 'running', completedAt: null },
+    { key: 'pi-local.b', state: 'connecting', completedAt: null },
+    { key: 'pi-local.c', state: 'idle', completedAt: 1 },
+    { key: 'codex-local.a', state: 'idle', completedAt: 2 },
+    // Attached but never ran a turn: that is not finished work.
+    { key: 'codex-local.b', state: 'idle', completedAt: null },
+  ])
+  assert.deepEqual(grouped['pi-local'], { running: 2, completed: 1 })
+  assert.deepEqual(grouped['codex-local'], { running: 0, completed: 1 })
+  assert.deepEqual(sumActivityByBridge(grouped), { running: 2, completed: 2 })
+  assert.deepEqual(sumActivityByBridge({}), { running: 0, completed: 0 })
+  assert.deepEqual(activityByBridge(null), {})
+  assert.deepEqual(activityByBridge([{ state: 'running' }]), {})
+
+  const labels = {
+    activityRunning: 'running',
+    activityCompleted: 'completed',
+    activityRunningAndCompleted: 'running+completed',
+    activityIdle: 'idle',
+    connectionConnected: '已连接',
+    connectionDisconnected: '未连接',
+    connectionConnecting: '正在连接',
+    connectionFailed: '连接失败',
+    connectionIdle: '未检测',
+  }
+  const t = (key) => labels[key]
+  assert.equal(runBadgeLabel({ running: 1, completed: 0 }, t), 'running')
+  assert.equal(runBadgeLabel({ running: 0, completed: 1 }, t), 'completed')
+  assert.equal(runBadgeLabel({ running: 1, completed: 1 }, t), 'running+completed')
+  assert.equal(runBadgeLabel({ running: 0, completed: 0 }, t), 'idle')
+
+  // The capsule only asks "connected or not"; the detail stays in the tooltip.
+  assert.equal(connectionState({ connection: { state: 'connected' } }, t).pillLabel, '已连接')
+  assert.equal(connectionState({ connection: { state: 'connecting' } }, t).pillLabel, '未连接')
+  assert.equal(connectionState({ connection: { state: 'failed' } }, t).pillLabel, '未连接')
+  assert.equal(connectionState({ connection: { state: 'idle' } }, t).pillLabel, '未连接')
+  assert.equal(connectionState({ connection: { state: 'failed', error: 'boom' } }, t).label, '连接失败')
+})
+
+test('the run badge spins only for running work and cores only for finished work', () => {
+  const exports = moduleExports()
+  const { BridgeRunBadge, ConnectionPill } = exports.__test
+  const collect = (node) => {
+    const found = []
+    const walk = (entry) => {
+      if (entry === null || entry === undefined || typeof entry !== 'object') return
+      if (entry.type !== undefined) found.push(entry)
+      for (const child of entry.props?.children ?? []) walk(child)
+    }
+    walk(node)
+    return found
+  }
+
+  const idle = collect(BridgeRunBadge({ running: false, completed: false, size: 16, label: 'idle' }))
+  assert.equal(idle[0].props['data-running'], 'false')
+  assert.equal(idle[0].props['data-completed'], 'false')
+  assert.equal(idle[0].props['aria-label'], 'idle')
+  // No core without finished work; the ring is present but static.
+  assert.equal(idle.some((node) => node.props.className === 'dshBridge_runCore'), false)
+  assert.equal(idle.find((node) => node.props.className === 'dshBridge_runRing').props['data-spinning'], 'false')
+
+  const running = collect(BridgeRunBadge({ running: true, completed: false, size: 16, label: 'running' }))
+  assert.equal(running[0].props['data-running'], 'true')
+  assert.equal(running.find((node) => node.props.className === 'dshBridge_runRing').props['data-spinning'], 'true')
+  assert.equal(running.some((node) => node.props.className === 'dshBridge_runCore'), false)
+
+  const both = collect(BridgeRunBadge({ running: true, completed: true, size: 16, label: 'both' }))
+  assert.equal(both.find((node) => node.props.className === 'dshBridge_runRing').props['data-spinning'], 'true')
+  const core = both.find((node) => node.props.className === 'dshBridge_runCore')
+  assert.ok(core !== undefined)
+  assert.equal(core.props.style.width, core.props.style.height)
+
+  const done = collect(BridgeRunBadge({ running: false, completed: true, size: 16, label: 'done' }))
+  assert.equal(done.find((node) => node.props.className === 'dshBridge_runRing').props['data-spinning'], 'false')
+  assert.ok(done.some((node) => node.props.className === 'dshBridge_runCore'))
+
+  // Connection is a text capsule, never a dot.
+  const pill = collect(ConnectionPill({ state: 'connected', label: '已连接' }))
+  assert.equal(pill.length, 1)
+  assert.equal(pill[0].props.className, 'dshBridge_connPill')
+  assert.equal(pill[0].props['data-state'], 'connected')
+  assert.deepEqual(pill[0].props.children, ['已连接'])
+  assert.equal(collect(ConnectionPill({ state: 'failed', label: '未连接' }))[0].props['data-state'], 'disconnected')
 })
 
 test('Bridge conversations share dsh Web content-width handles', async () => {

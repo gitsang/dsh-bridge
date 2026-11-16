@@ -246,8 +246,19 @@ connections: bridgeId -> { state: idle|connecting|connected|failed,
 ```
 
 On host start every bridge is probed: the engine probe validates the launcher
-and session root only. **No agent is spawned at startup**, so the switcher dot
-means "this bridge is ready", not "a child process is running".
+and session root only. **No agent is spawned at startup**, so the connection
+capsule means "this bridge is ready", not "a child process is running".
+
+The switcher carries two deliberately different vocabularies:
+
+- **Run status** is the leading glyph, driven by session activity: a spinner
+  ring while any task on that bridge is running, with a green core when a
+  finished task has not been acknowledged yet (the same `completedAt` marker
+  the sidebar row uses). The brand mark aggregates the same counters across
+  every bridge, so the badge is live even with no Bridge panel open.
+- **Connection state** is the trailing text capsule (`已连接` / `未连接`). It is
+  a pill on purpose: the probe detail (pending, failed, launcher error) lives
+  in its tooltip, and a green/red dot would collide with the run spinner.
 
 Agent processes are per turn:
 
@@ -260,7 +271,9 @@ Agent processes are per turn:
 `attachments` therefore holds at most one live process per actively running
 session, and `pendingAttachments` deduplicates concurrent spawns. Per-session
 activity lives in the host `sessionActivity` map and is exposed through
-`GET /api/bridge/activity?bridge=<id>`; the sidebar polls it every 2s.
+`GET /api/bridge/activity?bridge=<id>`; the sidebar polls it every 2s, and the
+switcher polls the same route without a bridge filter so its brand badge covers
+every bridge.
 
 `GET /api/bridge/status` exposes the states and `POST` re-runs a probe.
 `attach()` deduplicates concurrent spawns with a pending-attachment map, so

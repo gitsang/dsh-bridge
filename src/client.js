@@ -166,20 +166,147 @@ window.__ModuleLoader__.load({
           : state === 'failed'
             ? t('connectionFailed')
             : t('connectionIdle')
-      return { state, label, error: connection.error ?? null }
+      // The capsule only reports reachability: every non-connected probe state
+      // is "not connected", while the detailed `label` stays in the tooltip.
+      const pillLabel = state === 'connected' ? t('connectionConnected') : t('connectionDisconnected')
+      return { state, label, pillLabel, error: connection.error ?? null }
     }
 
-    function StatusDot({ state, label, selected = false }) {
+    /**
+     * The host records one activity entry per session it has run:
+     * `running`/`connecting` while a turn is live, then `idle`/`failed` with a
+     * durable `completedAt` marker that survives until the user opens the
+     * session. An attached-but-idle session carries no `completedAt`, so it is
+     * not "finished work" and must not paint the completion dot.
+     */
+    const RUNNING_ACTIVITY = new Set(['running', 'connecting'])
+    const ACTIVITY_POLL_MS = 2500
+
+    function isRunningActivity(entry) {
+      return RUNNING_ACTIVITY.has(entry?.state ?? 'unknown')
+    }
+
+    function isCompletedActivity(entry) {
+      return entry?.completedAt !== null && entry?.completedAt !== undefined
+    }
+
+    /** A session key is `<bridge id>.<base64url(native key)>`. */
+    function bridgeIdOfSessionKey(key) {
+      const text = typeof key === 'string' ? key : ''
+      const separator = text.lastIndexOf('.')
+      return separator > 0 ? text.slice(0, separator) : ''
+    }
+
+    /**
+     * Group the host's activity list by bridge id. The result holds only the
+     * two facts the badge paints: a live turn, and finished work the user has
+     * not looked at yet.
+     */
+    function activityByBridge(activity) {
+      const grouped = {}
+      for (const entry of Array.isArray(activity) ? activity : []) {
+        const id = bridgeIdOfSessionKey(entry?.key)
+        if (id === '') continue
+        const bucket = grouped[id] ?? { running: 0, completed: 0 }
+        if (isRunningActivity(entry)) bucket.running += 1
+        else if (isCompletedActivity(entry)) bucket.completed += 1
+        grouped[id] = bucket
+      }
+      return grouped
+    }
+
+    /** Sum every bridge's counters for the sidebar brand mark. */
+    function sumActivityByBridge(grouped) {
+      const total = { running: 0, completed: 0 }
+      for (const counts of Object.values(grouped ?? {})) {
+        total.running += counts?.running ?? 0
+        total.completed += counts?.completed ?? 0
+      }
+      return total
+    }
+
+    /**
+     * Poll the aggregate activity route once for the whole shell, so the
+     * brand mark reports every bridge even while no Bridge panel is open.
+     * Failures keep the last known counters; the next tick retries.
+     */
+    function useBridgeActivity() {
+      const [byBridge, setByBridge] = useState({})
+      useEffect(() => {
+        let cancelled = false
+        const tick = async () => {
+          try {
+            const body = await api('activity')
+            if (cancelled) return
+            setByBridge(activityByBridge(body.activity))
+          } catch {
+            // Keep the last known status; the next tick retries.
+          }
+        }
+        void tick()
+        const timer = setInterval(tick, ACTIVITY_POLL_MS)
+        return () => {
+          cancelled = true
+          clearInterval(timer)
+        }
+      }, [])
+      return byBridge
+    }
+
+    /**
+     * A run-status badge: a spinner ring while any task is running, with a
+     * green core when finished work is still unacknowledged. It is the one
+     * status glyph in the switcher, so connection state is never painted here.
+     */
+    function BridgeRunBadge({ running = false, completed = false, size = 16, label }) {
+      const ring = Math.max(10, Math.round(size * .8))
+      const core = Math.max(4, Math.round(ring * .36))
       return h(
         'span',
         {
-          className: 'dshBridge_statusDotSlot',
-          'data-selected': selected ? 'true' : 'false',
+          className: 'dshBridge_runBadge',
+          style: { width: `${size}px`, height: `${size}px` },
           role: 'img',
           'aria-label': label,
           title: label,
+          'data-running': running ? 'true' : 'false',
+          'data-completed': completed ? 'true' : 'false',
         },
-        h('span', { className: 'dshBridge_statusDot', 'data-state': state }),
+        h('span', {
+          className: 'dshBridge_runRing',
+          style: { width: `${ring}px`, height: `${ring}px` },
+          'data-spinning': running ? 'true' : 'false',
+        }),
+        completed
+          ? h('span', {
+              className: 'dshBridge_runCore',
+              style: { width: `${core}px`, height: `${core}px` },
+            })
+          : null,
+      )
+    }
+
+    /** Activity badge label for assistive tech and the hover tooltip. */
+    function runBadgeLabel(counts, t) {
+      if (counts.running > 0 && counts.completed > 0) return t('activityRunningAndCompleted')
+      if (counts.running > 0) return t('activityRunning')
+      if (counts.completed > 0) return t('activityCompleted')
+      return t('activityIdle')
+    }
+
+    /** Connection is a capsule, deliberately distinct from the run badge. */
+    function ConnectionPill({ state, label, title }) {
+      const connected = state === 'connected'
+      return h(
+        'span',
+        {
+          className: 'dshBridge_connPill',
+          'data-state': connected ? 'connected' : 'disconnected',
+          role: 'img',
+          'aria-label': title ?? label,
+          title: title ?? label,
+        },
+        label,
       )
     }
 
@@ -1426,10 +1553,16 @@ window.__ModuleLoader__.load({
       local: '本机',
       bridgeMenu: '选择桥接',
       connectionConnected: '已连接',
+      connectionDisconnected: '未连接',
       connectionConnecting: '正在连接',
       connectionFailed: '连接失败',
       connectionIdle: '未检测',
       reconnect: '重新检测连接',
+      activityRunning: '有任务运行中',
+      activityCompleted: '有任务已完成',
+      activityRunningAndCompleted: '有任务运行中，也有任务已完成',
+      activityCompletedFailed: '有任务已完成，其中部分失败',
+      activityIdle: '没有运行中的任务',
       manageBridges: '管理桥接',
       bridgeSettingsTitle: 'Bridge 设置',
       bridgeSettingsHint: '选择一个已配置的桥接，或新增一个 Bridge。',
@@ -1674,10 +1807,16 @@ window.__ModuleLoader__.load({
       local: 'Local',
       bridgeMenu: 'Choose a bridge',
       connectionConnected: 'Connected',
+      connectionDisconnected: 'Not connected',
       connectionConnecting: 'Connecting…',
       connectionFailed: 'Connection failed',
       connectionIdle: 'Not checked',
       reconnect: 'Check connection again',
+      activityRunning: 'A task is running',
+      activityCompleted: 'A task finished',
+      activityRunningAndCompleted: 'A task is running and another finished',
+      activityCompletedFailed: 'A task finished; some failed',
+      activityIdle: 'Nothing running',
       manageBridges: 'Manage bridges',
       bridgeSettingsTitle: 'Bridge settings',
       bridgeSettingsHint: 'Pick a configured bridge, or add another Bridge.',
@@ -2060,17 +2199,27 @@ window.__ModuleLoader__.load({
       '.dshBridge_brandSwitcher:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06))}',
       '.dshBridge_brandSwitcher:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#3b82f6))}',
       '.dshBridge_brandChevron{position:absolute;right:-2px;bottom:-1px;display:inline-flex;align-items:center;justify-content:center;width:11px;height:11px;border-radius:999px;background:var(--dsw-alias-bg-layer-1,Canvas);color:var(--dsw-alias-label-tertiary,currentColor)}',
+      /* The run badge takes the chevron's corner while work exists; the click
+       * target and every other brand affordance stay untouched. */
+      '.dshBridge_brandSwitcher[data-run="true"] .dshBridge_brandChevron{display:none}',
+      '.dshBridge_brandRun{position:absolute;right:-3px;bottom:-2px;display:inline-flex;align-items:center;justify-content:center;padding:1px;border-radius:999px;background:var(--dsw-alias-bg-layer-1,Canvas)}',
       '.dshBridge_menuLabel{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-width:0}',
-      '[role="menuitem"]:has(.dshBridge_statusDotSlot) > svg{display:none}',
-      '[role="menuitem"]:has(.dshBridge_statusDotSlot[data-selected="true"]){background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.05))}',
       '.dshBridge_menuName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.dshBridge_menuMeta{flex:none;margin-left:auto;font-size:10px;line-height:14px;white-space:nowrap;color:var(--dsw-alias-label-tertiary,currentColor)}',
-      '.dshBridge_statusDotSlot{display:inline-flex;flex:none;align-items:center;justify-content:center;width:14px;height:14px}',
-      '.dshBridge_statusDot{flex:none;width:7px;height:7px;border-radius:999px;background:var(--dsw-alias-label-dimmed,rgba(0,0,0,.25))}',
-      '.dshBridge_statusDot[data-state="connected"]{background:var(--dsw-alias-state-success-primary,#16a34a);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-state-success-primary,#16a34a) 18%,transparent)}',
-      '.dshBridge_statusDot[data-state="connecting"]{background:var(--dsw-alias-state-warning-primary,#d97706);animation:dshBridgePulse 1.1s ease-in-out infinite}',
-      '.dshBridge_statusDot[data-state="failed"]{background:var(--dsw-alias-state-error-primary,#dc2626)}',
-      '@keyframes dshBridgePulse{0%,100%{opacity:1}50%{opacity:.35}}',
+      /* Run badge: a spinner ring while a task runs, with a green core when
+       * finished work is unacknowledged. It is a status glyph, so it never
+       * carries connection information. */
+      '.dshBridge_runBadge{position:relative;display:inline-flex;flex:none;align-items:center;justify-content:center}',
+      '.dshBridge_runRing{box-sizing:border-box;display:block;border-radius:999px;border:1.5px solid var(--dsw-alias-label-dimmed,rgba(0,0,0,.2))}',
+      '.dshBridge_runRing[data-spinning="true"]{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary,#3b82f6) 28%,transparent);border-top-color:var(--dsw-alias-state-business-primary,#3b82f6);animation:dshBridgeSpin .8s linear infinite}',
+      '.dshBridge_runBadge[data-completed="true"][data-running="false"] .dshBridge_runRing{border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary,#16a34a) 34%,transparent)}',
+      '.dshBridge_runCore{position:absolute;border-radius:999px;background:var(--dsw-alias-state-success-primary,#16a34a)}',
+      '.dshBridge_runCore[data-failed="true"]{background:var(--dsw-alias-state-error-primary,#dc2626)}',
+      '@keyframes dshBridgeSpin{to{transform:rotate(360deg)}}',
+      '@media (prefers-reduced-motion:reduce){.dshBridge_runRing[data-spinning="true"]{animation:none}}',
+      /* Connection capsule: a text pill, deliberately unlike the run badge. */
+      '.dshBridge_connPill{flex:none;display:inline-flex;align-items:center;border-radius:999px;padding:0 6px;font-size:10px;line-height:16px;white-space:nowrap;border:.5px solid transparent;color:var(--dsw-alias-label-tertiary,currentColor);background:var(--dsw-alias-interactive-bg-active,rgba(0,0,0,.07))}',
+      '.dshBridge_connPill[data-state="connected"]{color:var(--dsw-alias-state-success-primary,#16a34a);border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary,#16a34a) 36%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-success-primary,#16a34a) 10%,transparent)}',
       '.dshBridge_statusRow{display:inline-flex;align-items:center;gap:6px}',
       '.dshBridge_tag{flex:none;padding:1px 7px;border-radius:999px;background:var(--dsw-alias-interactive-bg-active,rgba(0,0,0,.07));font-size:10px;line-height:16px;color:var(--dsw-alias-label-secondary,currentColor)}',
       '.dshBridge_tag[data-active="true"]{background:var(--dsw-alias-state-business-primary,#3b82f6);color:var(--dsw-alias-label-primary-foreground,#fff)}',
@@ -4070,10 +4219,12 @@ window.__ModuleLoader__.load({
      */
     function BridgeBrandSwitcher({ size, t, onSelectBridge, onSelectLocal }) {
       const ui = useBridgeUi()
+      const activity = useBridgeActivity()
       const [open, setOpen] = useState(false)
       const [data, setData] = useState(null)
       const [loading, setLoading] = useState(false)
       const [error, setError] = useState(null)
+      const totals = sumActivityByBridge(activity)
 
       const load = useCallback(async () => {
         setLoading(true)
@@ -4095,7 +4246,9 @@ window.__ModuleLoader__.load({
 
       // Poll the lightweight status route while the menu is open, so a
       // background probe transitioning orange -> green/red is reflected
-      // without closing and reopening the menu.
+      // without closing and reopening the menu. Session activity keeps its own
+      // shell-wide poll in `useBridgeActivity`, so the brand mark stays live
+      // even while the menu is closed.
       useEffect(() => {
         if (!open) return undefined
         let cancelled = false
@@ -4121,7 +4274,7 @@ window.__ModuleLoader__.load({
           }
         }
         void tick()
-        const timer = setInterval(tick, 2500)
+        const timer = setInterval(tick, ACTIVITY_POLL_MS)
         return () => {
           cancelled = true
           clearInterval(timer)
@@ -4142,24 +4295,40 @@ window.__ModuleLoader__.load({
           label: h('span', { className: 'dshBridge_menuLabel' }, t('local')),
         },
         { type: 'separator', id: '__local-separator__' },
-        ...bridges.map((bridge) => ({
-          id: bridge.id,
-          icon: h(IconApiOutlineRegular, { size: 15 }),
-          disabled: bridge.available === false,
-          label: h(
-            'span',
-            { className: 'dshBridge_menuLabel' },
-            h('span', { className: 'dshBridge_menuName' }, bridge.name),
-            h('span', { className: 'dshBridge_menuMeta dshBridge_statusRow' },
-              bridge.available === false
-                ? t('bridgeUnavailable')
-                : h(StatusDot, {
-                    state: connectionState(bridge, t).state,
-                    label: connectionState(bridge, t).label,
-                    selected: ui.bridge?.id === bridge.id,
-                  })),
-          ),
-        })),
+        ...bridges.map((bridge) => {
+          const counts = activity[bridge.id] ?? { running: 0, completed: 0 }
+          const runs = counts.running > 0
+          const finished = counts.completed > 0
+          const connection = connectionState(bridge, t)
+          return {
+            id: bridge.id,
+            disabled: bridge.available === false,
+            // The leading glyph is run status: a spinner while this bridge has
+            // a live turn, its core green after finished work nobody opened
+            // yet. Connection lives on the right as a text capsule.
+            icon: runs || finished
+              ? h(BridgeRunBadge, {
+                  running: runs,
+                  completed: finished,
+                  size: 15,
+                  label: runBadgeLabel(counts, t),
+                })
+              : h(IconApiOutlineRegular, { size: 15 }),
+            label: h(
+              'span',
+              { className: 'dshBridge_menuLabel' },
+              h('span', { className: 'dshBridge_menuName' }, bridge.name),
+              h('span', { className: 'dshBridge_menuMeta dshBridge_statusRow' },
+                bridge.available === false
+                  ? t('bridgeUnavailable')
+                  : h(ConnectionPill, {
+                      state: connection.state,
+                      label: connection.pillLabel,
+                      title: connection.error ?? connection.label,
+                    })),
+            ),
+          }
+        }),
       ]
       if (bridges.length === 0 && !loading) {
         items.push({ type: 'label', id: '__empty__', text: t('noBridges') })
@@ -4190,16 +4359,21 @@ window.__ModuleLoader__.load({
         bridgeUi.refresh(bridge.id)
       }
 
+      // The brand mark keeps the shell's fish and gains a corner run badge, so
+      // the switcher answers "is anything running?" without covering the brand.
+      const runLabel = totals.running > 0 || totals.completed > 0 ? runBadgeLabel(totals, t) : null
+      const brandLabel = runLabel === null ? t('bridgeMenu') : `${t('bridgeMenu')} · ${runLabel}`
       const anchor = h(
         'span',
         {
           className: 'dshBridge_brandSwitcher',
           role: 'button',
           tabIndex: 0,
-          'aria-label': t('bridgeMenu'),
+          'aria-label': brandLabel,
           'aria-haspopup': 'menu',
           'aria-expanded': open,
-          title: error ?? t('bridgeMenu'),
+          title: error ?? brandLabel,
+          'data-run': runLabel === null ? 'false' : 'true',
           onClick: (event) => {
             event.preventDefault()
             event.stopPropagation()
@@ -4215,6 +4389,18 @@ window.__ModuleLoader__.load({
         },
         h(FishLogo, { size }),
         h('span', { className: 'dshBridge_brandChevron' }, h(IconChevronDownOutlineRegular, { size: 9 })),
+        runLabel === null
+          ? null
+          : h(
+              'span',
+              { className: 'dshBridge_brandRun' },
+              h(BridgeRunBadge, {
+                running: totals.running > 0,
+                completed: totals.completed > 0,
+                size: 12,
+                label: runLabel,
+              }),
+            ),
       )
 
       return h(Menu, {
@@ -6182,6 +6368,13 @@ window.__ModuleLoader__.load({
       abbreviateHomePath,
       toolDiffTotals,
       assistantParts,
+      bridgeIdOfSessionKey,
+      activityByBridge,
+      sumActivityByBridge,
+      runBadgeLabel,
+      connectionState,
+      BridgeRunBadge,
+      ConnectionPill,
     }
     return module.exports
   },
