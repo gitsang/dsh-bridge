@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import {
+  SETTINGS_VERSION,
   createBridge,
   defaultSettings,
   deleteBridge,
@@ -18,10 +19,8 @@ import { ENGINES, getEngine } from '../src/backends/registry.js'
 
 test('registers Pi, Codex, OpenCode and remote DSH engines', () => {
   assert.deepEqual(ENGINES.map((entry) => entry.id), ['pi', 'codex', 'opencode', 'dsh'])
-  assert.equal(getEngine('pi').mode, 'cli')
-  assert.equal(getEngine('codex').mode, 'cli')
-  assert.equal(getEngine('opencode').mode, 'cli')
-  assert.equal(getEngine('dsh').mode, 'web')
+  // An engine owns exactly one connection strategy, so it declares no mode.
+  for (const engine of ENGINES) assert.equal('mode' in engine, false)
   assert.equal(getEngine('pi').available, true)
   // Codex and OpenCode own real adapters; remote DSH is still a declared stub.
   assert.equal(getEngine('codex').available, true)
@@ -39,7 +38,7 @@ test('registers Pi, Codex, OpenCode and remote DSH engines', () => {
 
 test('defaults start with one configurable Pi bridge', () => {
   const settings = defaultSettings()
-  assert.equal(settings.version, 3)
+  assert.equal(settings.version, SETTINGS_VERSION)
   assert.equal(settings.bridges.length, 1)
   assert.equal(settings.bridges[0].id, 'pi-local')
   assert.equal(settings.bridges[0].engine, 'pi')
@@ -50,13 +49,11 @@ test('multiple bridges can use the same engine with independent configs', () => 
   let settings = defaultSettings()
   settings = createBridge(settings, {
     name: 'Work Pi',
-    mode: 'cli',
     engine: 'pi',
     config: { sessionsRoot: '/work/sessions', binPath: '/opt/pi', offline: false },
   }).settings
   settings = createBridge(settings, {
     name: 'Scratch Pi',
-    mode: 'cli',
     engine: 'pi',
     config: { sessionsRoot: '/tmp/pi-sessions' },
   }).settings
@@ -72,7 +69,6 @@ test('multiple bridges can use the same engine with independent configs', () => 
 test('bridge update preserves a stored secret when the field is left blank', () => {
   let settings = createBridge(defaultSettings(), {
     name: 'Remote',
-    mode: 'web',
     engine: 'dsh',
     config: { baseUrl: 'https://dsh.example.com', token: 'secret-token' },
   }).settings
@@ -87,20 +83,32 @@ test('bridge update preserves a stored secret when the field is left blank', () 
   assert.equal(updated.config.baseUrl, 'https://dsh.example.com')
 })
 
-test('bridge validation rejects mode/engine mismatches and unknown fields', () => {
+test('bridge validation rejects unknown engines and unknown fields', () => {
   assert.throws(() => createBridge(defaultSettings(), {
-    name: 'Wrong mode', mode: 'web', engine: 'pi', config: {},
-  }), /not web/)
+    name: 'Wrong engine', engine: 'nope', config: {},
+  }), /unknown bridge engine/)
   assert.throws(() => createBridge(defaultSettings(), {
-    name: 'Bad field', mode: 'cli', engine: 'pi', config: { nope: 1 },
+    name: 'Bad field', engine: 'pi', config: { nope: 1 },
   }), /unknown pi setting/)
   assert.throws(() => createBridge(defaultSettings(), {
-    name: '', mode: 'cli', engine: 'pi', config: {},
+    name: '', engine: 'pi', config: {},
   }), /name is required/)
 })
 
+test('a bridge record has no transport mode, even when an old record carries one', () => {
+  const created = createBridge(defaultSettings(), {
+    name: 'Legacy', mode: 'cli', engine: 'pi', config: {},
+  })
+  assert.equal('mode' in created.bridge, false)
+  const normalized = normalizeSettings({
+    bridges: [{ id: 'a', name: 'A', mode: 'web', engine: 'pi', config: {} }],
+  })
+  assert.equal('mode' in normalized.bridges[0], false)
+  assert.equal(normalized.bridges[0].engine, 'pi')
+})
+
 test('delete removes only the selected bridge', () => {
-  let settings = createBridge(defaultSettings(), { name: 'Second', mode: 'cli', engine: 'pi', config: {} }).settings
+  let settings = createBridge(defaultSettings(), { name: 'Second', engine: 'pi', config: {} }).settings
   const id = settings.bridges.find((bridge) => bridge.name === 'Second').id
   settings = deleteBridge(settings, id).settings
   assert.deepEqual(settings.bridges.map((bridge) => bridge.name), ['Pi'])
@@ -118,7 +126,7 @@ test('migrates the old per-engine settings shape into bridge instances', () => {
       'dsh-web': { baseUrl: 'https://dsh.example.com', token: null },
     },
   })
-  assert.equal(migrated.version, 3)
+  assert.equal(migrated.version, SETTINGS_VERSION)
   assert.deepEqual(migrated.bridges.map((bridge) => bridge.engine), ['pi', 'codex', 'dsh'])
   assert.deepEqual(migrated.bridges[0].config, { sessionsRoot: '/old', binPath: '/old/bin/pi', offline: false })
   assert.equal(migrated.bridges[1].name, 'Codex')
@@ -135,7 +143,7 @@ test('migrates the legacy Pi-only settings shape', () => {
 })
 
 test('normalizes unknown bridge values back to the default bridge', () => {
-  const normalized = normalizeSettings({ bridges: [{ id: 'x', name: 'X', mode: 'cli', engine: 'nope' }] })
+  const normalized = normalizeSettings({ bridges: [{ id: 'x', name: 'X', engine: 'nope' }] })
   assert.deepEqual(normalized.bridges, [])
   assert.deepEqual(normalizeSettings(null), defaultSettings())
 })
@@ -143,7 +151,7 @@ test('normalizes unknown bridge values back to the default bridge', () => {
 test('writes a private, atomic bridge-list settings file under DSH_HOME', async () => {
   const home = await mkdtemp(join(tmpdir(), 'bridge-settings-'))
   const env = { ...process.env, DSH_HOME: home }
-  const saved = writeSettings({ bridges: [{ id: 'a', name: 'A', mode: 'cli', engine: 'pi', config: { sessionsRoot: '/tmp/sessions' } }] }, env)
+  const saved = writeSettings({ bridges: [{ id: 'a', name: 'A', engine: 'pi', config: { sessionsRoot: '/tmp/sessions' } }] }, env)
   assert.equal(saved.bridges[0].config.sessionsRoot, '/tmp/sessions')
   assert.equal(settingsPath(env), join(home, 'bridge.json'))
   const text = await readFile(settingsPath(env), 'utf8')

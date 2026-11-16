@@ -7,7 +7,6 @@
  * this module.
  */
 import {
-  BRIDGE_MODES,
   ENGINES,
   bridgeView,
   engineView,
@@ -590,7 +589,6 @@ export function apply(ctx) {
     },
     bridges: bridgesWithConnection(),
     engines: ENGINES.map(engineView),
-    modes: BRIDGE_MODES,
   })
 
   const attachmentFor = (key) => {
@@ -1036,10 +1034,9 @@ export function apply(ctx) {
           ok: true,
           bridges: bridgesWithConnection(),
           engines: ENGINES.map(engineView),
-          modes: BRIDGE_MODES,
           attachments: live,
           activity: [...sessionActivity.entries()].map(([key, value]) => ({ key, ...activityView(key) })),
-          protocol: 4,
+          protocol: 5,
         })
       },
     },

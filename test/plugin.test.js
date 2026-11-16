@@ -165,7 +165,7 @@ test('lists and creates local directories for the workspace picker', async () =>
   }
 })
 
-test('settings expose modes, engines and one default bridge', async () => {
+test('settings expose engines and one default bridge', async () => {
   const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
   const previousHome = process.env.DSH_HOME
   process.env.DSH_HOME = home
@@ -174,7 +174,11 @@ test('settings expose modes, engines and one default bridge', async () => {
     apply(ctx)
     const body = await settings(routes)
     assert.equal(body.ok, true)
-    assert.deepEqual(body.modes.map((mode) => mode.id), ['cli', 'web'])
+    // Bridges no longer carry a CLI/Web transport mode; the engine alone
+    // decides how a bridge connects.
+    assert.equal(body.modes, undefined)
+    for (const bridge of body.bridges) assert.equal('mode' in bridge, false)
+    for (const engine of body.engines) assert.equal('mode' in engine, false)
     assert.deepEqual(body.engines.map((engine) => engine.id), ['pi', 'codex', 'opencode', 'dsh'])
     assert.equal(body.bridges.length, 1)
     assert.equal(body.bridges[0].id, 'pi-local')
@@ -405,7 +409,6 @@ test('archives sessions on the host per bridge and blocks opening them', async (
       }))
       const created = await (await call(routes, 'bridges', post({
         name: 'Second Pi',
-        mode: 'cli',
         engine: 'pi',
         config: { sessionsRoot: second.root, binPath: fake },
       }))).json()
@@ -488,7 +491,6 @@ test('supports multiple Pi bridges with independent session roots', async () => 
     apply(ctx)
     const created = await (await call(routes, 'bridges', post({
       name: 'Second Pi',
-      mode: 'cli',
       engine: 'pi',
       config: { sessionsRoot: second.root },
     }))).json()
@@ -604,7 +606,6 @@ test('planned engines can be saved and report an unavailable adapter', async () 
     // OpenCode now own real adapters and are covered by the engine test files.
     const created = await (await call(routes, 'bridges', post({
       name: 'Remote DSH',
-      mode: 'web',
       engine: 'dsh',
       config: { baseUrl: 'https://dsh.example.com' },
     }))).json()
@@ -810,7 +811,6 @@ test('creates, edits, redacts and deletes bridges through the manager route', as
     apply(ctx)
     const created = await (await call(routes, 'bridges', post({
       name: 'Remote DSH',
-      mode: 'web',
       engine: 'dsh',
       config: { baseUrl: 'https://dsh.example.com', token: 'secret-token' },
     }))).json()
@@ -830,7 +830,7 @@ test('creates, edits, redacts and deletes bridges through the manager route', as
     const deleted = await (await call(routes, 'bridges', del({ id: remote.id }))).json()
     assert.equal(deleted.bridges.some((bridge) => bridge.id === remote.id), false)
 
-    const rejected = await call(routes, 'bridges', post({ name: 'Bad', mode: 'web', engine: 'pi', config: {} }))
+    const rejected = await call(routes, 'bridges', post({ name: 'Bad', engine: 'pi', config: { nope: 1 } }))
     assert.equal(rejected.status, 400)
   } finally {
     if (previousHome === undefined) delete process.env.DSH_HOME
@@ -987,7 +987,6 @@ test('lists, reads and drives a Codex session through the bridge routes', async 
     try {
       const created = await (await call(routes, 'bridges', post({
         name: 'Local Codex',
-        mode: 'cli',
         engine: 'codex',
         config: { sessionsRoot: root, binPath: fakeCodex },
       }))).json()
@@ -1074,7 +1073,6 @@ test('creates a new Codex session that the bridge can attach to', async () => {
     try {
       const created = await (await call(routes, 'bridges', post({
         name: 'Local Codex',
-        mode: 'cli',
         engine: 'codex',
         config: { sessionsRoot: root, binPath: fakeCodex },
       }))).json()
@@ -1181,7 +1179,6 @@ test('lists, reads and drives an OpenCode session through the bridge routes', as
     try {
       const created = await (await call(routes, 'bridges', post({
         name: 'Local OpenCode',
-        mode: 'cli',
         engine: 'opencode',
         config: { sessionsRoot: dataDir, binPath: fakeOpencode },
       }))).json()

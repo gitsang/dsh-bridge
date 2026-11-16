@@ -3,9 +3,10 @@
 Bridge external coding-agent sessions into the **DeepSeek Harness (dsh)** web UI.
 
 The Bridge is **instance-based**: users create one or more saved bridges, each
-with its own transport mode, engine, name, and configuration. The same engine can
-appear in several bridges (for example two Pi bridges with different session
-roots). The top-left dsh mark shows **Local** (the native dsh conversation) plus
+with its own engine, name, and configuration. The same engine can appear in
+several bridges (for example two Pi bridges with different session roots). An
+engine owns exactly one connection strategy, so a bridge never picks a transport
+mode. The top-left dsh mark shows **Local** (the native dsh conversation) plus
 every saved bridge, and selecting one switches both the sidebar and the main
 conversation area to that bridge.
 
@@ -19,7 +20,6 @@ add-bridge form but is marked as pending until its adapter is connected.
 - [x] Bridge-instance host model (`bridges[]`, no global “active backend”)
 - [x] Multiple bridges per engine with independent config
 - [x] Create/edit/delete bridges in a standalone settings page styled like native dsh Settings
-- [x] CLI / Web mode selection and mode-specific engine list
 - [x] Confirmed Pi engine: JSONL sessions, RPC attach, normalized events, prompts
 - [x] Confirmed Codex engine: rollout JSONL sessions, `app-server` JSON-RPC attach, approval dialogs
 - [x] Confirmed OpenCode engine: SQLite sessions, local `serve` HTTP/SSE attach, permission dialogs
@@ -189,13 +189,11 @@ Settings dialog. Its overlay shell, nav rail, title hierarchy, cards, buttons,
 inputs, and spacing are copied from the native dsh Settings surfaces (especially
 Models), so it still reads as the same product:
 
-- **Manage bridges**: list every saved bridge, add a bridge, edit its name/mode/
+- **Manage bridges**: list every saved bridge, add a bridge, edit its name/
   engine/config, or delete it.
 - Add-bridge form:
-  - **Bridge mode**: CLI or Web
-  - **Engine**:
-    - CLI → Pi, Codex, OpenCode
-    - Web → DSH
+  - **Engine**: Pi, Codex, OpenCode, or DSH. Choosing an engine is the whole
+    transport choice — each engine has exactly one connection strategy.
   - engine-specific fields:
     - **Pi**: Sessions root, Bin path, Offline startup
     - **Codex**: Sessions root, Bin path, Skip approvals
@@ -299,7 +297,7 @@ An engine provides:
 
 | Member | Purpose |
 | --- | --- |
-| `id`, `label`, `mode` | Identity and `cli`/`web` transport classification |
+| `id`, `label` | Identity |
 | `available`, `unavailableReason` | Honest state for unfinished adapters |
 | `capabilities` | Features the UI may expose |
 | `configFields`, `defaultConfig()` | Fields rendered in the add/edit form |
@@ -318,7 +316,7 @@ All routes sit below dsh's authenticated `/api` channel.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/bridge/settings` | Modes, engines, and redacted bridge list |
+| `GET /api/bridge/settings` | Engines and the redacted bridge list |
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | Manage saved bridges |
 | `GET/POST /api/bridge/status` | Read or refresh per-bridge readiness state |
 | `GET /api/bridge/activity?bridge=<id>` | Per-session running/idle/failed activity |
@@ -388,12 +386,11 @@ automatically.
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "bridges": [
     {
       "id": "pi-local",
       "name": "Pi",
-      "mode": "cli",
       "engine": "pi",
       "config": {
         "sessionsRoot": null,

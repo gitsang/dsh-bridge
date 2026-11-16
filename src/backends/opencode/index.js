@@ -67,9 +67,7 @@ function probeOpencode(config = {}, env = process.env) {
 export const opencodeEngine = {
   id: OPENCODE_ENGINE_ID,
   label: 'OpenCode',
-  mode: 'cli',
   description: 'Connect to OpenCode sessions through its local HTTP server.',
-  kind: 'cli',
   available: true,
   capabilities: ['sessions', 'session-create', 'attach', 'stream', 'prompt', 'abort', 'models', 'permission-ui'],
   configFields: [

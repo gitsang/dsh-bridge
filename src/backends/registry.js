@@ -1,30 +1,18 @@
 /**
  * Engine registry for the Bridge adapters.
  *
- * A bridge is a saved instance created by the user. It has a transport mode
- * (`cli` or `web`), an engine (`pi`, `codex`, `opencode`, `dsh`), and a config
- * record. Several bridges may point at the same engine with different session
- * roots or binaries; the registry only describes the engine capabilities.
+ * A bridge is a saved instance created by the user. It names an engine
+ * (`pi`, `codex`, `opencode`, `dsh`) and carries that engine's config record.
+ * Several bridges may point at the same engine with different session roots or
+ * binaries; the registry only describes the engine capabilities.
+ *
+ * Each engine owns exactly one connection strategy, so a bridge never picks a
+ * transport: Pi, Codex, and OpenCode speak to a local process, and DSH speaks
+ * to another DeepSeek Harness Web instance over HTTP.
  */
 import { codexEngine } from './codex/index.js'
 import { opencodeEngine } from './opencode/index.js'
 import { piEngine } from './pi/index.js'
-
-/** Transport modes accepted by the bridge manager. */
-export const BRIDGE_MODES = [
-  {
-    id: 'cli',
-    label: 'CLI',
-    description: 'Launch or attach to a local agent process.',
-  },
-  {
-    id: 'web',
-    label: 'Web',
-    description: 'Connect to a remote agent service over HTTP.',
-  },
-]
-
-export const MODE_BY_ID = new Map(BRIDGE_MODES.map((mode) => [mode.id, mode]))
 
 /**
  * An engine that is intentionally declared before its adapter is complete.
@@ -55,7 +43,6 @@ function plannedEngine(definition) {
 const dshEngine = plannedEngine({
   id: 'dsh',
   label: 'DSH',
-  mode: 'web',
   description: 'Connect to another DeepSeek Harness Web instance.',
   unavailableReason: 'remote DSH authentication and streaming transport are not implemented yet',
   capabilities: ['sessions', 'attach', 'stream', 'prompt', 'abort'],
@@ -75,26 +62,16 @@ export function getEngine(id) {
   return ENGINE_BY_ID.get(id)
 }
 
-export function enginesForMode(mode) {
-  return ENGINES.filter((engine) => engine.mode === mode)
-}
-
 export function engineConfigDefaults(engine) {
   const defaults = typeof engine.defaultConfig === 'function' ? engine.defaultConfig() : {}
   return { ...defaults }
 }
 
-/** Validate the engine/mode pair sent by the browser. */
-export function resolveEngine(mode, engineId) {
-  if (!MODE_BY_ID.has(mode)) {
-    throw Object.assign(new Error(`unknown bridge mode: ${String(mode)}`), { status: 400 })
-  }
+/** Validate the engine id sent by the browser. */
+export function resolveEngine(engineId) {
   const engine = getEngine(engineId)
   if (engine === undefined) {
     throw Object.assign(new Error(`unknown bridge engine: ${String(engineId)}`), { status: 400 })
-  }
-  if (engine.mode !== mode) {
-    throw Object.assign(new Error(`${engine.label} is a ${engine.mode} engine, not ${mode}`), { status: 400 })
   }
   return engine
 }
@@ -116,7 +93,6 @@ export function engineView(engine) {
   return {
     id: engine.id,
     label: engine.label,
-    mode: engine.mode,
     description: engine.description,
     available: engine.available !== false,
     unavailableReason: engine.available === false ? engine.unavailableReason : undefined,
@@ -134,7 +110,6 @@ export function bridgeView(bridge) {
   return {
     id: bridge.id,
     name: bridge.name,
-    mode: bridge.mode,
     engine: bridge.engine,
     engineLabel: engine.label,
     description: engine.description,

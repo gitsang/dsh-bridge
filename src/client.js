@@ -1587,7 +1587,6 @@ window.__ModuleLoader__.load({
       deleteBridgeConfirm: '确定删除这个桥接吗？',
       bridgeName: '名称',
       bridgeNamePlaceholder: '例如：本机 Pi、公司 Codex',
-      bridgeMode: '桥接模式',
       bridgeEngine: '引擎',
       bridgeList: '已配置的桥接',
       noBridges: '还没有配置桥接',
@@ -1599,8 +1598,6 @@ window.__ModuleLoader__.load({
       bridgeDeleted: '桥接已删除',
       bridgeUnavailable: '尚未支持',
       bridgeUnavailableHint: '引擎已经出现在新增表单里，但适配器还未接入。',
-      modeCli: 'CLI',
-      modeWeb: 'Web',
       binPath: 'Bin 地址',
       binPathHint: '留空则使用 PATH 或引擎默认安装位置。',
       sessionsRoot: '会话根目录',
@@ -1841,7 +1838,6 @@ window.__ModuleLoader__.load({
       deleteBridgeConfirm: 'Delete this bridge?',
       bridgeName: 'Name',
       bridgeNamePlaceholder: 'e.g. Local Pi, Work Codex',
-      bridgeMode: 'Bridge mode',
       bridgeEngine: 'Engine',
       bridgeList: 'Configured bridges',
       noBridges: 'No bridges configured yet',
@@ -1853,8 +1849,6 @@ window.__ModuleLoader__.load({
       bridgeDeleted: 'Bridge deleted',
       bridgeUnavailable: 'Adapter pending',
       bridgeUnavailableHint: 'The engine appears in the add form, but its adapter is not connected yet.',
-      modeCli: 'CLI',
-      modeWeb: 'Web',
       binPath: 'Bin path',
       binPathHint: 'Leave empty to use PATH or the engine default install.',
       sessionsRoot: 'Sessions root',
@@ -3826,7 +3820,6 @@ window.__ModuleLoader__.load({
       const [view, setView] = useState('list')
       const [editingId, setEditingId] = useState(null)
       const [name, setName] = useState('')
-      const [mode, setMode] = useState('cli')
       const [engineId, setEngineId] = useState('pi')
       const [config, setConfig] = useState({})
       const [saving, setSaving] = useState(false)
@@ -3879,14 +3872,12 @@ window.__ModuleLoader__.load({
       const close = () => setOpen(false)
       const engines = Array.isArray(data?.engines) ? data.engines : []
       const bridges = Array.isArray(data?.bridges) ? data.bridges : []
-      const modes = Array.isArray(data?.modes) ? data.modes : []
       const selectedEngine = engines.find((engine) => engine.id === engineId)
 
       const startCreate = () => {
-        const firstEngine = engines.find((engine) => engine.mode === 'cli') ?? engines[0]
+        const firstEngine = engines[0]
         setEditingId(null)
         setName('')
-        setMode(firstEngine?.mode ?? 'cli')
         setEngineId(firstEngine?.id ?? '')
         setConfig({ ...(firstEngine?.defaultConfig ?? {}) })
         setView('form')
@@ -3897,7 +3888,6 @@ window.__ModuleLoader__.load({
       const startEdit = (bridge) => {
         setEditingId(bridge.id)
         setName(bridge.name)
-        setMode(bridge.mode)
         setEngineId(bridge.engine)
         setConfig({ ...(bridge.config ?? {}) })
         setView('form')
@@ -3908,13 +3898,6 @@ window.__ModuleLoader__.load({
       const closeForm = () => {
         setView('list')
         setError(null)
-      }
-
-      const chooseMode = (nextMode) => {
-        const nextEngine = engines.find((engine) => engine.mode === nextMode)
-        setMode(nextMode)
-        setEngineId(nextEngine?.id ?? '')
-        setConfig({ ...(nextEngine?.defaultConfig ?? {}) })
       }
 
       const chooseEngine = (id) => {
@@ -3929,7 +3912,7 @@ window.__ModuleLoader__.load({
         setError(null)
         setNotice(null)
         try {
-          const payload = { name, mode, engine: engineId, config }
+          const payload = { name, engine: engineId, config }
           if (editingId !== null) payload.id = editingId
           const body = await api('bridges', {
             method: editingId === null ? 'POST' : 'PUT',
@@ -3973,7 +3956,7 @@ window.__ModuleLoader__.load({
             h('p', { className: 'dshBridge_settingsIntro' }, t('loading')),
           )
         } else {
-          const engineOptions = engines.filter((engine) => engine.mode === mode)
+          const engineOptions = engines
           content = h(
             'div',
             { className: 'dshBridge_settingsSection' },
@@ -3996,23 +3979,6 @@ window.__ModuleLoader__.load({
                   disabled: saving,
                   onChange: (event) => setName(event.target.value),
                 }),
-              ),
-              h(
-                'div',
-                { className: 'dshBridge_settingsField' },
-                h('span', { className: 'dshBridge_settingsFieldLabel' }, t('bridgeMode')),
-                h(
-                  'select',
-                  {
-                    className: 'dshBridge_settingsInput dshBridge_settingsSelect',
-                    value: mode,
-                    disabled: saving,
-                    onChange: (event) => chooseMode(event.target.value),
-                  },
-                  ...modes.map((entry) =>
-                    h('option', { key: entry.id, value: entry.id }, entry.id === 'cli' ? t('modeCli') : t('modeWeb')),
-                  ),
-                ),
               ),
               h(
                 'div',
@@ -4105,9 +4071,7 @@ window.__ModuleLoader__.load({
                           h(
                             'span',
                             { className: 'dshBridge_settingsRowTag' },
-                            bridge.available
-                              ? `${bridge.mode === 'cli' ? t('modeCli') : t('modeWeb')} · ${bridge.engineLabel}`
-                              : t('bridgeUnavailable'),
+                            bridge.available ? bridge.engineLabel : t('bridgeUnavailable'),
                           ),
                         ),
                         h(

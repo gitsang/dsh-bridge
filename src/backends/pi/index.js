@@ -83,9 +83,7 @@ function probePi(config, env) {
 export const piEngine = {
   id: PI_ENGINE_ID,
   label: 'Pi',
-  mode: 'cli',
   description: 'Connect to Pi Coding Agent sessions through its RPC mode.',
-  kind: 'cli',
   available: true,
   capabilities: ['sessions', 'session-create', 'workspace-write', 'attach', 'stream', 'prompt', 'abort', 'models', 'extension-ui'],
   configFields: [

@@ -7,8 +7,9 @@ The system separates four things that were previously conflated:
 1. **Engine** — an adapter for one agent runtime and protocol (Pi, Codex,
    OpenCode, DSH Web).
 2. **Bridge** — a saved, user-created instance of an engine. A bridge has an id,
-   a user-visible name, a transport mode, an engine id, and an engine-specific
-   config record.
+   a user-visible name, an engine id, and an engine-specific config record. An
+   engine owns exactly one connection strategy, so a bridge has no transport
+   mode to choose.
 3. **Host core** — authenticated routes, bridge persistence, opaque session
    keys, attachment lifecycle, and SSE fan-out.
 4. **Browser shell** — brand dropdown, floating settings overlay, sidebar/
@@ -19,13 +20,13 @@ of bridge rows may share one engine.
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "bridges": [
-    { "id": "pi-work",  "name": "Work Pi",  "mode": "cli", "engine": "pi",
+    { "id": "pi-work",  "name": "Work Pi",  "engine": "pi",
       "config": { "sessionsRoot": "/work/.pi/sessions", "binPath": null, "offline": true } },
-    { "id": "pi-scratch", "name": "Scratch Pi", "mode": "cli", "engine": "pi",
+    { "id": "pi-scratch", "name": "Scratch Pi", "engine": "pi",
       "config": { "sessionsRoot": "/tmp/pi-sessions", "binPath": null, "offline": true } },
-    { "id": "remote-dsh", "name": "Remote DSH", "mode": "web", "engine": "dsh",
+    { "id": "remote-dsh", "name": "Remote DSH", "engine": "dsh",
       "config": { "baseUrl": "https://dsh.example.com", "token": "***" } }
   ]
 }
@@ -38,7 +39,7 @@ of bridge rows may share one engine.
 
 An engine declares:
 
-- `id`, `label`, `mode` (`cli` or `web`)
+- `id`, `label`
 - `available` and `unavailableReason`
 - `capabilities`
 - `configFields` and `defaultConfig()`
@@ -53,12 +54,12 @@ browser receives serializable engine descriptors from
 
 ### Current engines
 
-| Engine | Mode | State | Config fields |
+| Engine | Strategy | State | Config fields |
 | --- | --- | --- | --- |
-| Pi | CLI | implemented | sessionsRoot, binPath, offline |
-| Codex | CLI | implemented | sessionsRoot, binPath, skipApprovals |
-| OpenCode | CLI | implemented | sessionsRoot, binPath, autoApprove |
-| DSH | Web | planned | baseUrl, token |
+| Pi | local CLI process | implemented | sessionsRoot, binPath, offline |
+| Codex | local CLI process | implemented | sessionsRoot, binPath, skipApprovals |
+| OpenCode | local server | implemented | sessionsRoot, binPath, autoApprove |
+| DSH | remote HTTP | planned | baseUrl, token |
 
 Planned engines can be saved as bridge records and appear in the menu disabled;
 listing/attach returns a clear unavailable state instead of crashing.
@@ -165,7 +166,7 @@ A browser-facing session key is:
 
 | Route | Purpose |
 | --- | --- |
-| `GET /api/bridge/settings` | Modes, engines, and redacted bridges |
+| `GET /api/bridge/settings` | Engines and the redacted bridge list |
 | `GET/POST/PUT/DELETE /api/bridge/bridges` | Manage bridge instances |
 | `GET/POST /api/bridge/sessions` | List one bridge's sessions/workspaces; create a session |
 | `GET/POST/PUT/DELETE /api/bridge/workspaces` | List, add, rename, soft-delete workspaces |
@@ -330,7 +331,7 @@ The dialog has:
 
 - a left navigation column (`Manage bridges`)
 - a right list of saved bridge cards
-- an add/edit form with mode, engine, name, and engine-specific fields
+- an add/edit form with name, engine, and engine-specific fields
 - secret fields rendered empty on edit; leaving them blank preserves the saved
   value
 

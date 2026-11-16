@@ -3,8 +3,8 @@
 把外部 coding agent 的会话桥接进 **DeepSeek Harness (dsh)** Web UI。
 
 Bridge 采用**实例模型**：用户可以先创建多个已保存的桥接，每个桥接有自己的
-名称、传输模式、引擎和配置。同一个引擎可以对应多个桥接，比如两个 Pi 桥接分别
-指向不同的 Session 根目录。左上角 dsh 图标的下拉框固定保留 **本机**（原生 dsh
+名称、引擎和配置。同一个引擎可以对应多个桥接，比如两个 Pi 桥接分别指向不同的
+Session 根目录。每个引擎只有一种连接方式，所以桥接不再单独选择传输模式。左上角 dsh 图标的下拉框固定保留 **本机**（原生 dsh
 对话），并列出所有已配置桥接；选择某个桥接后，侧边栏和右侧对话区会一起切换到
 该桥接。
 
@@ -17,7 +17,6 @@ Bridge 采用**实例模型**：用户可以先创建多个已保存的桥接，
 - [x] 桥接实例模型（`bridges[]`，不再是全局“当前后端”）
 - [x] 同一引擎可配置多个桥接，各自独立配置
 - [x] 独立 Bridge 设置页内新增 / 编辑 / 删除桥接（视觉规格对齐 dsh 原生设置）
-- [x] CLI / Web 模式与按模式过滤的引擎列表
 - [x] Pi 引擎完整可用：JSONL 会话、RPC attach、事件归一化、prompt
 - [x] Codex 引擎完整可用：rollout JSONL 会话、`app-server` JSON-RPC attach、审批弹窗
 - [x] OpenCode 引擎完整可用：SQLite 会话、本地 `serve` HTTP/SSE attach、权限弹窗
@@ -145,10 +144,8 @@ Bridge 设置是**独立页面**，不注册进 dsh 原生设置；但弹窗外�
 
 - **管理桥接**：列出已配置桥接，可新增、编辑、删除。
 - 新增桥接：
-  - **桥接模式**：CLI / Web
-  - **引擎**：
-    - CLI → Pi、Codex、OpenCode
-    - Web → DSH
+  - **引擎**：Pi、Codex、OpenCode、DSH。选引擎即是选择全部连接方式——每个引擎
+    只有一种连接策略。
   - 不同引擎展示不同配置项：
     - **Pi**：Session 根目录、Bin 地址、离线启动
     - **Codex**：Session 根目录、Bin 地址、跳过审批
@@ -252,7 +249,7 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 
 | 成员 | 作用 |
 | --- | --- |
-| `id`, `label`, `mode` | 身份与 `cli`/`web` 传输类型 |
+| `id`, `label` | 身份 |
 | `available`, `unavailableReason` | 未完成适配时如实显示状态 |
 | `capabilities` | UI 可开放的能力 |
 | `configFields`, `defaultConfig()` | 新增/编辑表单字段 |
@@ -342,12 +339,11 @@ key 有序集合写入 `$DSH_HOME/bridge-imports.json`（带版本、0600、原�
 
 ```json
 {
-  "version": 3,
+  "version": 4,
   "bridges": [
     {
       "id": "pi-local",
       "name": "Pi",
-      "mode": "cli",
       "engine": "pi",
       "config": {
         "sessionsRoot": null,

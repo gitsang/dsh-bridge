@@ -2,8 +2,9 @@
  * Persisted Bridge configuration.
  *
  * A user can create several bridges, including several instances of the same
- * engine. Each bridge record carries its mode, engine and engine-specific
- * config; the settings layer never interprets CLI protocols or session paths.
+ * engine. Each bridge record names its engine and carries that engine's config;
+ * the settings layer never interprets CLI protocols or session paths. An engine
+ * has exactly one connection strategy, so a bridge has no transport mode.
  */
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
@@ -16,7 +17,7 @@ import {
   resolveEngine,
 } from './backends/registry.js'
 
-export const SETTINGS_VERSION = 3
+export const SETTINGS_VERSION = 4
 export const DEFAULT_BRIDGE_ID = 'pi-local'
 
 export function bridgeHome(env = process.env) {
@@ -44,7 +45,6 @@ export function defaultSettings() {
       {
         id: DEFAULT_BRIDGE_ID,
         name: 'Pi',
-        mode: 'cli',
         engine: 'pi',
         config: piDefaultConfig(),
       },
@@ -80,7 +80,6 @@ function normalizeBridge(input, index = 0) {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) return null
   const engine = getEngine(input.engine)
   if (engine === undefined) return null
-  const mode = typeof input.mode === 'string' && input.mode === engine.mode ? input.mode : engine.mode
   const id = typeof input.id === 'string' && input.id.trim() !== ''
     ? input.id.trim()
     : index === 0 ? DEFAULT_BRIDGE_ID : bridgeId(engine.id)
@@ -90,7 +89,6 @@ function normalizeBridge(input, index = 0) {
   return {
     id,
     name,
-    mode,
     engine: engine.id,
     config: normalizeEngineConfig(engine, input.config),
   }
@@ -132,7 +130,6 @@ function migrateLegacySettings(input) {
   const bridges = [{
     id: DEFAULT_BRIDGE_ID,
     name: 'Pi',
-    mode: 'cli',
     engine: 'pi',
     config: normalizeEngineConfig(getEngine('pi'), legacyEngineConfig('pi', piLegacy)),
   }]
@@ -144,7 +141,6 @@ function migrateLegacySettings(input) {
     bridges.push({
       id: `${engine.id}-local`,
       name: engine.label,
-      mode: engine.mode,
       engine: engine.id,
       config: normalizeEngineConfig(engine, legacyEngineConfig(engine.id, legacy)),
     })
@@ -237,9 +233,8 @@ function bridgePayload(input, existing, { preserveSecret = false } = {}) {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
     throw Object.assign(new Error('bridge body must be an object'), { status: 400 })
   }
-  const mode = input.mode ?? existing?.mode
   const engineId = input.engine ?? existing?.engine
-  const engine = resolveEngine(mode, engineId)
+  const engine = resolveEngine(engineId)
   const name = input.name === undefined ? existing?.name : input.name
   if (typeof name !== 'string' || name.trim() === '') {
     throw Object.assign(new Error('bridge name is required'), { status: 400 })
@@ -248,7 +243,6 @@ function bridgePayload(input, existing, { preserveSecret = false } = {}) {
   const config = applyConfigPatch(engine, currentConfig, input.config, { preserveSecret })
   return {
     name: name.trim(),
-    mode: engine.mode,
     engine: engine.id,
     config,
   }

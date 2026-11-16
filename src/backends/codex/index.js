@@ -91,9 +91,7 @@ function probeCodex(config = {}, env = process.env) {
 export const codexEngine = {
   id: CODEX_ENGINE_ID,
   label: 'Codex',
-  mode: 'cli',
   description: 'Connect to OpenAI Codex CLI sessions through its app-server protocol.',
-  kind: 'cli',
   available: true,
   capabilities: ['sessions', 'session-create', 'attach', 'stream', 'prompt', 'abort', 'models', 'approval-ui'],
   configFields: [
