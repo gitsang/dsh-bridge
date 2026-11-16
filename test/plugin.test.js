@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import test, { afterEach, beforeEach } from 'node:test'
 import { apply, decodeSessionKey, name, sessionKey } from '../src/index.js'
 import { readArchiveStore } from '../src/archives.js'
+import { startFakeDsh } from './fixtures/fake-dsh.mjs'
 
 const fake = new URL('./fixtures/fake-pi.mjs', import.meta.url).pathname
 const fakeCodex = new URL('./fixtures/fake-codex.mjs', import.meta.url).pathname
@@ -595,31 +596,116 @@ test('rejects unknown bridge keys and malformed keys', async () => {
   assert.match((await foreign.json()).error, /unknown bridge/)
 })
 
-test('planned engines can be saved and report an unavailable adapter', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
-  const previousHome = process.env.DSH_HOME
-  process.env.DSH_HOME = home
+test('a remote DSH bridge lists, reads and drives a session on the other instance', async () => {
+  const fakeDsh = await startFakeDsh({
+    token: 'kit-token',
+    sessions: [
+      {
+        id: 'remote-sess',
+        title: 'Remote work',
+        workingDirectory: '/work/remote',
+        records: [
+          { type: 'turn/start', seq: 0, data: { turn: 1 } },
+          {
+            type: 'user/message',
+            seq: 1,
+            data: { role: 'user', content: [{ type: 'text', text: 'hello remote' }], source: { kind: 'user' } },
+          },
+          {
+            type: 'assistant/message',
+            seq: 2,
+            data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: 'hi there' }] } },
+          },
+          { type: 'turn/end', seq: 3, data: { turn: 1, reason: { kind: 'completed' } } },
+        ],
+        promptEvents: [
+          { type: 'turn/start', data: { turn: 2 } },
+          { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: 'ping' }], source: { kind: 'user' } } },
+          { type: 'turn/end', data: { turn: 2, reason: { kind: 'completed' } } },
+        ],
+      },
+    ],
+  })
   try {
     const { ctx, routes } = host()
     apply(ctx)
-    // Remote DSH is the remaining declared-but-unimplemented engine; Codex and
-    // OpenCode now own real adapters and are covered by the engine test files.
     const created = await (await call(routes, 'bridges', post({
       name: 'Remote DSH',
       engine: 'dsh',
-      config: { baseUrl: 'https://dsh.example.com' },
+      config: { baseUrl: fakeDsh.url, token: 'kit-token' },
     }))).json()
     const remote = created.bridges.find((bridge) => bridge.name === 'Remote DSH')
-    assert.equal(remote.available, false)
+    assert.equal(remote.available, true)
+    // The secret never leaves the host in a response.
+    assert.equal(remote.config.token, null)
+    assert.equal(remote.configured.token, true)
+    // Tokens and passwords stay out of the on-disk store's plaintext JSON? No:
+    // they are stored, so they can be used; they are only redacted on the wire.
+    assert.equal(created.settings.bridges.find((bridge) => bridge.id === remote.id).config.token, null)
+
+    // Import-first applies to a remote instance exactly as it does locally.
+    const candidates = await (await call(routes, `imports?bridge=${encodeURIComponent(remote.id)}`)).json()
+    assert.deepEqual(candidates.sessions.map((session) => session.name), ['Remote work'])
+    await importAll(routes, remote.id)
 
     const listed = await (await call(routes, `sessions?bridge=${encodeURIComponent(remote.id)}`)).json()
     assert.equal(listed.ok, true)
-    assert.equal(listed.available, false)
-    assert.deepEqual(listed.sessions, [])
-    assert.match(listed.unavailableReason, /not implemented/)
+    assert.equal(listed.available, true)
+    assert.deepEqual(listed.sessions.map((session) => session.name), ['Remote work'])
+    assert.deepEqual(listed.workspaces.map((workspace) => workspace.path), ['/work/remote'])
+
+    const key = listed.sessions[0].key
+    const detail = await (await call(routes, `session?key=${encodeURIComponent(key)}`)).json()
+    assert.equal(detail.ok, true)
+    assert.deepEqual(detail.session.messages.map((message) => message.role), ['user', 'assistant'])
+    // The remote row's durable model selection is readable while detached.
+    assert.deepEqual(detail.session.model, { provider: 'fake-provider', id: 'fake-model' })
+
+    const attached = await (await call(routes, 'attach', post({ key }))).json()
+    assert.equal(attached.ok, true)
+    assert.equal(attached.state.isStreaming, false)
+    assert.equal(attached.state.cwd, '/work/remote')
+
+    const prompted = await call(routes, 'prompt', post({ key, message: 'ping' }))
+    assert.equal(prompted.status, 202)
+    assert.equal((await prompted.json()).accepted, true)
+
+    const stats = await (await call(routes, `stats?key=${encodeURIComponent(key)}`)).json()
+    assert.equal(stats.ok, true)
+    assert.equal(stats.stats.turns, 1)
+
+    const detached = await (await call(routes, 'detach', post({ key }))).json()
+    assert.equal(detached.ok, true)
   } finally {
-    if (previousHome === undefined) delete process.env.DSH_HOME
-    else process.env.DSH_HOME = previousHome
+    await fakeDsh.close()
+  }
+})
+
+test('a remote DSH bridge reports its credential problem instead of a bare failure', async () => {
+  const fakeDsh = await startFakeDsh({ token: 'kit-token' })
+  try {
+    const { ctx, routes } = host()
+    apply(ctx)
+    const created = await (await call(routes, 'bridges', post({
+      name: 'Wrong token',
+      engine: 'dsh',
+      config: { baseUrl: fakeDsh.url, token: 'not-the-token' },
+    }))).json()
+    const remote = created.bridges.find((bridge) => bridge.name === 'Wrong token')
+
+    const listed = await call(routes, `sessions?bridge=${encodeURIComponent(remote.id)}`)
+    assert.equal(listed.status, 502)
+    const body = await listed.json()
+    assert.equal(body.ok, false)
+    assert.match(body.error, /rejected the launch token/)
+
+    // A host-side probe reports the same reason on the bridge's status dot.
+    const status = await (await call(routes, 'status', post({ bridge: remote.id }))).json()
+    const entry = status.bridges.find((bridge) => bridge.id === remote.id)
+    assert.equal(entry.state, 'failed')
+    assert.match(entry.error, /launch token/)
+  } finally {
+    await fakeDsh.close()
   }
 })
 

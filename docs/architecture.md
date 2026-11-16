@@ -5,7 +5,8 @@
 The system separates four things that were previously conflated:
 
 1. **Engine** — an adapter for one agent runtime and protocol (Pi, Codex,
-   OpenCode, DSH Web).
+   OpenCode, and DSH Web — the last one drives another DeepSeek Harness Web
+   instance instead of a local process).
 2. **Bridge** — a saved, user-created instance of an engine. A bridge has an id,
    a user-visible name, an engine id, and an engine-specific config record. An
    engine owns exactly one connection strategy, so a bridge has no transport
@@ -59,7 +60,7 @@ browser receives serializable engine descriptors from
 | Pi | local CLI process | implemented | sessionsRoot, binPath, offline |
 | Codex | local CLI process | implemented | sessionsRoot, binPath, skipApprovals |
 | OpenCode | local server | implemented | sessionsRoot, binPath, autoApprove |
-| DSH | remote HTTP | planned | baseUrl, token |
+| DSH | remote HTTP client | implemented | baseUrl, token, password, allowInsecureTls |
 
 Planned engines can be saved as bridge records and appear in the menu disabled;
 listing/attach returns a clear unavailable state instead of crashing.
@@ -148,6 +149,42 @@ Both the durable transcript and the live event stream translate native tool
 names onto the names the browser styles (`bash`, `read`, `search`, `write`,
 `edit`, `others`). Keeping both paths on one mapping is what makes a tool call
 render identically before and after a reload.
+
+### DSH: a remote instance
+
+DSH is the one engine with no local process. The remote instance owns the Agent,
+the durable session log, and the turn loop; the bridge's adapter is a client of
+that instance over its authenticated `/api` RPC.
+
+- `src/backends/dsh/http.js` — wire only: base URL validation, the two auth
+  flows (launch token via `GET /?token=`, gateway password via `POST /login`),
+  the per-client cookie jar, the `client-request`/`server-response` envelope,
+  timeouts, and one re-authentication retry on a 401.
+- `src/backends/dsh/session-store.js` — pure mapping: `session/list` rows to
+  bridge summaries, durable Session events to neutral messages and live events,
+  paged history to the transcript shape, catalog groups to the model list, and
+  projections to the statusline statistics.
+- `src/backends/dsh/attachment.js` — one live session: authenticate, pin the
+  log cursor, then poll `session/projections` and catch up through
+  `session/page`. `session/prompt` cold-resumes a detached remote session and
+  takes its writer lock; `session/cancel` stops a running turn.
+- `src/backends/dsh/index.js` — the engine descriptor: list, read, create,
+  probe, catalog, and `normalizeEvent`.
+
+Deliberate choices:
+
+- **Polling over the mux stream.** The durable log is already the authority and
+  the browser renders entries, not deltas, so a `remote.mux` WebSocket would add
+  framing, reconnection, and API-peer socket lifetime without changing a pixel.
+  A projections read is roughly 4 KB and one call, which is why `session/list`
+  (the whole row set) is never polled.
+- **No bridge-owned dialogs.** Approvals belong to the remote instance's UI, so
+  the engine declares no approval capability and `respondUi` refuses.
+- **Import-first still applies.** A remote session appears in this sidebar only
+  after the user imports it, exactly like a terminal-created Pi session.
+
+The protocol reference, including the unused pieces, is
+`docs/notes/remote-dsh-protocol.md`.
 
 ## Session identity
 
@@ -414,6 +451,8 @@ The transcript copies dsh's own chat vocabulary instead of inventing one:
 
 ### Remote DSH Web
 
-- reuse dsh's authenticated client protocol
-- store the remote base URL and a credential reference
-- list workspaces/sessions, attach, stream events, prompt, detach
+- [x] reuse dsh's authenticated client protocol (token or gateway password)
+- [x] store the remote base URL and its credentials in the bridge record
+- [x] list workspaces/sessions, read history, attach, prompt, abort, model pick
+- [x] honest readiness probe per credential failure mode
+- [ ] token-delta streaming over `remote.mux` instead of poll catch-up

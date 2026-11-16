@@ -11,47 +11,9 @@
  * to another DeepSeek Harness Web instance over HTTP.
  */
 import { codexEngine } from './codex/index.js'
+import { dshEngine } from './dsh/index.js'
 import { opencodeEngine } from './opencode/index.js'
 import { piEngine } from './pi/index.js'
-
-/**
- * An engine that is intentionally declared before its adapter is complete.
- * It participates in the add-bridge form, but operations fail honestly.
- */
-function plannedEngine(definition) {
-  const unavailable = () => {
-    throw Object.assign(
-      new Error(`${definition.label} is not available yet: ${definition.unavailableReason}`),
-      { status: 409 },
-    )
-  }
-  return {
-    ...definition,
-    available: false,
-    async listSessions() {
-      return unavailable()
-    },
-    async readSession() {
-      return unavailable()
-    },
-    async createAttachment() {
-      return unavailable()
-    },
-  }
-}
-
-const dshEngine = plannedEngine({
-  id: 'dsh',
-  label: 'DSH',
-  description: 'Connect to another DeepSeek Harness Web instance.',
-  unavailableReason: 'remote DSH authentication and streaming transport are not implemented yet',
-  capabilities: ['sessions', 'attach', 'stream', 'prompt', 'abort'],
-  configFields: [
-    { key: 'baseUrl', type: 'string', labelKey: 'baseUrl', hintKey: 'baseUrlHint', placeholder: 'https://dsh.example.com' },
-    { key: 'token', type: 'secret', labelKey: 'accessToken', hintKey: 'accessTokenHint', placeholder: 'optional token' },
-  ],
-  defaultConfig: () => ({ baseUrl: null, token: null }),
-})
 
 /** Engine registry in menu order. */
 export const ENGINES = [piEngine, codexEngine, opencodeEngine, dshEngine]

@@ -22,11 +22,11 @@ test('registers Pi, Codex, OpenCode and remote DSH engines', () => {
   // An engine owns exactly one connection strategy, so it declares no mode.
   for (const engine of ENGINES) assert.equal('mode' in engine, false)
   assert.equal(getEngine('pi').available, true)
-  // Codex and OpenCode own real adapters; remote DSH is still a declared stub.
+  // Every registered engine owns a real adapter, including remote DSH.
   assert.equal(getEngine('codex').available, true)
   assert.equal(getEngine('opencode').available, true)
-  assert.equal(getEngine('dsh').available, false)
-  for (const id of ['codex', 'opencode']) {
+  assert.equal(getEngine('dsh').available, true)
+  for (const id of ['codex', 'opencode', 'dsh']) {
     const engine = getEngine(id)
     assert.equal(typeof engine.listSessions, 'function')
     assert.equal(typeof engine.readSession, 'function')

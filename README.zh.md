@@ -8,9 +8,10 @@ Session 根目录。每个引擎只有一种连接方式，所以桥接不再单
 对话），并列出所有已配置桥接；选择某个桥接后，侧边栏和右侧对话区会一起切换到
 该桥接。
 
-三个 CLI 引擎都已完整支持——**Pi**、**Codex**、**OpenCode**——各自有独立的会话
-存储、实时连接协议、模型目录和事件归一化。远程 **DSH**（另一个 DeepSeek Harness
-实例）会出现在新增桥接表单里，在适配器接入前明确标记为暂不可用。
+四个引擎都已支持。**Pi**、**Codex**、**OpenCode** 驱动本机的 coding agent，各自有
+独立的会话存储、实时连接协议、模型目录和事件归一化；**DSH** 则反过来**连出去**，
+把另一个 DeepSeek Harness Web 实例当作引擎——Bridge 成为那个实例会话的客户端，
+凭据可以是它启动时打印的 URL 里的令牌，也可以是它前面 dsh-gateway 的密码。
 
 ## 当前状态
 
@@ -37,7 +38,11 @@ Session 根目录。每个引擎只有一种连接方式，所以桥接不再单
 - [x] dsh 风格对话界面与 composer
 - [x] 与 dsh Web 一致的左右内容宽度拖拽手柄，共用宽度偏好
 - [x] composer 模型选择器与 dsh 风格 statusline（轮次/步数、Token、缓存命中）
-- [ ] 远程 DSH Web 引擎适配器
+- [x] 远程 **DSH** 引擎：把另一个 DeepSeek Harness Web 实例当作桥接
+  - [x] 凭据支持 `URL` + 启动令牌（直连 `dsh web`），或 `URL` + dsh-gateway 密码
+  - [x] 远程会话列表、历史、prompt、中断、模型选择、统计
+  - [x] 轮询持久日志（不用 WebSocket），以 turn 边界驱动实时状态
+  - [x] 就绪探测如实报告：令牌失效、Host 不受信、网关未设密码都会给出具体原因
 
 ## 交互
 
@@ -106,14 +111,14 @@ pending，下次 attach 后立即应用。
 ### 引擎
 
 每个引擎自带会话存储、连接协议和事件映射。任何引擎细节都不会泄漏到 Host：
-`src/backends/registry.js` 只 import 三个描述符，路由只调用适配器契约。
+`src/backends/registry.js` 只 import 四个描述符，路由只调用适配器契约。
 
 | 引擎 | 会话存储 | 实时连接 | 模型目录 | 审批 |
 | --- | --- | --- | --- | --- |
 | **Pi** | `$PI_CODING_AGENT_SESSION_DIR` JSONL 文件树 | stdio 上的 `pi --mode rpc` JSONL | 短生命周期 RPC 子进程的 `get_available_models` | 扩展 UI 弹窗转发到浏览器 |
 | **Codex** | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl` | stdio 上的 `codex app-server` JSON-RPC 2.0 | 短生命周期 app-server 的 `model/list` | `item/*/requestApproval` 由 Bridge 回答，保留审批时转发 |
 | **OpenCode** | `opencode.db`（SQLite；`session_message`，回退旧格式 `message`/`part`） | 回环端口上的 `opencode serve`，HTTP + SSE——**同时支持 1.x 与 2.x** | 同一 server 的 `GET /provider`（1.x）或 `GET /api/model`（2.x） | 权限与提问事件由 Bridge 回答或转发 |
-| **DSH** | 远程实例 | 待接入 | 待接入 | — |
+| **DSH** | 远程实例自己的持久日志 | 轮询 `session/projections` + `session/page` 补齐（不用 WebSocket） | `session/modelCatalog`（与实例全局相关） | — 审批属于远程实例自己的 UI |
 
 有三处引擎特性值得单独说明，因为它们直接影响界面：
 
@@ -136,6 +141,35 @@ pending，下次 attach 后立即应用。
 `search`、`write`、`edit`、`others`），持久记录和实时流两条路径都翻译，所以同一次
 调用在刷新前后长得一样。
 
+### DSH：把远程实例当引擎
+
+另外三个引擎都是「连上本机 agent」，DSH 反过来：没有进程要启动，也没有本地会话
+存储要解析——远程实例已经拥有 Agent、持久日志和回合循环，Bridge 只是它的**客户端**。
+
+- **凭据。** 两种互斥的方式。**启动令牌**从远程 `dsh web` 启动时打印的 URL 里复制，
+  通过 `GET /?token=…` 换取 cookie，有效期 30 天；令牌本身是进程级的，远程每次重启
+  都会变。**dsh-gateway 密码**通过 `POST /login` 登录，是实例经网关发布时唯一可行的
+  方式，因为令牌无法穿过网关。两种失败都有明确提示，不会退化成一句泛泛的错误。
+- **会话。** 远程的 `session/list` 行成为桥接会话；在那边建好但从未发过消息的空会话
+  不显示。导入准入规则同样生效：远程会话要在用户显式导入后才进入本地侧边栏。
+- **历史。** 从日志最新位置往前读 `session/page` 直到日志开头，再折成与 Pi 相同的
+  消息结构：assistant 消息携带 `text`、`thinking`、`toolCall` 块，`tool/result`
+  合并进对应的调用。
+- **实时回合。** 轮询 `session/projections`（每次约 4 KB），日志头前进时用
+  `session/page` 补齐；`turn/start` 与 `turn/end` 界定回合，驱动侧边栏的运行中 /
+  已完成状态，`turn/end.reason.kind` 区分 `completed`、`aborted`、`error` 等。
+  选择轮询而不是 dsh 的 `remote.mux` WebSocket，是因为持久日志本身就是权威，加一条
+  流只会引入分帧、重连和 peer socket 生命周期，却不改变浏览器要渲染的内容。
+- **发送与中断。** `session/prompt` 会在同一次调用里冷启动远程会话（因此会占用它的
+  writer 锁：远程实例上开着同一个会话的标签页时，可能返回 `session/writer-held`）；
+  `session/cancel` 停止正在跑的回合。模型选择按会话走 `session/selectModel`，模型
+  目录是实例全局的。
+- **没有 Bridge 自己的弹窗。** dsh 的审批属于远程实例自己的 UI，所以 DSH 引擎不声明
+  审批能力。
+
+这套适配器背后的协议参考（包括它暂时没用到的 mux 流）见
+[`docs/notes/remote-dsh-protocol.md`](docs/notes/remote-dsh-protocol.md)。
+
 ### 设置页
 
 Bridge 设置是**独立页面**，不注册进 dsh 原生设置；但弹窗外壳、左侧导航、
@@ -150,7 +184,10 @@ Bridge 设置是**独立页面**，不注册进 dsh 原生设置；但弹窗外�
     - **Pi**：Session 根目录、Bin 地址、离线启动
     - **Codex**：Session 根目录、Bin 地址、跳过审批
     - **OpenCode**：数据目录、Bin 地址、自动批准
-    - **DSH**：服务地址和访问令牌。令牌不会出现在 API 响应里；编辑时留空会保留原值。
+    - **DSH**：服务地址、启动令牌、网关密码、允许不安全 TLS。两个密钥都不会出现在
+      API 响应里；编辑时留空会保留原值。直连 `dsh web` 用令牌（从它启动时打印的
+      URL 里复制，每次重启都会变）；通过 `dsh-gateway` 发布时用密码——令牌无法穿过
+      网关。
 
 两个审批开关存在的原因是：Bridge 的一轮对话没有原生终端可以回答询问。`跳过审批`
 （Codex）以 `approvalPolicy: never` 启动 app-server；`自动批准`（OpenCode）由
@@ -239,7 +276,7 @@ Engine adapters
   ├─ Pi（已实现）
   ├─ Codex（已实现）
   ├─ OpenCode（已实现）
-  └─ DSH（待接入）
+  └─ DSH（已实现，连另一个 dsh web / dsh-gateway）
 ```
 
 Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 import 任何
