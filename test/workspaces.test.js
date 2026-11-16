@@ -90,6 +90,45 @@ test('adding a soft-deleted path revives it with the requested title', () => {
   assert.deepEqual(removedWorkspacePaths(revived.store, 'pi-local'), [])
 })
 
+test('rename and delete resolve a path as well as a record id', () => {
+  const path = '/work/demo'
+  const created = createWorkspace(defaultWorkspaceStore(), 'pi-local', { path, name: 'demo' })
+  const renamed = renameWorkspace(created.store, 'pi-local', path, 'Titled by path', '2026-10-20T00:05:00.000Z')
+  assert.equal(renamed.workspace.id, created.workspace.id)
+  assert.equal(renamed.workspace.name, 'Titled by path')
+  assert.equal(listWorkspaces(renamed.store, 'pi-local')[0].name, 'Titled by path')
+
+  const deleted = deleteWorkspace(renamed.store, 'pi-local', path, '2026-10-20T00:06:00.000Z')
+  assert.equal(deleted.workspace.id, created.workspace.id)
+  assert.notEqual(deleted.workspace.deletedAt, null)
+  assert.deepEqual(listWorkspaces(deleted.store, 'pi-local'), [])
+  assert.deepEqual(removedWorkspacePaths(deleted.store, 'pi-local'), [path])
+})
+
+test('deleting a session-derived group tombstones the path that has no record', () => {
+  const store = deleteWorkspace(defaultWorkspaceStore(), 'pi-local', '/work/legacy', '2026-10-20T00:07:00.000Z').store
+  assert.deepEqual(listWorkspaces(store, 'pi-local'), [])
+  assert.deepEqual(removedWorkspacePaths(store, 'pi-local'), ['/work/legacy'])
+
+  const rescanned = reconcileWorkspaces(store, 'pi-local', [{ id: '/work/legacy', name: 'legacy' }])
+  assert.equal(rescanned.changed, false)
+  assert.deepEqual(listWorkspaces(rescanned.store, 'pi-local'), [])
+})
+
+test('renaming a session-derived group materializes durable metadata', () => {
+  const renamed = renameWorkspace(defaultWorkspaceStore(), 'pi-local', '/work/legacy', 'Legacy', '2026-10-20T00:08:00.000Z')
+  assert.equal(renamed.workspace.path, '/work/legacy')
+  assert.equal(renamed.workspace.name, 'Legacy')
+  assert.equal(typeof renamed.workspace.id, 'string')
+  assert.notEqual(renamed.workspace.id, '/work/legacy')
+  assert.equal(listWorkspaces(renamed.store, 'pi-local')[0].name, 'Legacy')
+})
+
+test('opaque unknown workspace ids stay a 404', () => {
+  assert.throws(() => deleteWorkspace(defaultWorkspaceStore(), 'pi-local', 'not-a-path'), { status: 404 })
+  assert.throws(() => renameWorkspace(defaultWorkspaceStore(), 'pi-local', 'not-a-path', 'X'), { status: 404 })
+})
+
 test('workspace records are bridge-scoped and survive a settings file round trip', async () => {
   const home = await mkdtemp(join(tmpdir(), 'bridge-workspaces-'))
   const env = { ...process.env, DSH_HOME: home }

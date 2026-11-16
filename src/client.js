@@ -4576,7 +4576,11 @@ window.__ModuleLoader__.load({
           if (ui.archivedFilter === 'only' && members.length === 0) continue
           result.push({
             key: workspace.key,
-            workspaceId: workspace.key,
+            // Rename/delete talk to the host's durable record, not to the
+            // grouping key: the key is the path, while records created by the
+            // host carry their own id (legacy/session-derived groups fall back
+            // to the path, which the host also accepts).
+            workspaceId: workspace.workspaceId,
             cwd: workspace.path,
             label: workspace.label,
             createdAt: workspace.createdAt,

@@ -117,6 +117,15 @@ test('workspace rows expose new-session, rename, and soft-delete actions', async
   assert.match(source, /bridgeUi\.selectSession\(body\.session\.key\)/)
 })
 
+test('workspace rows target the durable record id, never the grouping path key', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  // `groups[].key` is the workspace path; the host's rename/delete route expects
+  // the stored record id, so the action target must carry that id.
+  assert.doesNotMatch(source, /workspaceId: workspace\.key/)
+  assert.match(source, /workspaceId: workspace\.workspaceId/)
+  assert.match(source, /id: workspaceAction\.target\.workspaceId, name/)
+})
+
 test('archive state is host-owned and archived rows are not openable', async () => {
   const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
   assert.match(source, /api\('archive', \{\s*method: 'POST'/)

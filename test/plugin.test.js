@@ -393,6 +393,45 @@ test('renames workspaces durably and soft-deletes without touching Pi data', asy
   }
 })
 
+test('workspace mutations also accept the path a stale sidebar sends as the id', async () => {
+  const { root } = await fixtureSession()
+  const home = await mkdtemp(join(tmpdir(), 'bridge-plugin-home-'))
+  const previousHome = process.env.DSH_HOME
+  process.env.DSH_HOME = home
+  try {
+    const { ctx, routes } = host()
+    apply(ctx)
+    await call(routes, 'bridges', put({ id: 'pi-local', config: { sessionsRoot: root } }))
+    await importAll(routes)
+    const initial = await (await call(routes, 'workspaces?bridge=pi-local')).json()
+    const workspace = initial.workspaces[0]
+    // Records carry their own uuid `id`, while the sidebar's grouping key is
+    // the path. Older browsers sent that key and got "unknown workspace: <path>".
+    assert.notEqual(workspace.id, workspace.path)
+
+    const renamed = await (await call(routes, 'workspaces', put({
+      bridge: 'pi-local',
+      id: workspace.path,
+      name: 'Renamed by path',
+    }))).json()
+    assert.equal(renamed.workspace.id, workspace.id)
+    assert.equal(renamed.workspace.name, 'Renamed by path')
+
+    const deleted = await (await call(routes, 'workspaces', del({ bridge: 'pi-local', id: workspace.path }))).json()
+    assert.equal(deleted.deleted, true)
+    assert.equal(deleted.workspace.id, workspace.id)
+    assert.deepEqual(deleted.workspaces, [])
+    assert.deepEqual(deleted.removedWorkspacePaths, [workspace.path])
+
+    const listed = await (await call(routes, 'sessions?bridge=pi-local')).json()
+    assert.deepEqual(listed.workspaces, [])
+    assert.deepEqual(listed.removedWorkspacePaths, [workspace.path])
+  } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = previousHome
+  }
+})
+
 
 test('archives sessions on the host per bridge and blocks opening them', async () => {
   const first = await fixtureSession()

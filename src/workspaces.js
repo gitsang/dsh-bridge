@@ -122,6 +122,23 @@ function recordList(store, bridgeId) {
   return Array.isArray(entry?.workspaces) ? entry.workspaces : []
 }
 
+/**
+ * Workspace mutations identify a record by its durable id, but a group can also
+ * exist only because a session still points at its `cwd` (a session imported
+ * before workspace metadata existed, or a legacy browser-local workspace). Such
+ * a group can only carry its path, so both forms resolve to the same record.
+ */
+function workspaceIndex(records, identifier) {
+  const byId = records.findIndex((workspace) => workspace.id === identifier)
+  if (byId !== -1) return byId
+  return records.findIndex((workspace) => workspace.path === identifier)
+}
+
+/** Distinguish a workspace path from an opaque record id. */
+function isWorkspacePath(value) {
+  return /[/\\]/.test(value)
+}
+
 /** Active (non-deleted) workspace records for one bridge. */
 export function listWorkspaces(store, bridgeId) {
   return recordList(store, bridgeId)
@@ -212,13 +229,16 @@ export function renameWorkspace(store, bridgeId, id, nameValue, now = new Date()
   if (idValue === null) throw Object.assign(new Error('workspace id is required'), { status: 400 })
   if (name === null) throw Object.assign(new Error('workspace name is required'), { status: 400 })
   const next = normalizeWorkspaceStore(store)
-  const records = recordList(next, bridgeId).map((workspace) => (
-    workspace.id === idValue
-      ? { ...workspace, name, updatedAt: now }
-      : workspace
-  ))
-  const workspace = records.find((entry) => entry.id === idValue)
-  if (workspace === undefined) throw Object.assign(new Error(`unknown workspace: ${idValue}`), { status: 404 })
+  const records = [...recordList(next, bridgeId)]
+  const index = workspaceIndex(records, idValue)
+  if (index === -1) {
+    // Renaming a session-derived group (no record yet) materializes metadata so
+    // the title the user just typed is durable.
+    if (!isWorkspacePath(idValue)) throw Object.assign(new Error(`unknown workspace: ${idValue}`), { status: 404 })
+    return createWorkspace(next, bridgeId, { path: idValue, name }, now)
+  }
+  const workspace = { ...records[index], name, updatedAt: now }
+  records[index] = workspace
   next.bridges[bridgeId] = { workspaces: records }
   return { store: next, workspace: { ...workspace } }
 }
@@ -228,13 +248,28 @@ export function deleteWorkspace(store, bridgeId, id, now = new Date().toISOStrin
   const idValue = cleanString(id)
   if (idValue === null) throw Object.assign(new Error('workspace id is required'), { status: 400 })
   const next = normalizeWorkspaceStore(store)
-  const records = recordList(next, bridgeId).map((workspace) => (
-    workspace.id === idValue && workspace.deletedAt === null
-      ? { ...workspace, deletedAt: now, updatedAt: now }
-      : workspace
-  ))
-  const workspace = records.find((entry) => entry.id === idValue)
-  if (workspace === undefined) throw Object.assign(new Error(`unknown workspace: ${idValue}`), { status: 404 })
+  const records = [...recordList(next, bridgeId)]
+  const index = workspaceIndex(records, idValue)
+  let workspace
+  if (index === -1) {
+    // A session-derived group has no record to tombstone yet; write one so the
+    // group stays removed instead of being rebuilt from the session's `cwd`.
+    if (!isWorkspacePath(idValue)) throw Object.assign(new Error(`unknown workspace: ${idValue}`), { status: 404 })
+    workspace = {
+      id: idValue,
+      path: idValue,
+      name: defaultWorkspaceName(idValue),
+      createdAt: now,
+      updatedAt: now,
+      deletedAt: now,
+    }
+    records.push(workspace)
+  } else {
+    workspace = records[index].deletedAt === null
+      ? { ...records[index], deletedAt: now, updatedAt: now }
+      : { ...records[index] }
+    records[index] = workspace
+  }
   next.bridges[bridgeId] = { workspaces: records }
   return { store: next, workspace: { ...workspace } }
 }
