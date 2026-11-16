@@ -412,6 +412,7 @@ test('the brand mark reports activity from every bridge', async () => {
     activityByBridge,
     sumActivityByBridge,
     runBadgeLabel,
+    finishedCount,
     connectionState,
   } = exports.__test
 
@@ -426,17 +427,23 @@ test('the brand mark reports activity from every bridge', async () => {
     { key: 'codex-local.a', state: 'idle', completedAt: 2 },
     // Attached but never ran a turn: that is not finished work.
     { key: 'codex-local.b', state: 'idle', completedAt: null },
+    // A failed turn finished too, but it must not read as a success.
+    { key: 'opencode-local.a', state: 'failed', completedAt: 3 },
   ])
-  assert.deepEqual(grouped['pi-local'], { running: 2, completed: 1 })
-  assert.deepEqual(grouped['codex-local'], { running: 0, completed: 1 })
-  assert.deepEqual(sumActivityByBridge(grouped), { running: 2, completed: 2 })
-  assert.deepEqual(sumActivityByBridge({}), { running: 0, completed: 0 })
+  assert.deepEqual(grouped['pi-local'], { running: 2, completed: 1, failed: 0 })
+  assert.deepEqual(grouped['codex-local'], { running: 0, completed: 1, failed: 0 })
+  assert.deepEqual(grouped['opencode-local'], { running: 0, completed: 0, failed: 1 })
+  assert.deepEqual(sumActivityByBridge(grouped), { running: 2, completed: 2, failed: 1 })
+  assert.deepEqual(sumActivityByBridge({}), { running: 0, completed: 0, failed: 0 })
+  assert.equal(finishedCount({ running: 0, completed: 2, failed: 1 }), 3)
+  assert.equal(finishedCount(undefined), 0)
   assert.deepEqual(activityByBridge(null), {})
   assert.deepEqual(activityByBridge([{ state: 'running' }]), {})
 
   const labels = {
     activityRunning: 'running',
     activityCompleted: 'completed',
+    activityCompletedFailed: 'finished-failed',
     activityRunningAndCompleted: 'running+completed',
     activityIdle: 'idle',
     connectionConnected: '已连接',
@@ -446,10 +453,13 @@ test('the brand mark reports activity from every bridge', async () => {
     connectionIdle: '未检测',
   }
   const t = (key) => labels[key]
-  assert.equal(runBadgeLabel({ running: 1, completed: 0 }, t), 'running')
-  assert.equal(runBadgeLabel({ running: 0, completed: 1 }, t), 'completed')
-  assert.equal(runBadgeLabel({ running: 1, completed: 1 }, t), 'running+completed')
-  assert.equal(runBadgeLabel({ running: 0, completed: 0 }, t), 'idle')
+  assert.equal(runBadgeLabel({ running: 1, completed: 0, failed: 0 }, t), 'running')
+  assert.equal(runBadgeLabel({ running: 0, completed: 1, failed: 0 }, t), 'completed')
+  assert.equal(runBadgeLabel({ running: 0, completed: 0, failed: 1 }, t), 'finished-failed')
+  assert.equal(runBadgeLabel({ running: 0, completed: 1, failed: 1 }, t), 'completed')
+  assert.equal(runBadgeLabel({ running: 1, completed: 1, failed: 0 }, t), 'running+completed')
+  assert.equal(runBadgeLabel({ running: 1, completed: 0, failed: 1 }, t), 'running+completed')
+  assert.equal(runBadgeLabel({ running: 0, completed: 0, failed: 0 }, t), 'idle')
 
   // The capsule only asks "connected or not"; the detail stays in the tooltip.
   assert.equal(connectionState({ connection: { state: 'connected' } }, t).pillLabel, '已连接')
@@ -495,6 +505,17 @@ test('the run badge spins only for running work and cores only for finished work
   const done = collect(BridgeRunBadge({ running: false, completed: true, size: 16, label: 'done' }))
   assert.equal(done.find((node) => node.props.className === 'dshBridge_runRing').props['data-spinning'], 'false')
   assert.ok(done.some((node) => node.props.className === 'dshBridge_runCore'))
+  assert.equal(done.find((node) => node.props.className === 'dshBridge_runCore').props['data-failed'], 'false')
+
+  // A failure-only finish still gets a core, but it is not painted green.
+  const failed = collect(BridgeRunBadge({ running: false, completed: false, failed: true, size: 16, label: 'failed' }))
+  assert.equal(failed[0].props['data-completed'], 'true')
+  assert.equal(failed[0].props['data-failed'], 'true')
+  assert.equal(failed.find((node) => node.props.className === 'dshBridge_runCore').props['data-failed'], 'true')
+  // Mixed outcomes prefer the success reading.
+  const mixed = collect(BridgeRunBadge({ running: false, completed: true, failed: true, size: 16, label: 'mixed' }))
+  assert.equal(mixed[0].props['data-failed'], 'false')
+  assert.equal(mixed.find((node) => node.props.className === 'dshBridge_runCore').props['data-failed'], 'false')
 
   // Connection is a text capsule, never a dot.
   const pill = collect(ConnectionPill({ state: 'connected', label: '已连接' }))

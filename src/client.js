@@ -207,9 +207,13 @@ window.__ModuleLoader__.load({
       for (const entry of Array.isArray(activity) ? activity : []) {
         const id = bridgeIdOfSessionKey(entry?.key)
         if (id === '') continue
-        const bucket = grouped[id] ?? { running: 0, completed: 0 }
+        const bucket = grouped[id] ?? { running: 0, completed: 0, failed: 0 }
         if (isRunningActivity(entry)) bucket.running += 1
-        else if (isCompletedActivity(entry)) bucket.completed += 1
+        else if (isCompletedActivity(entry)) {
+          // A failed turn also finishes; it gets a core, but never a green one.
+          if (entry.state === 'failed') bucket.failed += 1
+          else bucket.completed += 1
+        }
         grouped[id] = bucket
       }
       return grouped
@@ -217,12 +221,18 @@ window.__ModuleLoader__.load({
 
     /** Sum every bridge's counters for the sidebar brand mark. */
     function sumActivityByBridge(grouped) {
-      const total = { running: 0, completed: 0 }
+      const total = { running: 0, completed: 0, failed: 0 }
       for (const counts of Object.values(grouped ?? {})) {
         total.running += counts?.running ?? 0
         total.completed += counts?.completed ?? 0
+        total.failed += counts?.failed ?? 0
       }
       return total
+    }
+
+    /** Finished work the user has not acknowledged, successful or not. */
+    function finishedCount(counts) {
+      return (counts?.completed ?? 0) + (counts?.failed ?? 0)
     }
 
     /**
@@ -258,9 +268,10 @@ window.__ModuleLoader__.load({
      * green core when finished work is still unacknowledged. It is the one
      * status glyph in the switcher, so connection state is never painted here.
      */
-    function BridgeRunBadge({ running = false, completed = false, size = 16, label }) {
+    function BridgeRunBadge({ running = false, completed = false, failed = false, size = 16, label }) {
       const ring = Math.max(10, Math.round(size * .8))
       const core = Math.max(4, Math.round(ring * .36))
+      const finished = completed || failed
       return h(
         'span',
         {
@@ -270,16 +281,18 @@ window.__ModuleLoader__.load({
           'aria-label': label,
           title: label,
           'data-running': running ? 'true' : 'false',
-          'data-completed': completed ? 'true' : 'false',
+          'data-completed': finished ? 'true' : 'false',
+          'data-failed': failed && !completed ? 'true' : 'false',
         },
         h('span', {
           className: 'dshBridge_runRing',
           style: { width: `${ring}px`, height: `${ring}px` },
           'data-spinning': running ? 'true' : 'false',
         }),
-        completed
+        finished
           ? h('span', {
               className: 'dshBridge_runCore',
+              'data-failed': failed && !completed ? 'true' : 'false',
               style: { width: `${core}px`, height: `${core}px` },
             })
           : null,
@@ -288,9 +301,11 @@ window.__ModuleLoader__.load({
 
     /** Activity badge label for assistive tech and the hover tooltip. */
     function runBadgeLabel(counts, t) {
-      if (counts.running > 0 && counts.completed > 0) return t('activityRunningAndCompleted')
+      const finished = finishedCount(counts)
+      if (counts.running > 0 && finished > 0) return t('activityRunningAndCompleted')
       if (counts.running > 0) return t('activityRunning')
-      if (counts.completed > 0) return t('activityCompleted')
+      if ((counts.failed ?? 0) > 0 && (counts.completed ?? 0) === 0) return t('activityCompletedFailed')
+      if (finished > 0) return t('activityCompleted')
       return t('activityIdle')
     }
 
@@ -2212,7 +2227,7 @@ window.__ModuleLoader__.load({
       '.dshBridge_runBadge{position:relative;display:inline-flex;flex:none;align-items:center;justify-content:center}',
       '.dshBridge_runRing{box-sizing:border-box;display:block;border-radius:999px;border:1.5px solid var(--dsw-alias-label-dimmed,rgba(0,0,0,.2))}',
       '.dshBridge_runRing[data-spinning="true"]{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary,#3b82f6) 28%,transparent);border-top-color:var(--dsw-alias-state-business-primary,#3b82f6);animation:dshBridgeSpin .8s linear infinite}',
-      '.dshBridge_runBadge[data-completed="true"][data-running="false"] .dshBridge_runRing{border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary,#16a34a) 34%,transparent)}',
+      '.dshBridge_runBadge[data-completed="true"][data-running="false"]:not([data-failed="true"]) .dshBridge_runRing{border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary,#16a34a) 34%,transparent)}',
       '.dshBridge_runCore{position:absolute;border-radius:999px;background:var(--dsw-alias-state-success-primary,#16a34a)}',
       '.dshBridge_runCore[data-failed="true"]{background:var(--dsw-alias-state-error-primary,#dc2626)}',
       '@keyframes dshBridgeSpin{to{transform:rotate(360deg)}}',
@@ -4296,9 +4311,9 @@ window.__ModuleLoader__.load({
         },
         { type: 'separator', id: '__local-separator__' },
         ...bridges.map((bridge) => {
-          const counts = activity[bridge.id] ?? { running: 0, completed: 0 }
+          const counts = activity[bridge.id] ?? { running: 0, completed: 0, failed: 0 }
           const runs = counts.running > 0
-          const finished = counts.completed > 0
+          const finished = finishedCount(counts) > 0
           const connection = connectionState(bridge, t)
           return {
             id: bridge.id,
@@ -4309,7 +4324,8 @@ window.__ModuleLoader__.load({
             icon: runs || finished
               ? h(BridgeRunBadge, {
                   running: runs,
-                  completed: finished,
+                  completed: counts.completed > 0,
+                  failed: counts.failed > 0,
                   size: 15,
                   label: runBadgeLabel(counts, t),
                 })
@@ -4361,7 +4377,7 @@ window.__ModuleLoader__.load({
 
       // The brand mark keeps the shell's fish and gains a corner run badge, so
       // the switcher answers "is anything running?" without covering the brand.
-      const runLabel = totals.running > 0 || totals.completed > 0 ? runBadgeLabel(totals, t) : null
+      const runLabel = totals.running > 0 || finishedCount(totals) > 0 ? runBadgeLabel(totals, t) : null
       const brandLabel = runLabel === null ? t('bridgeMenu') : `${t('bridgeMenu')} · ${runLabel}`
       const anchor = h(
         'span',
@@ -4397,6 +4413,7 @@ window.__ModuleLoader__.load({
               h(BridgeRunBadge, {
                 running: totals.running > 0,
                 completed: totals.completed > 0,
+                failed: totals.failed > 0,
                 size: 12,
                 label: runLabel,
               }),
@@ -6372,6 +6389,7 @@ window.__ModuleLoader__.load({
       activityByBridge,
       sumActivityByBridge,
       runBadgeLabel,
+      finishedCount,
       connectionState,
       BridgeRunBadge,
       ConnectionPill,
