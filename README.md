@@ -36,9 +36,9 @@ started.
 - [x] dsh-style search button and result list
 - [x] dsh-style Select Workspace Directory dialog with New folder
 - [x] Per-workspace New Session action plus workspace rename / soft delete
-- [x] Durable workspace mapping in `bridge-workspaces.json`; delete marks only, never touches engine data
-- [x] Durable per-bridge import membership in `bridge-imports.json`
-- [x] Host-owned, per-bridge session archive in `bridge-archives.json` with attach/prompt admission checks
+- [x] Durable workspace mapping in `bridge/workspaces.json`; delete marks only, never touches engine data
+- [x] Durable per-bridge import membership in `bridge/imports.json`
+- [x] Host-owned, per-bridge session archive in `bridge/archives.json` with attach/prompt admission checks
 - [x] dsh-styled transcript: native process rows, tool cards, and composer
 - [x] Draggable left/right content-width handles, sharing dsh Web's width preference
 - [x] Composer model picker and a dsh-style statusline (turns/steps, tokens, cache hit)
@@ -102,7 +102,7 @@ that reads the complete engine session list:
 
 A new session created from Bridge is an explicit user action and is imported
 immediately. Import membership is persisted per bridge in
-`$DSH_HOME/bridge-imports.json`, separate from agent JSONL and the archive set.
+`$DSH_HOME/bridge/imports.json`, separate from agent JSONL and the archive set.
 
 ### Connection lifecycle
 
@@ -328,7 +328,7 @@ Browser (dsh web)
                               /api/bridge/{session,attach,prompt,events,…}
 
 Host bridge core
-  ├─ bridge instance store (bridge.json)
+  ├─ bridge instance store (bridge/settings.json)
   ├─ engine registry (Pi / Codex / OpenCode / DSH)
   ├─ opaque keys (`bridgeId.base64url(nativeKey)`)
   └─ generic attachment + SSE lifecycle
@@ -396,7 +396,7 @@ before.
 ## Session imports
 
 Import state is owned by the bridge host, not browser storage. The host keeps
-`$DSH_HOME/bridge-imports.json` (versioned, 0600, atomic writes) as a per-bridge
+`$DSH_HOME/bridge/imports.json` (versioned, 0600, atomic writes) as a per-bridge
 ordered set of native session keys.
 
 - `GET /api/bridge/imports?bridge=<id>` returns every discovered candidate plus
@@ -410,7 +410,7 @@ ordered set of native session keys.
 ## Session archiving
 
 Archive state is owned by the bridge host, not by browser storage. The host
-keeps `$DSH_HOME/bridge-archives.json` (versioned, 0600, atomic writes) as a
+keeps `$DSH_HOME/bridge/archives.json` (versioned, 0600, atomic writes) as a
 per-bridge ordered set of native session keys. Pi JSONL files, workspace
 accounting, and message history are never modified.
 
@@ -432,9 +432,12 @@ is outside the bridge host and therefore cannot be stopped by this gate.
 
 ## Configuration
 
-Bridges live in `$DSH_HOME/bridge.json` (mode 0600), written atomically. The old
-`$DSH_HOME/pi-bridge.json` and older per-engine `backends` schema are migrated
-automatically.
+All bridge-owned state lives under `$DSH_HOME/bridge/` (mode 0600 files,
+written atomically): `settings.json`, `archives.json`, `imports.json`,
+`workspaces.json`. Pre-0.4.1 flat files (`$DSH_HOME/bridge.json`,
+`bridge-archives.json`, `bridge-imports.json`, `bridge-workspaces.json`) are
+moved into the directory on first read; the older `$DSH_HOME/pi-bridge.json`
+and per-engine `backends` schema are migrated automatically.
 
 ```json
 {

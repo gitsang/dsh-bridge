@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { mkdtemp, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +8,7 @@ import {
   archiveSession,
   archivesPath,
   defaultArchiveStore,
+  legacyArchivesPath,
   deleteBridgeArchives,
   isSessionArchived,
   listArchivedSessionKeys,
@@ -62,11 +64,21 @@ test('normalizes corrupt records and survives a file round trip', async () => {
   const env = { ...process.env, DSH_HOME: home }
   const saved = writeArchiveStore(normalized, env)
   assert.deepEqual(readArchiveStore(env), saved)
-  assert.equal(archivesPath(env), join(home, 'bridge-archives.json'))
+  assert.equal(archivesPath(env), join(home, 'bridge', 'archives.json'))
   assert.equal((await stat(archivesPath(env))).mode & 0o777, 0o600)
 
   await writeFile(archivesPath(env), '{broken', 'utf8')
   const warnings = []
   assert.deepEqual(readArchiveStore(env, { warn: (line) => warnings.push(line) }), defaultArchiveStore())
   assert.equal(warnings.length, 1)
+})
+
+test('adopts the pre-0.4.1 flat archive file into the data directory', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'bridge-archives-'))
+  const env = { ...process.env, DSH_HOME: home }
+  await writeFile(legacyArchivesPath(env), JSON.stringify({ version: 1, bridges: { 'pi-a': ['/a'] } }), 'utf8')
+  const store = readArchiveStore(env)
+  assert.deepEqual(listArchivedSessionKeys(store, 'pi-a'), ['/a'])
+  assert.equal(existsSync(legacyArchivesPath(env)), false)
+  assert.deepEqual(readArchiveStore(env), store)
 })

@@ -13,11 +13,16 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { bridgeHome } from './settings.js'
+import { adoptLegacyFile, bridgeDataDir, bridgeHome } from './settings.js'
 
 export const WORKSPACES_VERSION = 1
 
 export function workspacesPath(env = process.env) {
+  return join(bridgeDataDir(env), 'workspaces.json')
+}
+
+/** Pre-0.4.1 flat workspace file in the harness home; migrated on first read. */
+export function legacyWorkspacesPath(env = process.env) {
   return join(bridgeHome(env), 'bridge-workspaces.json')
 }
 
@@ -97,6 +102,7 @@ export function normalizeWorkspaceStore(input) {
 /** Read workspace metadata, falling back to an empty store on corruption. */
 export function readWorkspaceStore(env = process.env, logger) {
   const file = workspacesPath(env)
+  adoptLegacyFile(file, [legacyWorkspacesPath(env)], logger)
   if (!existsSync(file)) return defaultWorkspaceStore()
   try {
     return normalizeWorkspaceStore(JSON.parse(readFileSync(file, 'utf8')))

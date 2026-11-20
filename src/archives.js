@@ -12,11 +12,16 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { bridgeHome } from './settings.js'
+import { adoptLegacyFile, bridgeDataDir, bridgeHome } from './settings.js'
 
 export const ARCHIVES_VERSION = 1
 
 export function archivesPath(env = process.env) {
+  return join(bridgeDataDir(env), 'archives.json')
+}
+
+/** Pre-0.4.1 flat archive file in the harness home; migrated on first read. */
+export function legacyArchivesPath(env = process.env) {
   return join(bridgeHome(env), 'bridge-archives.json')
 }
 
@@ -60,6 +65,7 @@ export function normalizeArchiveStore(input) {
 
 export function readArchiveStore(env = process.env, logger) {
   const file = archivesPath(env)
+  adoptLegacyFile(file, [legacyArchivesPath(env)], logger)
   if (!existsSync(file)) return defaultArchiveStore()
   try {
     return normalizeArchiveStore(JSON.parse(readFileSync(file, 'utf8')))

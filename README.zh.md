@@ -32,9 +32,9 @@ Session 根目录。每个引擎只有一种连接方式，所以桥接不再单
 - [x] dsh 风格搜索按钮与结果列表
 - [x] dsh 风格“选择工作区目录”弹窗，可新建文件夹并加入工作区
 - [x] 每个工作区右侧的新建会话按钮，以及工作区重命名 / 软删除
-- [x] 工作区映射持久化到 `bridge-workspaces.json`，删除只做标记，不碰引擎数据
-- [x] 按桥接隔离的导入成员持久化到 `bridge-imports.json`
-- [x] 按桥接隔离的归档状态持久化到 `bridge-archives.json`，并在 attach / prompt 时校验
+- [x] 工作区映射持久化到 `bridge/workspaces.json`，删除只做标记，不碰引擎数据
+- [x] 按桥接隔离的导入成员持久化到 `bridge/imports.json`
+- [x] 按桥接隔离的归档状态持久化到 `bridge/archives.json`，并在 attach / prompt 时校验
 - [x] dsh 风格对话界面与 composer
 - [x] 与 dsh Web 一致的左右内容宽度拖拽手柄，共用宽度偏好
 - [x] composer 模型选择器与 dsh 风格 statusline（轮次/步数、Token、缓存命中）
@@ -211,7 +211,7 @@ Bridge 侧边栏标题栏的数据库图标是导入按钮。弹窗会读取该�
   工作区并补齐对应的工作区记录。
 
 通过 Bridge 新建的会话本身就是显式操作，会立即导入。导入成员按桥接持久化在
-`$DSH_HOME/bridge-imports.json`，与 agent JSONL 和归档状态彼此独立。
+`$DSH_HOME/bridge/imports.json`，与 agent JSONL 和归档状态彼此独立。
 
 ### 选中桥接后
 
@@ -268,7 +268,7 @@ Browser (dsh web)
                               /api/bridge/{session,attach,prompt,events,…}
 
 Host bridge core
-  ├─ 桥接实例存储（bridge.json）
+  ├─ 桥接实例存储（bridge/settings.json）
   ├─ 引擎注册表（Pi / Codex / OpenCode / DSH）
   ├─ 不透明 key（`bridgeId.base64url(nativeKey)`）
   └─ 通用 attachment + SSE 生命周期
@@ -333,7 +333,7 @@ Host 只在 `src/backends/registry.js` import 具体适配器；浏览器不 imp
 ## 会话导入
 
 导入状态由 bridge host 持有，不保存在浏览器。host 把每个桥接的已导入原生 session
-key 有序集合写入 `$DSH_HOME/bridge-imports.json`（带版本、0600、原子写入）。
+key 有序集合写入 `$DSH_HOME/bridge/imports.json`（带版本、0600、原子写入）。
 
 - `GET /api/bridge/imports?bridge=<id>` 返回全部候选会话（带 `imported` 标记）
   和工作区候选；
@@ -346,7 +346,7 @@ key 有序集合写入 `$DSH_HOME/bridge-imports.json`（带版本、0600、原�
 ## 会话归档
 
 归档状态由 bridge host 持有，不再保存在浏览器里。host 把每个桥接的归档会话
-原生 key 有序集合写入 `$DSH_HOME/bridge-archives.json`（带版本、0600、原子写
+原生 key 有序集合写入 `$DSH_HOME/bridge/archives.json`（带版本、0600、原子写
 入）。不会修改 Pi JSONL、workspace 记账或消息历史。
 
 - `GET /api/bridge/sessions` 同时返回 `archivedKeys`（供浏览器使用的带桥接前缀
@@ -365,10 +365,13 @@ key 有序集合写入 `$DSH_HOME/bridge-imports.json`（带版本、0600、原�
 
 ## 配置
 
-桥接保存在 `$DSH_HOME/bridge.json`（0600，原子写入）。旧的
-`$DSH_HOME/pi-bridge.json` 和更早的按引擎 `backends` 结构会自动迁移。
+桥接的全部持久状态集中在 `$DSH_HOME/bridge/` 目录（0600，原子写入）：
+`settings.json`、`archives.json`、`imports.json`、`workspaces.json`。
+0.4.1 之前散在根目录的平铺文件（`$DSH_HOME/bridge.json`、`bridge-archives.json`、
+`bridge-imports.json`、`bridge-workspaces.json`）会在首次读取时自动搬入该目录；
+更早的 `$DSH_HOME/pi-bridge.json` 和按引擎 `backends` 结构也会自动迁移。
 
-工作区显示名与删除标记保存在 `$DSH_HOME/bridge-workspaces.json`（0600，
+工作区显示名与删除标记保存在 `$DSH_HOME/bridge/workspaces.json`（0600，
 原子写入）。默认显示名取路径最后一段文件夹名（例如 `/work/demo` 显示为
 `demo`），旧版本曾把完整路径写成默认名的记录会自动纠正。它是“工作区路径 →
 显示名 / 删除标记”的持久映射：重命名只改这里，

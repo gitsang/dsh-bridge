@@ -11,11 +11,16 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { bridgeHome } from './settings.js'
+import { adoptLegacyFile, bridgeDataDir, bridgeHome } from './settings.js'
 
 export const IMPORTS_VERSION = 1
 
 export function importsPath(env = process.env) {
+  return join(bridgeDataDir(env), 'imports.json')
+}
+
+/** Pre-0.4.1 flat import file in the harness home; migrated on first read. */
+export function legacyImportsPath(env = process.env) {
   return join(bridgeHome(env), 'bridge-imports.json')
 }
 
@@ -55,6 +60,7 @@ export function normalizeImportStore(input) {
 
 export function readImportStore(env = process.env, logger) {
   const file = importsPath(env)
+  adoptLegacyFile(file, [legacyImportsPath(env)], logger)
   if (!existsSync(file)) return defaultImportStore()
   try {
     return normalizeImportStore(JSON.parse(readFileSync(file, 'utf8')))

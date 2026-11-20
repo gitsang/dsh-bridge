@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, stat, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -8,6 +9,7 @@ import {
   defaultWorkspaceName,
   defaultWorkspaceStore,
   deleteWorkspace,
+  legacyWorkspacesPath,
   listWorkspaces,
   normalizeWorkspaceStore,
   readWorkspaceStore,
@@ -138,8 +140,21 @@ test('workspace records are bridge-scoped and survive a settings file round trip
   assert.equal(listWorkspaces(saved, 'pi-a').length, 1)
   assert.equal(listWorkspaces(saved, 'pi-b').length, 1)
   assert.deepEqual(readWorkspaceStore(env), saved)
-  assert.equal(workspacesPath(env), join(home, 'bridge-workspaces.json'))
+  assert.equal(workspacesPath(env), join(home, 'bridge', 'workspaces.json'))
   assert.equal((await stat(workspacesPath(env))).mode & 0o777, 0o600)
+})
+
+test('adopts the pre-0.4.1 flat workspace file into the data directory', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'bridge-workspaces-'))
+  const env = { ...process.env, DSH_HOME: home }
+  await writeFile(legacyWorkspacesPath(env), JSON.stringify({
+    version: 1,
+    bridges: { 'pi-a': { workspaces: [{ id: 'w1', path: '/work/a', name: 'A' }] } },
+  }), 'utf8')
+  const store = readWorkspaceStore(env)
+  assert.equal(listWorkspaces(store, 'pi-a')[0].name, 'A')
+  assert.equal(existsSync(legacyWorkspacesPath(env)), false)
+  assert.deepEqual(readWorkspaceStore(env), store)
 })
 
 test('normalizes duplicates and corrupt workspace files back to a safe store', async () => {
@@ -159,6 +174,7 @@ test('normalizes duplicates and corrupt workspace files back to a safe store', a
 
   const home = await mkdtemp(join(tmpdir(), 'bridge-workspaces-'))
   const env = { ...process.env, DSH_HOME: home }
+  await mkdir(join(home, 'bridge'), { recursive: true })
   await writeFile(workspacesPath(env), '{broken', 'utf8')
   const warnings = []
   assert.deepEqual(readWorkspaceStore(env, { warn: (line) => warnings.push(line) }), defaultWorkspaceStore())

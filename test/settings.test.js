@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +9,7 @@ import {
   createBridge,
   defaultSettings,
   deleteBridge,
+  legacyPiSettingsPath,
   legacySettingsPath,
   normalizeSettings,
   readSettings,
@@ -153,19 +155,42 @@ test('writes a private, atomic bridge-list settings file under DSH_HOME', async 
   const env = { ...process.env, DSH_HOME: home }
   const saved = writeSettings({ bridges: [{ id: 'a', name: 'A', engine: 'pi', config: { sessionsRoot: '/tmp/sessions' } }] }, env)
   assert.equal(saved.bridges[0].config.sessionsRoot, '/tmp/sessions')
-  assert.equal(settingsPath(env), join(home, 'bridge.json'))
+  assert.equal(settingsPath(env), join(home, 'bridge', 'settings.json'))
   const text = await readFile(settingsPath(env), 'utf8')
   assert.match(text, /"sessionsRoot": "\/tmp\/sessions"/)
   assert.deepEqual(readSettings(env), saved)
 })
 
-test('reads a legacy file when the new settings file does not exist yet', async () => {
+test('adopts the pre-0.4.1 flat settings file into the data directory', async () => {
   const home = await mkdtemp(join(tmpdir(), 'bridge-settings-'))
   const env = { ...process.env, DSH_HOME: home }
-  await writeFile(legacySettingsPath(env), JSON.stringify({ backend: 'pi', pi: { offline: false } }), 'utf8')
+  await writeFile(legacySettingsPath(env), JSON.stringify({ bridges: [{ id: 'a', name: 'A', engine: 'pi', config: { offline: false } }] }), 'utf8')
+  const settings = readSettings(env)
+  assert.equal(settings.bridges[0].id, 'a')
+  assert.equal(settings.bridges[0].config.offline, false)
+  // The flat file moved; a second read sees the same record at the new path.
+  assert.equal(existsSync(legacySettingsPath(env)), false)
+  assert.deepEqual(readSettings(env), settings)
+})
+
+test('reads the legacy Pi file when no newer file exists', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'bridge-settings-'))
+  const env = { ...process.env, DSH_HOME: home }
+  await writeFile(legacyPiSettingsPath(env), JSON.stringify({ backend: 'pi', pi: { offline: false } }), 'utf8')
   const settings = readSettings(env)
   assert.equal(settings.bridges[0].engine, 'pi')
   assert.equal(settings.bridges[0].config.offline, false)
+  assert.equal(existsSync(legacyPiSettingsPath(env)), false)
+})
+
+test('the data-directory file wins over a stale flat file', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'bridge-settings-'))
+  const env = { ...process.env, DSH_HOME: home }
+  writeSettings({ bridges: [{ id: 'new', name: 'New', engine: 'pi' }] }, env)
+  await writeFile(legacySettingsPath(env), JSON.stringify({ bridges: [{ id: 'old', name: 'Old', engine: 'pi' }] }), 'utf8')
+  assert.equal(readSettings(env).bridges[0].id, 'new')
+  // The stale flat file is left alone, never silently overwriting current state.
+  assert.equal(existsSync(legacySettingsPath(env)), true)
 })
 
 test('a corrupt file falls back to defaults', async () => {

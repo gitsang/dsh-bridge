@@ -24,13 +24,45 @@ export function bridgeHome(env = process.env) {
   return env.DSH_HOME || join(homedir(), '.dsh')
 }
 
+/**
+ * All bridge-owned state lives in one directory under the harness home,
+ * matching the official per-plugin data layout (e.g. speech-to-text/).
+ */
+export function bridgeDataDir(env = process.env) {
+  return join(bridgeHome(env), 'bridge')
+}
+
 export function settingsPath(env = process.env) {
+  return join(bridgeDataDir(env), 'settings.json')
+}
+
+/** Pre-0.4.1 flat settings file in the harness home; migrated on first read. */
+export function legacySettingsPath(env = process.env) {
   return join(bridgeHome(env), 'bridge.json')
 }
 
 /** Pre-0.3 settings were named after Pi; keep reading them for migration. */
-export function legacySettingsPath(env = process.env) {
+export function legacyPiSettingsPath(env = process.env) {
   return join(bridgeHome(env), 'pi-bridge.json')
+}
+
+/**
+ * Move a pre-directory data file into the data directory once. The current
+ * file always wins; a failed move is non-fatal because the legacy path stays
+ * readable. Returns the migrated path, or undefined when nothing moved.
+ */
+export function adoptLegacyFile(file, legacyFiles, logger) {
+  if (existsSync(file)) return undefined
+  const source = legacyFiles.find((candidate) => existsSync(candidate))
+  if (source === undefined) return undefined
+  try {
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+    renameSync(source, file)
+    return source
+  } catch (error) {
+    logger?.warn?.(`bridge: could not move ${source} to ${file}: ${error instanceof Error ? error.message : String(error)}`)
+    return undefined
+  }
 }
 
 function piDefaultConfig() {
@@ -170,11 +202,11 @@ export function normalizeSettings(input) {
   return { version: SETTINGS_VERSION, bridges }
 }
 
-/** Read settings from the current file, falling back to the legacy Pi file. */
+/** Read settings, adopting the pre-directory flat files on first read. */
 export function readSettings(env = process.env, logger) {
   const file = settingsPath(env)
-  const legacy = legacySettingsPath(env)
-  const source = existsSync(file) ? file : existsSync(legacy) ? legacy : undefined
+  adoptLegacyFile(file, [legacySettingsPath(env), legacyPiSettingsPath(env)], logger)
+  const source = existsSync(file) ? file : undefined
   if (source === undefined) return defaultSettings()
   try {
     return normalizeSettings(JSON.parse(readFileSync(source, 'utf8')))

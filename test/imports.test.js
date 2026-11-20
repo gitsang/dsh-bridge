@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { mkdtemp, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +8,7 @@ import {
   defaultImportStore,
   deleteBridgeImports,
   importsPath,
+  legacyImportsPath,
   importSessions,
   isSessionImported,
   listImportedSessionKeys,
@@ -64,11 +66,21 @@ test('normalizes corrupt records and survives a file round trip', async () => {
   const env = { ...process.env, DSH_HOME: home }
   const saved = writeImportStore(normalized, env)
   assert.deepEqual(readImportStore(env), saved)
-  assert.equal(importsPath(env), join(home, 'bridge-imports.json'))
+  assert.equal(importsPath(env), join(home, 'bridge', 'imports.json'))
   assert.equal((await stat(importsPath(env))).mode & 0o777, 0o600)
 
   await writeFile(importsPath(env), '{broken', 'utf8')
   const warnings = []
   assert.deepEqual(readImportStore(env, { warn: (line) => warnings.push(line) }), defaultImportStore())
   assert.equal(warnings.length, 1)
+})
+
+test('adopts the pre-0.4.1 flat import file into the data directory', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'bridge-imports-'))
+  const env = { ...process.env, DSH_HOME: home }
+  await writeFile(legacyImportsPath(env), JSON.stringify({ version: 1, bridges: { 'pi-a': ['one'] } }), 'utf8')
+  const store = readImportStore(env)
+  assert.deepEqual(listImportedSessionKeys(store, 'pi-a'), ['one'])
+  assert.equal(existsSync(legacyImportsPath(env)), false)
+  assert.deepEqual(readImportStore(env), store)
 })
