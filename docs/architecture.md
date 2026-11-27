@@ -356,9 +356,10 @@ menu is built from `GET /api/bridge/settings`:
 - every saved bridge
 - footer: `Bridge settings`
 
-Local calls `ctx.layout.selectPanel(null)` and clears the Bridge navigation
-state. Selecting a bridge stores the bridge descriptor in the shared browser
-store and calls `ctx.layout.selectPanel('bridge')`.
+Local releases the sidebar anchor, clears the Bridge navigation state, and
+stays on Conversation. Selecting a bridge stores the bridge descriptor in the
+shared browser store and calls `ctx.layout.selectPanel(null)`: the Bridge page
+renders under the stock `conversation` main key, not a global panel of its own.
 
 The old `sidebar.panellist` Bridge button is intentionally **not registered**.
 The dropdown is the entry point.
@@ -376,13 +377,48 @@ The dialog has:
 - secret fields rendered empty on edit; leaving them blank preserves the saved
   value
 
+### Conversation-key hosting and the sidebar anchor
+
+The Bridge page shadows `main.conversation` — the session-maybe shell beneath
+the stock `conversation` entry of the keyed `main` slot — instead of registering
+a global panel. It does **not** re-declare the keyed `main` cell or the
+`main.conversation` child (both are already declared by the shipped entries;
+re-declaring throws "already declared" and breaks the stock Conversation boot).
+The shadow registers a priority `-1` seat only while a bridge is selected;
+otherwise it disposes and the stock Conversation shows through. dsh's right
+sidebar (workspace files, terminal, previews) only mounts while
+`activePanelId === null`, so staying on the Conversation key is what lets the
+stock right sidebar work beside a bridge transcript with zero changes to dsh.
+
+The right sidebar is session-scoped: its file-tree root and every terminal's
+workdir come from the bound Session's `cwd`. The plugin therefore keeps one
+blank dsh **anchor Session per working directory** while the Bridge page is on
+screen:
+
+- `ctx.workspaces.create({ path })` is idempotent per canonical path, and
+  `ctx.sessions.create({ workspaceId, sessionId? })` reuses the remembered
+  blank anchor (ids persist in browser localStorage per cwd). The anchor
+  never runs a model turn.
+- The anchor is bound through `ctx.uiWorkspace.openSession(anchorId)`, not a
+  bare `sessions.retain`: `ui-session.publishMain` keeps the current binding
+  while it stays retained, so only driving the stock navigation rebinds the
+  main view (and releases the previous stock reference). A plugin-owned
+  `mainView` reference is held on top so the anchor survives list refreshes.
+- The anchor follows the open bridge session's `cwd`; on the New Session hero
+  it follows the picked workspace. Two bridge sessions in one directory share
+  one anchor — the same file tree and the same terminals.
+- The anchor steps aside only when the user navigates to a stock conversation:
+  the main binding and `uiWorkspace.selection` agree on a foreign Session. A
+  background `mainView` retention from stock startup restoration is not a
+  navigation and does not evict the bridge page.
+
 ### Bridge-owned sidebar
 
-`sidebar.workspaces` is a single-owner slot. While the Bridge panel is active,
-the plugin registers its own occupant at priority `-1`; dsh's slot shadowing
-rules render the lowest live priority, so the stock workspace browser is hidden.
-Returning to Local or Conversation disposes that occupant and restores the stock
-browser.
+`sidebar.workspaces` is a single-owner slot. While a bridge is selected and
+Conversation is on screen, the plugin registers its own occupant at priority
+`-1`; dsh's slot shadowing rules render the lowest live priority, so the stock
+workspace browser is hidden. Returning to Local disposes that occupant and
+restores the stock browser.
 
 The sidebar and main panel are separate registrations, so they share a small
 external store containing only serializable view state:

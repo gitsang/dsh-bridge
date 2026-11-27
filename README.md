@@ -264,14 +264,18 @@ to on.
 
 Selecting a saved bridge:
 
-1. opens the Bridge main panel;
+1. renders the Bridge page under the stock Conversation key (no global panel),
+   so dsh's right sidebar — workspace files, terminal, previews — stays available;
 2. replaces the stock `sidebar.workspaces` browser with the bridge's workspace/
    session tree. The browser reuses dsh's `dsh-client-ui-primitives`, visual tokens,
    row metrics, icons, and menus, and supports workspace / workspace-tree / flat
    grouping, manual / last-updated ordering, archived-session filtering, a search
    button, and the directory-picker dialog;
 3. loads session history into the main transcript;
-4. keeps the composer and live streaming attached to that bridge.
+4. keeps the composer and live streaming attached to that bridge;
+5. binds the right sidebar to one blank dsh anchor Session per working
+   directory, so its file tree and terminals always use the bridge session's
+   cwd — sessions in the same directory share the same files and terminals.
 
 Submitting is local-first: the user bubble appears on the click, the card clears
 immediately, and a `深度求索中，用时 …` line with a whale tail waits below the

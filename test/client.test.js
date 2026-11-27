@@ -48,14 +48,28 @@ function moduleExports() {
   })
 }
 
-test('registers the Bridge panel, brand bridge switcher, standalone settings overlay, and sidebar', () => {
+/** Minimal sessions/workspaces faces for apply(): the anchor only subscribes at registration time. */
+function fakeSessionFaces() {
+  return {
+    sessions: {
+      list: { getSnapshot: () => ({ byId: {} }), subscribe: () => () => {} },
+      create: async () => 'session-anchor',
+      retain: () => ({ release() {} }),
+    },
+    workspaces: { create: async ({ path }) => ({ workspaceId: `ws:${path}`, path }) },
+    uiSession: { adapter: { current: { getSnapshot: () => ({}), subscribe: () => () => {} } } },
+    uiWorkspace: { openSession() {}, selection: { getSnapshot: () => ({}), subscribe: () => () => {} } },
+  }
+}
+
+test('registers the Bridge conversation shadow, brand switcher, settings overlay, and sidebar', () => {
   const exports = moduleExports()
   assert.equal(typeof exports.apply, 'function')
-  assert.deepEqual(exports.inject, ['slots', 'locale', 'layout'])
+  assert.deepEqual(exports.inject, ['slots', 'locale', 'layout', 'sessions', 'workspaces', 'uiSession', 'uiWorkspace'])
 
   const registered = []
   const dictionaries = []
-  let panelId = 'bridge'
+  let panelId = null
   const panelListeners = new Set()
   const ctx = {
     effect(factory) {
@@ -79,6 +93,7 @@ test('registers the Bridge panel, brand bridge switcher, standalone settings ove
         },
       },
     },
+    ...fakeSessionFaces(),
     slots: {
       inject(name, factory) {
         factory()
@@ -95,13 +110,154 @@ test('registers the Bridge panel, brand bridge switcher, standalone settings ove
   assert.equal(dictionaries[0].namespace, 'bridge')
 
   const bySlot = Object.fromEntries(registered.map((entry) => [entry.options.name, entry.options]))
-  assert.equal(bySlot.main.key, 'bridge')
+  // The Bridge page shadows `main.conversation` (the shell beneath the stock
+  // Conversation main entry) instead of re-declaring the keyed `main` cell:
+  // activePanelId stays null so dsh's right sidebar (files/terminal) keeps
+  // working beside the bridge transcript. No bridge is selected in this
+  // harness, so the conversation seat stays unregistered and the stock
+  // Conversation shows through.
+  assert.equal(bySlot.main, undefined)
+  assert.equal(bySlot['main.conversation'], undefined)
   assert.equal(bySlot['sidebar.panellist'], undefined)
   assert.equal(bySlot['sidebar.brand.mark'].name, 'sidebar.brand.mark')
-  assert.equal(bySlot['sidebar.workspaces'].name, 'sidebar.workspaces')
   assert.equal(bySlot['shell.overlay'].id, 'bridge-settings')
   assert.equal(bySlot['settings.section'], undefined)
-  assert.equal(registered.length, 4)
+  // No bridge selected yet: the workspace browser occupant stays unregistered.
+  assert.equal(bySlot['sidebar.workspaces'], undefined)
+  assert.equal(registered.length, 2)
+})
+
+test('the sidebar anchor keeps one blank dsh session per cwd and yields to stock navigation', async () => {
+  const exports = moduleExports()
+  const { createSidebarAnchor } = exports.__test
+
+  const created = []
+  const retained = []
+  const released = []
+  const rows = {}
+  const listListeners = new Set()
+  let activePanelId = null
+  const panelListeners = new Set()
+  const sessions = {
+    list: {
+      getSnapshot: () => ({ byId: rows }),
+      subscribe(listener) {
+        listListeners.add(listener)
+        return () => listListeners.delete(listener)
+      },
+    },
+    async create(opts) {
+      created.push(opts)
+      // Mirror ui-session: an existing sessionId is reused idempotently.
+      return opts.sessionId ?? `session-${opts.workspaceId.replace(/^ws:/, '')}`
+    },
+    retain(id, opts) {
+      retained.push({ id, source: opts.source })
+      rows[id] = { sessionId: id, retainedBy: { mainView: 1 } }
+      return { release() { released.push(id); delete rows[id] } }
+    },
+  }
+  const workspaces = { create: async ({ path }) => ({ workspaceId: `ws:${path}`, path }) }
+  const layout = {
+    panelInfo: {
+      getSnapshot: () => ({ activePanelId }),
+      subscribe(listener) {
+        panelListeners.add(listener)
+        return () => panelListeners.delete(listener)
+      },
+    },
+  }
+  // uiWorkspace.openSession is what actually rebinds the main view; record it.
+  const opened = []
+  let selection = {}
+  const selectionListeners = new Set()
+  const uiWorkspace = {
+    openSession(id) {
+      opened.push(id)
+      selection = { sessionId: id }
+      for (const listener of selectionListeners) listener()
+    },
+    selection: {
+      getSnapshot: () => selection,
+      subscribe(listener) {
+        selectionListeners.add(listener)
+        return () => selectionListeners.delete(listener)
+      },
+    },
+  }
+  let boundKey
+  const bindingListeners = new Set()
+  const mainBinding = {
+    getSnapshot: () => ({ key: boundKey }),
+    subscribe(listener) {
+      bindingListeners.add(listener)
+      return () => bindingListeners.delete(listener)
+    },
+  }
+
+  // The foreign-navigation guard only acts while a bridge is on screen.
+  exports.__test.bridgeUi.set({ bridge: { id: 'pi-local' } })
+  const anchor = createSidebarAnchor(sessions, workspaces, layout, uiWorkspace, mainBinding)
+  await anchor.ensure('/work/a')
+  assert.equal(anchor.current().cwd, '/work/a')
+  assert.deepEqual(created, [{ workspaceId: 'ws:/work/a' }])
+  assert.deepEqual(opened, ['session-/work/a'])
+  assert.deepEqual(retained, [{ id: 'session-/work/a', source: 'mainView' }])
+
+  // Same cwd again: no second create, no second open, no second retain.
+  await anchor.ensure('/work/a')
+  assert.equal(created.length, 1)
+  assert.equal(opened.length, 1)
+  assert.equal(retained.length, 1)
+
+  // A different cwd switches the anchor: open+retain the new one, release the old.
+  await anchor.ensure('/work/b')
+  assert.equal(anchor.current().sessionId, 'session-/work/b')
+  assert.deepEqual(released, ['session-/work/a'])
+
+  // A rapid A→B switch must not let the stale A answer win.
+  const first = anchor.ensure('/work/a')
+  const second = anchor.ensure('/work/b')
+  await Promise.all([first, second])
+  assert.equal(anchor.current().cwd, '/work/b')
+  const latestId = anchor.current().sessionId
+
+  // A background mainView retention that is NOT the uiWorkspace selection (stock
+  // startup restoration) must not evict the bridge page.
+  rows['session-restored'] = { sessionId: 'session-restored', retainedBy: { mainView: 1 } }
+  boundKey = 'session-restored'
+  for (const listener of bindingListeners) listener()
+  assert.notEqual(anchor.current(), null)
+
+  // Stock dsh navigation that selects another session (uiWorkspace selection and
+  // the main binding agree on a foreign session) steps the anchor aside so the
+  // stock Conversation can render.
+  rows['session-stock'] = { sessionId: 'session-stock', retainedBy: { mainView: 1 } }
+  selection = { sessionId: 'session-stock' }
+  boundKey = 'session-stock'
+  for (const listener of bindingListeners) listener()
+  assert.equal(anchor.current(), null)
+  assert.ok(released.includes(latestId))
+
+  anchor.dispose()
+  exports.__test.bridgeUi.set({ bridge: null })
+  assert.equal(listListeners.size, 0)
+  assert.equal(panelListeners.size, 0)
+  assert.equal(bindingListeners.size, 0)
+})
+
+test('the conversation shadow falls through to stock main.conversation with no bridge', async () => {
+  const source = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  // The plugin injects into the shipped `main.conversation` shell rather than
+  // re-declaring it, and only registers its priority -1 seat while a bridge is
+  // selected — Local keeps the exact stock Conversation otherwise.
+  assert.match(source, /ctx\.slots\.inject\('main\.conversation'/)
+  assert.match(source, /const active = bridgeUi\.state\.bridge !== null/)
+  assert.match(source, /\{ name: 'main\.conversation', locale: NS, priority: -1 \}/)
+  assert.match(source, /else if \(!active && dispose !== undefined\)/)
+  // The anchor follows the open session's cwd, or the hero's picked workspace.
+  assert.match(source, /const anchorCwd = selectedKey !== null/)
+  assert.match(source, /void anchor\.ensure\(anchorCwd\)/)
 })
 
 test('workspace rows expose new-session, rename, and soft-delete actions', async () => {
@@ -145,6 +301,7 @@ test('bridge dictionaries describe bridges as saved instances, not engines', () 
       panelInfo: { getSnapshot: () => ({ activePanelId: null }), subscribe: () => () => {} },
     },
     locale: { register: (namespace, dict) => dictionaries.push(dict), bind: () => (key) => key },
+    ...fakeSessionFaces(),
     slots: { inject: () => {}, register: () => () => {} },
   })
   assert.equal(dictionaries[0].zh.panel, 'Bridge')
@@ -577,6 +734,7 @@ test('Bridge sidebar imports sessions through a tree/list dialog', async () => {
       panelInfo: { getSnapshot: () => ({ activePanelId: null }), subscribe: () => () => {} },
     },
     locale: { register: (namespace, dict) => dictionaries.push(dict), bind: () => (key) => key },
+    ...fakeSessionFaces(),
     slots: { inject: () => {}, register: () => () => {} },
   })
   assert.equal(dictionaries[0].zh.importSessions, '导入会话')
@@ -767,6 +925,7 @@ test('the empty Bridge panel is dsh web\'s New Session hero', async () => {
       panelInfo: { getSnapshot: () => ({ activePanelId: null }), subscribe: () => () => {} },
     },
     locale: { register: (namespace, dict) => dictionaries.push(dict), bind: () => (key) => key },
+    ...fakeSessionFaces(),
     slots: { inject: () => {}, register: () => () => {} },
   })
   assert.equal(dictionaries[0].zh.heroHeadline, '探索未至之境')

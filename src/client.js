@@ -71,7 +71,6 @@ window.__ModuleLoader__.load({
     } = primitives
 
     const NS = 'bridge'
-    const PANEL_ID = 'bridge'
     const SETTINGS_EVENT = 'bridge:open-settings'
     const CONFIG_CHANGED_EVENT = 'bridge:config-changed'
 
@@ -146,6 +145,138 @@ window.__ModuleLoader__.load({
           extraWorkspaces: state.extraWorkspaces,
         })
       },
+    }
+
+    /**
+     * The Bridge page shadows `main.conversation` (the shell beneath the stock
+     * Conversation main entry) instead of registering a global panel of its own.
+     * dsh's right sidebar (workspace files, terminal, previews) only mounts while
+     * `activePanelId === null`, so staying on the Conversation key is what lets
+     * the stock right sidebar work beside a bridge transcript with zero changes
+     * to dsh.
+     */
+    const ANCHOR_STORAGE = 'dsh.bridge.sidebarAnchors.v1'
+
+    function readAnchorIds() {
+      try {
+        const raw = window?.localStorage?.getItem(ANCHOR_STORAGE)
+        const parsed = raw === null || raw === undefined || raw === '' ? {} : JSON.parse(raw)
+        return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+      } catch {
+        return {}
+      }
+    }
+
+    function writeAnchorId(cwd, sessionId) {
+      try {
+        const map = readAnchorIds()
+        map[cwd] = sessionId
+        window?.localStorage?.setItem(ANCHOR_STORAGE, JSON.stringify(map))
+      } catch {
+        // Storage pressure only costs anchor reuse, never the sidebar itself.
+      }
+    }
+
+    /**
+     * One blank dsh Session per working directory, retained as `mainView` while
+     * the Bridge page is on screen. The right sidebar binds to that Session, so
+     * its file tree root and every terminal's workdir equal the bridge session's
+     * cwd — and two bridge sessions in the same directory share one anchor, one
+     * file tree, and one set of terminals. The anchor never runs a model turn;
+     * it exists so dsh's session-scoped chrome has something to bind to.
+     */
+    function createSidebarAnchor(sessions, workspaces, layout, uiWorkspace, mainBinding) {
+      let generation = 0
+      let held = null
+      let pending = null
+      // dsh's own navigation (a stock sidebar row, New Session, startup
+      // restoration) drives the main view through uiWorkspace. While the Bridge
+      // page is on screen the anchor must not pin the binding against that
+      // navigation: the moment the user opens a stock conversation, step aside
+      // and let the stock Conversation render.
+      const isBridgeShowing = () => bridgeUi.state.bridge !== null && layout.panelInfo.getSnapshot().activePanelId === null
+      const onForeignMainView = () => {
+        if (held === null || !isBridgeShowing()) return
+        const boundId = mainBinding?.getSnapshot()?.key
+        if (boundId === undefined || boundId === held.sessionId) return
+        // Only a Session the user actually navigated to (uiWorkspace's own
+        // selection) evicts the bridge. A background mainView retention from
+        // stock startup restoration is not a navigation and must not flip the
+        // page back to Conversation the moment the bridge opens.
+        const selected = uiWorkspace?.selection?.getSnapshot?.()?.sessionId
+        if (selected !== boundId) return
+        const reference = held.reference
+        held = null
+        bridgeUi.set({ bridge: null, sessions: [], workspaces: [], removedWorkspacePaths: [], selectedKey: null, search: '', loadError: null, loading: false })
+        reference.release()
+      }
+      const unsubscribeList = sessions.list.subscribe(onForeignMainView)
+      const unsubscribePanel = layout.panelInfo.subscribe(onForeignMainView)
+      const unsubscribeBinding = mainBinding?.subscribe(onForeignMainView) ?? (() => {})
+      const ensure = async (cwd) => {
+        const ticket = ++generation
+        if (typeof cwd !== 'string' || cwd === '') {
+          held?.reference.release()
+          held = null
+          return
+        }
+        if (held !== null && held.cwd === cwd) return
+        if (pending !== null && pending.cwd === cwd) return pending.promise
+        const promise = (async () => {
+          const workspace = await workspaces.create({ path: cwd })
+          if (ticket !== generation) return
+          const remembered = readAnchorIds()[cwd]
+          const sessionId = await sessions.create({
+            workspaceId: workspace.workspaceId,
+            ...(typeof remembered === 'string' && remembered !== '' ? { sessionId: remembered } : {}),
+          })
+          if (ticket !== generation) return
+          writeAnchorId(cwd, sessionId)
+          // Drive the main view through uiWorkspace so the anchor becomes the
+          // stock selection: publishMain keeps the current binding while it
+          // stays retained, so a plain sessions.retain would never displace a
+          // restored stock Session. openSession retains the anchor AND releases
+          // the previous stock reference, rebinding the right sidebar to the
+          // anchor's cwd. The bridge shadow still renders because a bridge is
+          // selected; the stock Conversation only shows once the bridge clears.
+          uiWorkspace.openSession(sessionId)
+          if (ticket !== generation) return
+          const reference = sessions.retain(sessionId, { source: 'mainView' })
+          if (ticket !== generation) {
+            reference.release()
+            return
+          }
+          const previous = held
+          held = { cwd, sessionId, reference }
+          previous?.reference.release()
+        })().catch((error) => {
+          // The anchor is chrome, not the conversation: a failed create must
+          // never take the bridge transcript down with it.
+          console.warn('bridge: sidebar anchor failed:', error)
+        }).finally(() => {
+          if (pending?.promise === promise) pending = null
+        })
+        pending = { cwd, promise }
+        return promise
+      }
+      return {
+        ensure,
+        release() {
+          generation += 1
+          pending = null
+          held?.reference.release()
+          held = null
+        },
+        dispose() {
+          this.release()
+          unsubscribeList()
+          unsubscribePanel()
+          unsubscribeBinding()
+        },
+        current() {
+          return held
+        },
+      }
     }
 
     function openBridgeSettings() {
@@ -5290,7 +5421,7 @@ window.__ModuleLoader__.load({
     }
 
     function BridgePage(props) {
-      const { t } = props
+      const { t, anchor } = props
       const ui = useBridgeUi()
       const { bridge, sessions, selectedKey, loading } = ui
       const [detail, setDetail] = useState(null)
@@ -6032,6 +6163,23 @@ window.__ModuleLoader__.load({
       )
       const statusStats = sessionStats ?? fallbackStats
       const selectedSession = detail ?? sessions.find((session) => session.key === selectedKey)
+      // The right sidebar (files/terminal) binds to one blank dsh anchor
+      // Session per working directory. Follow the open bridge session's cwd;
+      // on the hero, follow the picked workspace so the tree and terminals are
+      // already there before the first message. Same cwd ⇒ same anchor ⇒ the
+      // same file tree and terminals across sessions.
+      const anchorCwd = selectedKey !== null
+        ? selectedSession?.cwd ?? detail?.cwd ?? null
+        : heroWorkspacePath
+      useEffect(() => {
+        if (anchor === undefined) return undefined
+        void anchor.ensure(anchorCwd)
+        return undefined
+      }, [anchor, anchorCwd])
+      useEffect(() => {
+        if (anchor === undefined) return undefined
+        return () => anchor.release()
+      }, [anchor])
       // Live state is authoritative; otherwise fall back to what the session
       // JSONL recorded, so an unconnected session still shows its model.
       const currentModel = state?.model ?? detail?.model ?? (pendingModel === null ? null : {
@@ -6263,15 +6411,61 @@ window.__ModuleLoader__.load({
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'bridge: dictionaries')
       const t = ctx.locale.bind(NS)
 
+      const anchor = createSidebarAnchor(ctx.sessions, ctx.workspaces, ctx.layout, ctx.uiWorkspace, ctx.uiSession?.adapter?.current)
+      ctx.effect(() => () => anchor.dispose(), 'bridge: sidebar anchor')
+      // Whenever the bridge selection clears (Local, a deleted bridge, stock
+      // navigation taking over), the anchor must not keep the main view bound.
+      ctx.effect(() => bridgeUi.subscribe(() => {
+        if (bridgeUi.state.bridge === null) anchor.release()
+      }), 'bridge: anchor follows selection')
+
       const openPanel = () => {
         try {
-          ctx.layout?.selectPanel(PANEL_ID)
+          // The Bridge page lives under the Conversation key, so "open the
+          // panel" means returning to Conversation, where the shadow renders.
+          ctx.layout?.selectPanel(null)
         } catch {
-          // The panel may not be available during shell startup.
+          // The layout may not be available during shell startup.
         }
       }
 
-      ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS }, BridgePage))
+      /**
+       * Shadow `main.conversation` (the shell beneath the stock Conversation
+       * main entry), NOT the keyed `main` cell: `main.conversation` is already
+       * declared by the shipped `main` entry, so re-declaring it here would
+       * throw "already declared" and break the stock Conversation's boot.
+       *
+       * While a bridge is selected this renders the Bridge page in place of the
+       * stock conversation shell; otherwise it renders null and the stock shell
+       * shows through once the bridge entry abdicates. Because the page lives
+       * under the Conversation key (activePanelId === null), dsh's right sidebar
+       * — files, terminal, previews — stays mounted beside the bridge transcript,
+       * bound to the per-cwd anchor Session.
+       */
+      ctx.slots.inject('main.conversation', () => {
+        let dispose
+        const sync = () => {
+          const active = bridgeUi.state.bridge !== null
+          if (active && dispose === undefined) {
+            dispose = ctx.slots.register(
+              { name: 'main.conversation', locale: NS, priority: -1 },
+              function BridgeConversationSeat() {
+                return h(BridgePage, { t, anchor })
+              },
+            )
+          } else if (!active && dispose !== undefined) {
+            dispose()
+            dispose = undefined
+          }
+        }
+        const unsubscribe = bridgeUi.subscribe(sync)
+        sync()
+        return () => {
+          unsubscribe()
+          dispose?.()
+          dispose = undefined
+        }
+      })
       ctx.slots.inject('shell.overlay', () =>
         ctx.slots.register(
           { name: 'shell.overlay', id: 'bridge-settings', locale: NS },
@@ -6289,6 +6483,7 @@ window.__ModuleLoader__.load({
               t,
               onSelectBridge: openPanel,
               onSelectLocal: () => {
+                anchor.release()
                 try {
                   ctx.layout?.selectPanel(null)
                 } catch {
@@ -6300,13 +6495,13 @@ window.__ModuleLoader__.load({
         ),
       )
 
-      // While the Bridge panel is active, shadow the stock workspace browser
-      // with the active bridge's session list. Disposing the entry restores
-      // the stock browser when the user returns to Conversation.
+      // While a bridge is selected and Conversation is on screen, shadow the
+      // stock workspace browser with the active bridge's session list.
+      // Disposing the entry restores the stock browser.
       ctx.slots.inject('sidebar.workspaces', () => {
         let dispose
         const sync = () => {
-          const active = ctx.layout.panelInfo.getSnapshot().activePanelId === PANEL_ID
+          const active = bridgeUi.state.bridge !== null && ctx.layout.panelInfo.getSnapshot().activePanelId === null
           if (active && dispose === undefined) {
             dispose = ctx.slots.register(
               { name: 'sidebar.workspaces', locale: NS, priority: -1 },
@@ -6317,10 +6512,12 @@ window.__ModuleLoader__.load({
             dispose = undefined
           }
         }
-        const unsubscribe = ctx.layout.panelInfo.subscribe(sync)
+        const unsubscribePanel = ctx.layout.panelInfo.subscribe(sync)
+        const unsubscribeUi = bridgeUi.subscribe(sync)
         sync()
         return () => {
-          unsubscribe()
+          unsubscribePanel()
+          unsubscribeUi()
           dispose?.()
           dispose = undefined
         }
@@ -6328,7 +6525,7 @@ window.__ModuleLoader__.load({
     }
 
     exports.apply = apply
-    exports.inject = ['slots', 'locale', 'layout']
+    exports.inject = ['slots', 'locale', 'layout', 'sessions', 'workspaces', 'uiSession', 'uiWorkspace']
     exports.__test = {
       textOf,
       formatTime,
@@ -6365,6 +6562,8 @@ window.__ModuleLoader__.load({
       connectionState,
       BridgeRunBadge,
       ConnectionPill,
+      createSidebarAnchor,
+      bridgeUi,
     }
     return module.exports
   },
